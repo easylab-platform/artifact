@@ -30,7 +30,7 @@ func main() {
 		selfBase   = flag.String("self-base", "", "external base URL for auth realms / self URIs")
 		tokens     = flag.String("tokens", "", "static `token=level` pairs (read|write), comma separated")
 		airGap     = flag.Bool("air-gap", false, "disable all upstream pull-through")
-		blobBackend = flag.String("blob-backend", "file", "blob backend: file | sqlite")
+		blobBackend = flag.String("blob-backend", "filesystem", "blob backend: filesystem | s3")
 	)
 	flag.Parse()
 
@@ -50,15 +50,11 @@ func main() {
 	defer meta.Close()
 
 	var blobs pkrkit.BlobStore
-	switch *blobBackend {
-	case "sqlite":
-		blobs = store.NewSQLiteBlobStore(meta.DB())
-	default:
-		b, err := store.NewFileBlobStore(filepath.Join(*dataDir, "blobs"))
-		if err != nil {
-			log.Fatalf("open blob store: %v", err)
-		}
-		blobs = b
+	// Blob backend: filesystem (default) via the factory, or S3 placeholder. The
+	// inline-SQLite blob backend is removed; artifact bytes live on the filesystem.
+	blobs, err = store.OpenBlobStore(*blobBackend, filepath.Join(*dataDir, "blobs"))
+	if err != nil {
+		log.Fatalf("open blob store: %v", err)
 	}
 
 	reg := &pkrkit.Registry{Blobs: blobs, Meta: meta, Upstreams: upstreams}
