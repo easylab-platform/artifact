@@ -9,7 +9,6 @@ package oci
 
 import (
 	"encoding/json"
-	"errors"
 	"strings"
 
 	"github.com/easylab-platform/artifact/core"
@@ -40,7 +39,7 @@ func splitRegistry(name string) (string, string) {
 	}
 	first := name[:i]
 	if strings.Contains(first, ".") || strings.Contains(first, ":") || first == "localhost" {
-		return first, name[i+1 : len(name)]
+		return first, name[i+1:]
 	}
 	return "", name
 }
@@ -126,5 +125,3 @@ func manifestArtifactType(body []byte) string {
 	}
 	return probe.Config.MediaType
 }
-
-var errInvalidDigest = errors.New("invalid digest")

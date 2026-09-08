@@ -224,7 +224,7 @@ func (s *State) dist(w http.ResponseWriter, r *http.Request, rest string) {
 				continue
 			}
 			data, _ := io.ReadAll(rd)
-			rd.Close()
+			_ = rd.Close()
 			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
@@ -242,7 +242,12 @@ func (s *State) upload(w http.ResponseWriter, r *http.Request) {
 	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
-	data, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	name, version := composerJSONNameVersion(data)
 	if name == "" {
 		name = "vendor/pkg"
@@ -270,10 +275,10 @@ func (s *State) deletePackage(w http.ResponseWriter, r *http.Request, rest strin
 func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.Context) {
 	if art, err := reg.Meta.Get(ctx, "composer", name, version); err == nil {
 		for _, b := range art.Blobs {
-			_ = reg.Blobs.Delete(ctx, b.Digest)
+			artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
 		}
 	}
-	_ = reg.Meta.Delete(ctx, "composer", name, version)
+	artifactkit.LogMetaErr("meta delete", reg.Meta.Delete(ctx, "composer", name, version))
 }
 
 func storeVersionSource(reg *artifactkit.Registry, name, version string, data []byte, source string, ctx context.Context) {
@@ -289,7 +294,7 @@ func storeVersionSource(reg *artifactkit.Registry, name, version string, data []
 			art.Proprietary, _ = json.Marshal(map[string]any{"autoload": al})
 		}
 	}
-	_ = reg.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func composerJSONNameVersion(data []byte) (string, string) {
@@ -316,7 +321,7 @@ func composerJSONBytes(data []byte) ([]byte, bool) {
 			if f.Name == "composer.json" {
 				rc, _ := f.Open()
 				buf, _ := io.ReadAll(io.LimitReader(rc, 1<<20))
-				rc.Close()
+				_ = rc.Close()
 				return buf, true
 			}
 		}

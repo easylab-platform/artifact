@@ -90,7 +90,12 @@ func (s *State) newUpload(w http.ResponseWriter, r *http.Request) {
 	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
-	raw, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	ct := r.Header.Get("Content-Type")
 	data := raw
 	if strings.HasPrefix(ct, "multipart/form-data") {
@@ -187,7 +192,7 @@ func (s *State) versionArchive(w http.ResponseWriter, r *http.Request, path stri
 					continue
 				}
 				data, _ := io.ReadAll(rd)
-				rd.Close()
+				_ = rd.Close()
 				artifactkit.BlobResponse(w, data, filename)
 				return
 			}
@@ -218,7 +223,7 @@ func (s *State) archive(w http.ResponseWriter, r *http.Request, rest string) {
 					continue
 				}
 				data, _ := io.ReadAll(rd)
-				rd.Close()
+				_ = rd.Close()
 				artifactkit.BlobResponse(w, data, filename)
 				return
 			}
@@ -255,10 +260,10 @@ func nameVersionFromStem(stem string) (string, string) {
 func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.Context) {
 	if art, err := reg.Meta.Get(ctx, "pub", name, version); err == nil {
 		for _, b := range art.Blobs {
-			_ = reg.Blobs.Delete(ctx, b.Digest)
+			artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
 		}
 	}
-	_ = reg.Meta.Delete(ctx, "pub", name, version)
+	artifactkit.LogMetaErr("meta delete", reg.Meta.Delete(ctx, "pub", name, version))
 }
 
 func storeVersionSource(reg *artifactkit.Registry, name, version, filename string, data []byte, source string, ctx context.Context) {
@@ -270,7 +275,7 @@ func storeVersionSource(reg *artifactkit.Registry, name, version, filename strin
 			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 	}
-	_ = reg.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func pubspecNameVersion(data []byte) (string, string) {
@@ -278,7 +283,7 @@ func pubspecNameVersion(data []byte) (string, string) {
 	if err != nil {
 		return "", ""
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()

@@ -266,7 +266,7 @@ func (s *State) flatFile(w http.ResponseWriter, r *http.Request, id, ver, filena
 				continue
 			}
 			data, _ := io.ReadAll(rd)
-			rd.Close()
+			_ = rd.Close()
 			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
@@ -289,10 +289,10 @@ func (s *State) deletePkg(w http.ResponseWriter, r *http.Request, id, ver string
 	}
 	if art, err := s.Registry.Meta.Get(r.Context(), "nuget", id, ver); err == nil {
 		for _, b := range art.Blobs {
-			_ = s.Registry.Blobs.Delete(r.Context(), b.Digest)
+			artifactkit.LogMetaErr("blob delete", s.Registry.Blobs.Delete(r.Context(), b.Digest))
 		}
 	}
-	_ = s.Registry.Meta.Delete(r.Context(), "nuget", id, ver)
+	artifactkit.LogMetaErr("meta delete", s.Registry.Meta.Delete(r.Context(), "nuget", id, ver))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -300,7 +300,12 @@ func (s *State) push(w http.ResponseWriter, r *http.Request) {
 	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
-	raw, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	ct := r.Header.Get("Content-Type")
 	data := raw
 	if strings.HasPrefix(ct, "multipart/form-data") {
@@ -333,7 +338,7 @@ func storeVersionSource(reg *artifactkit.Registry, id, ver, filename string, dat
 			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 	}
-	_ = reg.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func parseNuspec(nupkg []byte) (string, string) {
@@ -350,7 +355,7 @@ func parseNuspec(nupkg []byte) (string, string) {
 			continue
 		}
 		buf, _ := io.ReadAll(io.LimitReader(rc, 1<<20))
-		rc.Close()
+		_ = rc.Close()
 		s := string(buf)
 		id := extractXMLTag(s, "id")
 		ver := extractXMLTag(s, "version")

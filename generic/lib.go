@@ -43,7 +43,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		vs, _ := s.Registry.Meta.ListVersions(r.Context(), "generic", name)
 		for _, v := range vs {
-			_ = s.Registry.Meta.Delete(r.Context(), "generic", name, v)
+			artifactkit.LogMetaErr("meta delete", s.Registry.Meta.Delete(r.Context(), "generic", name, v))
 		}
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
@@ -72,7 +72,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			data, _ := io.ReadAll(rd)
-			rd.Close()
+			_ = rd.Close()
 			if r.Method == http.MethodHead {
 				w.Header().Set("Content-Length", itoa(len(data)))
 				w.WriteHeader(http.StatusOK)
@@ -86,9 +86,10 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
+		artifactkit.LimitBody(w, r)
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
-			artifactkit.Error(w, http.StatusBadRequest, "read error")
+			artifactkit.WriteReadErr(w, err)
 			return
 		}
 		store(s.Registry, name, version, filename, data, r.Context())
@@ -121,11 +122,11 @@ func store(reg *artifactkit.Registry, name, version, filename string, data []byt
 		}
 		for _, b := range removed {
 			if b.Digest != digest {
-				_ = reg.Blobs.Delete(ctx, b.Digest)
+				artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
 			}
 		}
 	}
-	_ = reg.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

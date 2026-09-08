@@ -21,7 +21,7 @@ func testRegistry(t *testing.T) *artifactkit.Registry {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { meta.Close() })
+	t.Cleanup(func() { _ = meta.Close() })
 	return &artifactkit.Registry{
 		Blobs: blobs, Meta: meta,
 		Upstreams: &artifactkit.Upstreams{Defaults: map[string]string{"oci": "https://registry-1.docker.io"}, AirGap: true},
@@ -43,7 +43,7 @@ func TestServeHTTPPingAndCatalog(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Header.Get("Docker-Distribution-Api-Version") != "registry/2.0" {
 		t.Fatalf("ping: %d %s", resp.StatusCode, resp.Header.Get("Docker-Distribution-Api-Version"))
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// catalog empty
 	resp, _ = http.Get(srv.URL + "/v2/_catalog")
@@ -51,7 +51,7 @@ func TestServeHTTPPingAndCatalog(t *testing.T) {
 	if !strings.Contains(body, `"repositories":[]`) {
 		t.Fatalf("catalog: %s", body)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// put blob single-shot
 	data := []byte("hello oci")
@@ -64,7 +64,7 @@ func TestServeHTTPPingAndCatalog(t *testing.T) {
 	if putResp.StatusCode != 201 {
 		t.Fatalf("put blob: %d", putResp.StatusCode)
 	}
-	putResp.Body.Close()
+	_ = putResp.Body.Close()
 
 	// head blob
 	req, _ = http.NewRequest(http.MethodHead, srv.URL+"/v2/myorg/myrepo/blobs/"+digest, nil)
@@ -75,7 +75,7 @@ func TestServeHTTPPingAndCatalog(t *testing.T) {
 	if headResp.StatusCode != 200 {
 		t.Fatalf("head blob: %d", headResp.StatusCode)
 	}
-	headResp.Body.Close()
+	_ = headResp.Body.Close()
 
 	// get blob
 	getResp, err := http.Get(srv.URL + "/v2/myorg/myrepo/blobs/" + digest)
@@ -86,7 +86,7 @@ func TestServeHTTPPingAndCatalog(t *testing.T) {
 	if getResp.StatusCode != 200 || got != string(data) {
 		t.Fatalf("get blob: %d %q", getResp.StatusCode, got)
 	}
-	getResp.Body.Close()
+	_ = getResp.Body.Close()
 }
 
 func TestSplitRegistry(t *testing.T) {
@@ -118,7 +118,7 @@ func TestExtractBlobs(t *testing.T) {
 
 func readAll(t *testing.T, resp *http.Response) string {
 	t.Helper()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var sb strings.Builder
 	buf := make([]byte, 4096)
 	for {

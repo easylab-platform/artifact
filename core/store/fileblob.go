@@ -106,8 +106,8 @@ func (s *FileBlobStore) PutIfAbsent(ctx context.Context, digest string, r io.Rea
 
 	h := sha256.New()
 	if _, err := io.Copy(io.MultiWriter(tmp, h), r); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
 		return false, err
 	}
 	if err := tmp.Close(); err != nil {
@@ -115,18 +115,18 @@ func (s *FileBlobStore) PutIfAbsent(ctx context.Context, digest string, r io.Rea
 	}
 	got := "sha256:" + hex.EncodeToString(h.Sum(nil))
 	if got != digest {
-		os.Remove(tmp.Name())
+		_ = os.Remove(tmp.Name())
 		return false, fmt.Errorf("digest mismatch: expected %s got %s", digest, got)
 	}
 	// Verify + publish under lock to avoid double-rename races.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := os.Stat(final); err == nil {
-		os.Remove(tmp.Name())
+		_ = os.Remove(tmp.Name())
 		return false, nil
 	}
 	if err := os.Rename(tmp.Name(), final); err != nil {
-		os.Remove(tmp.Name())
+		_ = os.Remove(tmp.Name())
 		return false, err
 	}
 	return true, nil
@@ -143,7 +143,7 @@ func (s *FileBlobStore) HashesFor(ctx context.Context, digest string) (artifactk
 	if f == nil {
 		return artifactkit.Hashes{}, artifactkit.ErrBlobUnknown
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h, err := artifactkit.ComputeHashes(f)
 	if err != nil {
 		return artifactkit.Hashes{}, err

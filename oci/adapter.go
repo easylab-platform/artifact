@@ -1,6 +1,7 @@
 package oci
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -9,9 +10,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/easylab-platform/artifact/core"
 )
@@ -27,6 +31,9 @@ type OciState struct {
 	// SelfBase is the external base URL (scheme://host[:port]) used for auth
 	// challenge realms and absolute self URIs in responses.
 	SelfBase string
+	// UploadDir roots the on-disk upload-session store. Empty uses
+	// <TempDir>/artifact-oci-uploads.
+	UploadDir string
 }
 
 // Adapter is the OCI protocol handler. It implements http.Handler, so it can
@@ -37,9 +44,14 @@ type Adapter struct {
 	// explicitly prefixed registries (ghcr.io/...).
 	registryUpstreamsMu sync.Mutex
 	registryUpstreams   map[string]*Upstream
+	// uploads stores in-progress blob uploads on disk.
+	uploads *uploadSessions
+	// sweeperStop stops the upload-session GC.
+	sweeperStop chan struct{}
 }
 
-// New builds an OCI adapter.
+// New builds an OCI adapter. Upload sessions are rooted at OciState.UploadDir
+// (when empty, <TempDir>/artifact-oci-uploads).
 func New(state *OciState) *Adapter {
 	if state == nil {
 		state = &OciState{}
@@ -47,7 +59,42 @@ func New(state *OciState) *Adapter {
 	if state.DefaultUpstream == "" {
 		state.DefaultUpstream = "https://registry-1.docker.io"
 	}
-	return &Adapter{state: state, registryUpstreams: map[string]*Upstream{}}
+	root := state.UploadDir
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "artifact-oci-uploads")
+	}
+	uploads, err := newUploadSessions(root)
+	if err != nil {
+		// A broken upload dir is a broken environment; surface it eagerly.
+		panic("artifact/oci: upload sessions: " + err.Error())
+	}
+	a := &Adapter{state: state, registryUpstreams: map[string]*Upstream{}, uploads: uploads, sweeperStop: make(chan struct{})}
+	go a.sweepLoop()
+	return a
+}
+
+// sweepLoop periodically drops abandoned upload sessions (1h cadence, 24h
+// max age).
+func (a *Adapter) sweepLoop() {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			a.uploads.sweep(24 * time.Hour)
+		case <-a.sweeperStop:
+			return
+		}
+	}
+}
+
+// Stop halts background maintenance (the sweep loop). Call on shutdown.
+func (a *Adapter) Stop() {
+	select {
+	case <-a.sweeperStop:
+	default:
+		close(a.sweeperStop)
+	}
 }
 
 // Name implements artifactkit.Protocol.
@@ -61,6 +108,9 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	}
 	if v, ok := cfg["self_base"].(string); ok && v != "" {
 		state.SelfBase = v
+	}
+	if v, ok := cfg["upload_dir"].(string); ok && v != "" {
+		state.UploadDir = v
 	}
 	if v, ok := cfg["auth"].(artifactkit.Auth); ok {
 		state.Auth = v
@@ -147,9 +197,13 @@ func (a *Adapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// authorize checks the request's credential against the exact action being
+// performed. A valid credential is NOT enough: the token's level must permit
+// the action (read cannot push/delete). Anonymous access is not granted here
+// (pull-through reads still work, but writes always require write level).
 func (a *Adapter) authorize(r *http.Request, name string, act artifactkit.Action) bool {
 	if a.state.Auth == nil {
-		return true
+		return true // auth disabled: anonymous full access (dev/open mode)
 	}
 	scope := "repository:" + name + ":" + string(act)
 	tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -157,9 +211,6 @@ func (a *Adapter) authorize(r *http.Request, name string, act artifactkit.Action
 		if _, ok := a.state.Auth.CheckBearer(r.Context(), tok, scope); ok {
 			return true
 		}
-	}
-	if a.state.Auth.Authenticate(r.Context(), r) != "" {
-		return true
 	}
 	return false
 }
@@ -279,14 +330,14 @@ func (a *Adapter) getManifest(w http.ResponseWriter, r *http.Request, name, ref 
 			dgst := "sha256:" + hexDigest(mbody)
 			blobs := extractBlobs(mbody)
 			// Store both the reference and the digest as versions.
-			a.state.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
+			artifactkit.LogMetaErr("oci pull cache", a.state.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
 				Format: "oci", Repository: repo, Version: ref,
 				MediaType: ct, Proprietary: mbody, Digest: dgst, Blobs: blobs, Source: "pull",
-			})
-			a.state.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
+			}))
+			artifactkit.LogMetaErr("oci pull cache", a.state.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
 				Format: "oci", Repository: repo, Version: dgst,
 				MediaType: ct, Proprietary: mbody, Digest: dgst, Blobs: blobs, Source: "pull",
-			})
+			}))
 			writeManifest(w, mbody, ct, dgst, body)
 			return
 		}
@@ -295,8 +346,13 @@ func (a *Adapter) getManifest(w http.ResponseWriter, r *http.Request, name, ref 
 }
 
 func (a *Adapter) putManifest(w http.ResponseWriter, r *http.Request, name, ref, registry string) {
+	artifactkit.LimitBody(w, r)
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
+		if artifactkit.IsBodyTooLarge(err) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, ociError("MANIFEST_INVALID", "manifest too large"))
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, ociError("MANIFEST_INVALID", "error reading manifest"))
 		return
 	}
@@ -330,13 +386,13 @@ func (a *Adapter) putManifest(w http.ResponseWriter, r *http.Request, name, ref,
 	if eff != ref {
 		dg := art
 		dg.Version = eff
-		a.state.Registry.Meta.Put(r.Context(), dg)
+		artifactkit.LogMetaErr("oci alias put", a.state.Registry.Meta.Put(r.Context(), dg))
 	}
 	// OCI 1.1 ?tag= values.
 	if q := r.URL.Query().Get("tag"); q != "" {
 		tagArt := art
 		tagArt.Version = q
-		a.state.Registry.Meta.Put(r.Context(), tagArt)
+		artifactkit.LogMetaErr("oci tag put", a.state.Registry.Meta.Put(r.Context(), tagArt))
 	}
 	w.Header().Set("Docker-Content-Digest", eff)
 	w.Header().Set("Location", "/v2/"+name+"/manifests/"+eff)
@@ -395,7 +451,7 @@ func (a *Adapter) getBlob(w http.ResponseWriter, r *http.Request, name, digest s
 			writeJSON(w, http.StatusNotFound, ociError("BLOB_UNKNOWN", "blob unknown to registry"))
 			return
 		}
-		defer rd.Close()
+		defer func() { _ = rd.Close() }()
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Docker-Content-Digest", digest)
 		w.Header().Set("Accept-Ranges", "bytes")
@@ -413,12 +469,12 @@ func (a *Adapter) getBlob(w http.ResponseWriter, r *http.Request, name, digest s
 			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, *size))
 			w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
 			w.WriteHeader(http.StatusPartialContent)
-			io.CopyN(w, rd, end-start+1)
+			_, _ = io.CopyN(w, rd, end-start+1)
 			return
 		}
 		w.Header().Set("Content-Length", strconv.FormatInt(*size, 10))
 		w.WriteHeader(http.StatusOK)
-		io.Copy(w, rd)
+		_, _ = io.Copy(w, rd)
 		return
 	}
 	// Pull-through: stream from upstream, caching locally while verifying.
@@ -428,33 +484,68 @@ func (a *Adapter) getBlob(w http.ResponseWriter, r *http.Request, name, digest s
 		writeJSON(w, http.StatusNotFound, ociError("BLOB_UNKNOWN", "blob unknown to registry"))
 		return
 	}
-	resp, lenp, err := up.GetBlob(repo, digest)
+	resp, _, err := up.GetBlob(repo, digest)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, ociError("UPSTREAM_ERROR", err.Error()))
 		return
 	}
-	defer resp.Body.Close()
-	// Buffer through a temp file to verify digest before storing.
-	tmpPath, err := writeAndVerify(r.Context(), resp.Body, digest)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, ociError("UPSTREAM_ERROR", err.Error()))
-		return
-	}
-	// Serve the buffered bytes now that they verified.
-	data, err := readFile(r.Context(), tmpPath)
+	defer func() { _ = resp.Body.Close() }()
+	// Stream through a temp file: hash while copying, verify, then commit to
+	// the blob store and serve FROM THE BLOB STORE (no full in-memory copy —
+	// a multi-GB layer never exceeds one page cache).
+	tmp, err := newTempFile()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
 		return
 	}
-	a.state.Registry.Blobs.PutIfAbsent(r.Context(), digest, strings.NewReader(string(data)))
+	defer func() { _ = tmp.Close() }() // removes the file
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(tmp.f, h), resp.Body); err != nil {
+		writeJSON(w, http.StatusBadGateway, ociError("UPSTREAM_ERROR", err.Error()))
+		return
+	}
+	got := "sha256:" + hex.EncodeToString(h.Sum(nil))
+	if got != digest {
+		// Mismatch: nothing is cached; the client gets a 502 so it can retry.
+		writeJSON(w, http.StatusBadGateway, ociError("UPSTREAM_ERROR", "digest mismatch from upstream"))
+		return
+	}
+	if err := tmp.f.Close(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
+		return
+	}
+	if _, err := a.state.Registry.Blobs.PutIfAbsent(r.Context(), digest, mustOpen(tmp.path)); err != nil {
+		writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
+		return
+	}
+	rd, err := a.state.Registry.Blobs.Open(r.Context(), digest)
+	if err != nil || rd == nil {
+		writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", "verified blob vanished"))
+		return
+	}
+	defer func() { _ = rd.Close() }()
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Docker-Content-Digest", digest)
-	if lenp != nil {
-		w.Header().Set("Content-Length", strconv.FormatInt(*lenp, 10))
-	}
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Content-Length", strconv.FormatInt(int64(h.Size()), 10))
 	w.WriteHeader(http.StatusOK)
-	w.Write(data)
+	_, _ = io.Copy(w, rd)
 }
+
+// mustOpen opens a file, closing it on the caller's behalf through the
+// returned reader only on success (errors return nil).
+func mustOpen(path string) io.Reader {
+	f, err := os.Open(path)
+	if err != nil {
+		return errReader{err}
+	}
+	return f
+}
+
+// errReader always errors (used to hand an open failure into PutIfAbsent).
+type errReader struct{ err error }
+
+func (e errReader) Read([]byte) (int, error) { return 0, e.err }
 
 func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session string) {
 	if !a.authorize(r, name, artifactkit.ActionPush) {
@@ -477,8 +568,13 @@ func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session s
 				writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "invalid digest"))
 				return
 			}
+			artifactkit.LimitBody(w, r)
 			data, err := io.ReadAll(r.Body)
 			if err != nil {
+				if artifactkit.IsBodyTooLarge(err) {
+					writeJSON(w, http.StatusRequestEntityTooLarge, ociError("BLOB_UPLOAD_INVALID", "blob too large"))
+					return
+				}
 				writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "read error"))
 				return
 			}
@@ -486,15 +582,26 @@ func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session s
 				writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "digest does not match content"))
 				return
 			}
-			a.state.Registry.Blobs.PutIfAbsent(r.Context(), dgst, strings.NewReader(string(data)))
+			if _, err := a.state.Registry.Blobs.PutIfAbsent(r.Context(), dgst, bytes.NewReader(data)); err != nil {
+				writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
+				return
+			}
 			w.Header().Set("Location", "/v2/"+name+"/blobs/"+dgst)
 			w.Header().Set("Docker-Content-Digest", dgst)
 			w.WriteHeader(http.StatusCreated)
 			return
 		}
 		// Start a session.
-		sessID := "sess-" + a.nextSessionID()
-		a.state.Registry.Meta.SaveUpload(r.Context(), artifactkit.UploadRecord{ID: sessID, Format: "oci", Repository: name})
+		sid := a.nextSessionID()
+		if sid == "" {
+			writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", "session id generation failed"))
+			return
+		}
+		sessID := "sess-" + sid
+		if err := a.state.Registry.Meta.SaveUpload(r.Context(), artifactkit.UploadRecord{ID: sessID, Format: "oci", Repository: name}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
+			return
+		}
 		w.Header().Set("Location", "/v2/"+name+"/blobs/uploads/"+sessID)
 		w.Header().Set("Docker-Upload-UUID", sessID)
 		w.WriteHeader(http.StatusAccepted)
@@ -504,25 +611,48 @@ func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session s
 			writeJSON(w, http.StatusNotFound, ociError("BLOB_UPLOAD_UNKNOWN", "blob upload unknown"))
 			return
 		}
+		// The part file is authoritative for the resumable offset.
 		w.Header().Set("Docker-Upload-UUID", u.ID)
-		w.Header().Set("Range", fmt.Sprintf("0-%d", max64(u.Bytes-1, 0)))
+		w.Header().Set("Range", fmt.Sprintf("0-%d", max64(a.uploads.size(session)-1, 0)))
 		w.WriteHeader(http.StatusNoContent)
 	case http.MethodPatch:
-		// Accumulate chunk bytes in-memory per session.
-		if !a.sessionAppend(r.Context(), session, r) {
-			writeJSON(w, http.StatusNotFound, ociError("BLOB_UPLOAD_UNKNOWN", "blob upload unknown"))
+		// Append the chunk to the on-disk session file.
+		u, ok := a.beginUpload(w, r, name, session)
+		if !ok {
 			return
 		}
+		artifactkit.LimitBody(w, r)
+		total, err := a.uploads.append(r.Context(), session, r)
+		if err != nil {
+			if artifactkit.IsBodyTooLarge(err) {
+				writeJSON(w, http.StatusRequestEntityTooLarge, ociError("BLOB_UPLOAD_INVALID", "chunk too large"))
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
+			return
+		}
+		a.saveUploadSize(r.Context(), u, total)
 		w.Header().Set("Docker-Upload-UUID", session)
-		w.Header().Set("Range", fmt.Sprintf("0-%d", a.sessionSize(session)-1))
+		w.Header().Set("Range", fmt.Sprintf("0-%d", max64(total-1, 0)))
 		w.Header().Set("Location", "/v2/"+name+"/blobs/uploads/"+session)
 		w.WriteHeader(http.StatusAccepted)
 	case http.MethodPut:
 		// Final chunk (may carry the remainder of the body) + digest commit.
-		if !a.sessionAppend(r.Context(), session, r) && a.sessionSize(session) == 0 {
-			writeJSON(w, http.StatusNotFound, ociError("BLOB_UPLOAD_UNKNOWN", "blob upload unknown"))
+		u, ok := a.beginUpload(w, r, name, session)
+		if !ok {
 			return
 		}
+		artifactkit.LimitBody(w, r)
+		total, err := a.uploads.append(r.Context(), session, r)
+		if err != nil {
+			if artifactkit.IsBodyTooLarge(err) {
+				writeJSON(w, http.StatusRequestEntityTooLarge, ociError("BLOB_UPLOAD_INVALID", "final chunk too large"))
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
+			return
+		}
+		a.saveUploadSize(r.Context(), u, total)
 		dgst := r.URL.Query().Get("digest")
 		if dgst == "" {
 			writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "digest parameter missing"))
@@ -532,27 +662,54 @@ func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session s
 			writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "invalid digest"))
 			return
 		}
-		data := a.sessionBytes(session)
-		if dgst != "sha256:"+hexDigest(data) {
+		if err := a.verifySessionDigest(session, dgst); err != nil {
 			writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "digest does not match content"))
 			return
 		}
-		if _, err := a.state.Registry.Blobs.PutIfAbsent(r.Context(), dgst, strings.NewReader(string(data))); err != nil {
+		// Stream the part file into the blob store (no full in-memory copy).
+		if err := a.uploads.commit(r.Context(), session, dgst, a.state.Registry.Blobs); err != nil {
 			writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
 			return
 		}
-		a.sessionDrop(session)
-		a.state.Registry.Meta.DeleteUpload(r.Context(), session)
+		_ = a.state.Registry.Meta.DeleteUpload(r.Context(), session)
 		w.Header().Set("Location", "/v2/"+name+"/blobs/"+dgst)
 		w.Header().Set("Docker-Content-Digest", dgst)
 		w.WriteHeader(http.StatusCreated)
 	case http.MethodDelete:
-		a.sessionDrop(session)
-		a.state.Registry.Meta.DeleteUpload(r.Context(), session)
+		a.uploads.remove(session)
+		_ = a.state.Registry.Meta.DeleteUpload(r.Context(), session)
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// beginUpload validates that the session exists AND belongs to the named
+// repository (a session id leaked to another client cannot be cross-mounted),
+// writing the appropriate error response when invalid.
+func (a *Adapter) beginUpload(w http.ResponseWriter, r *http.Request, name, session string) (artifactkit.UploadRecord, bool) {
+	u, err := a.state.Registry.Meta.GetUpload(r.Context(), session)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, ociError("BLOB_UPLOAD_UNKNOWN", "blob upload unknown"))
+		return artifactkit.UploadRecord{}, false
+	}
+	if u.Repository != name || u.Format != "oci" {
+		writeJSON(w, http.StatusBadRequest, ociError("BLOB_UPLOAD_INVALID", "upload session belongs to a different repository"))
+		return artifactkit.UploadRecord{}, false
+	}
+	return u, true
+}
+
+// saveUploadSize persists the running byte count for resume reporting.
+func (a *Adapter) saveUploadSize(ctx context.Context, u artifactkit.UploadRecord, total int64) {
+	u.Bytes = total
+	_ = a.state.Registry.Meta.SaveUpload(ctx, u)
+}
+
+// verifySessionDigest hashes the session part file and compares it with the
+// client-declared digest without buffering the whole layer.
+func (a *Adapter) verifySessionDigest(session, digest string) error {
+	return a.uploads.verify(session, digest)
 }
 
 func (a *Adapter) listReferrers(w http.ResponseWriter, r *http.Request, name, subject string) {
@@ -597,7 +754,7 @@ func writeManifest(w http.ResponseWriter, body []byte, mt, dgst string, withBody
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	if withBody {
 		w.WriteHeader(http.StatusOK)
-		w.Write(body)
+		_, _ = w.Write(body)
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}
@@ -606,7 +763,7 @@ func writeManifest(w http.ResponseWriter, body []byte, mt, dgst string, withBody
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func ociError(code, msg string) map[string]any {
@@ -663,107 +820,12 @@ func max64(a, b int64) int64 {
 	return b
 }
 
-// sessionKey is a context key for a generated upload uuid.
-type sessionKey string
-
-// nextSessionID returns a unique upload-session id.
+// nextSessionID returns a unique upload-session id (crypto/rand). A
+// generation failure returns "" which the caller treats as a 500.
 func (a *Adapter) nextSessionID() string {
 	var b [16]byte
-	crandRead(b[:])
-	return fmt.Sprintf("%x", b[:])
-}
-
-// in-flight upload session buffer (in-memory; a real deployment would page
-// to a temp file for large layers, matching the reference Cas + persistence).
-var sessionBufs sync.Map
-
-func (a *Adapter) sessionAppend(ctx context.Context, session string, r *http.Request) bool {
-	if session == "" {
-		return false
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
 	}
-	// The session must be registered (POST started it) before appending.
-	if _, err := a.state.Registry.Meta.GetUpload(ctx, session); err != nil {
-		return false
-	}
-	data, err := io.ReadAll(r.Body)
-	if err != nil {
-		return false
-	}
-	val, _ := sessionBufs.LoadOrStore(session, &[]byte{})
-	buf := val.(*[]byte)
-	*buf = append(*buf, data...)
-	// Persist the running size so a resumed GET reports a correct Range.
-	u, _ := a.state.Registry.Meta.GetUpload(ctx, session)
-	u.Bytes = int64(len(*buf))
-	_ = a.state.Registry.Meta.SaveUpload(ctx, u)
-	return true
-}
-
-func (a *Adapter) sessionSize(session string) int {
-	val, ok := sessionBufs.Load(session)
-	if !ok {
-		return 0
-	}
-	return len(*(val.(*[]byte)))
-}
-
-func (a *Adapter) sessionBytes(session string) []byte {
-	val, ok := sessionBufs.Load(session)
-	if !ok {
-		return nil
-	}
-	return *val.(*[]byte)
-}
-
-func (a *Adapter) sessionDrop(session string) {
-	sessionBufs.Delete(session)
-}
-
-var crandRead = func(b []byte) {
-	if _, err := rand.Read(b); err != nil {
-		msg := []byte("fallback-random-seed")
-		copy(b, msg)
-	}
-}
-
-// writeAndVerify streams an upstream body to a temp file while hashing, only
-// returning a valid path when the digest matches (CacheThrough semantics: the
-// client is served even on mismatch; nothing is cached on mismatch).
-func writeAndVerify(ctx context.Context, body io.Reader, digest string) (string, error) {
-	tmp, err := createTemp()
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			// ignore
-		}
-	}()
-	h := sha256.New()
-	w, err := newTempWriter(tmp.path)
-	if err != nil {
-		return "", err
-	}
-	if _, err := io.Copy(io.MultiWriter(w, h), body); err != nil {
-		w.Close()
-		return "", err
-	}
-	w.Close()
-	got := "sha256:" + hex.EncodeToString(h.Sum(nil))
-	if got != digest {
-		return "", fmt.Errorf("digest mismatch: got %s", got)
-	}
-	return tmp.path, nil
-}
-
-func readFile(ctx context.Context, path string) ([]byte, error) {
-	return fileRead(path)
-}
-
-func createTemp() (*tmpFile, error) {
-	f, err := newTempFile()
-	if err != nil {
-		return nil, err
-	}
-	return f, nil
+	return hex.EncodeToString(b[:])
 }

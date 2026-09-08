@@ -76,9 +76,6 @@ func isIP(s string) bool {
 	return true
 }
 
-func (u *Upstream) schemeOf() string { return u.scheme }
-func (u *Upstream) hostOf() string   { return u.host }
-
 func (u *Upstream) base() string { return fmt.Sprintf("%s://%s/v2", u.scheme, u.host) }
 
 func (u *Upstream) client() *http.Client { return u.factory.Client(u.proxy) }
@@ -119,11 +116,11 @@ func (u *Upstream) doGet(scope, path string, accept string) (*http.Response, err
 	challenge := resp.Header.Get("WWW-Authenticate")
 	tok, err := u.fetchTokenForChallenge(challenge, scope)
 	if err != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, err
 	}
 	u.setToken(scope, tok)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	req2, err := http.NewRequest(http.MethodGet, urlp, nil)
 	if err != nil {
 		return nil, err
@@ -153,7 +150,7 @@ func (u *Upstream) fetchTokenForChallenge(challenge, scope string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	params = parseAuthParams(resp.Header.Get("WWW-Authenticate"))
 	realm, ok := params["realm"]
 	if !ok {
@@ -184,7 +181,7 @@ func (u *Upstream) fetchToken(realm string, params map[string]string, scope stri
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return "", fmt.Errorf("token request failed: %d", resp.StatusCode)
 	}
@@ -223,7 +220,7 @@ func (u *Upstream) GetManifest(name, reference string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, "", &upstreamStatus{Status: resp.StatusCode}
 	}
@@ -247,7 +244,7 @@ func (u *Upstream) GetBlob(name, digest string) (*http.Response, *int64, error) 
 		return nil, nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, nil, &upstreamStatus{Status: resp.StatusCode}
 	}
 	var lenp *int64
@@ -265,7 +262,7 @@ func (u *Upstream) ListTags(name string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, &upstreamStatus{Status: resp.StatusCode}
 	}

@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -247,7 +248,7 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, name, version s
 				continue
 			}
 			data, _ := io.ReadAll(rd)
-			rd.Close()
+			_ = rd.Close()
 			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
@@ -274,7 +275,12 @@ func (s *State) publish(w http.ResponseWriter, r *http.Request) {
 	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
-	data, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	name, version, crate := parsePublishBody(data)
 	if name == "" {
 		name = r.URL.Query().Get("name")
@@ -323,20 +329,26 @@ func (s *State) owners(w http.ResponseWriter, r *http.Request, path string) {
 		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
-		data, _ := io.ReadAll(r.Body)
+		artifactkit.LimitBody(w, r)
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			artifactkit.WriteReadErr(w, err)
+			return
+		}
 		m := s.loadMeta(r.Context(), name)
 		var req struct {
 			Users []string `json:"users"`
 		}
 		if json.Unmarshal(data, &req) == nil {
-			if r.Method == http.MethodPut {
+			switch r.Method {
+			case http.MethodPut:
 				for _, u := range req.Users {
 					if !contains(m.Owners, u) {
 						m.Owners = append(m.Owners, u)
 					}
 				}
 				s.saveMeta(r.Context(), name, m)
-			} else if r.Method == http.MethodDelete {
+			case http.MethodDelete:
 				var removed []string
 				for _, u := range req.Users {
 					if contains(m.Owners, u) {
@@ -367,7 +379,9 @@ func (s *State) owners(w http.ResponseWriter, r *http.Request, path string) {
 func (s *State) loadMeta(ctx context.Context, name string) meta {
 	m := meta{Yanked: map[string]bool{}}
 	if art, err := s.Registry.Meta.Get(ctx, "cargo", name, ""); err == nil && len(art.Proprietary) > 0 {
-		_ = json.Unmarshal(art.Proprietary, &m)
+		if err := json.Unmarshal(art.Proprietary, &m); err != nil {
+			log.Printf("cargo: cached index for %s is malformed: %v", name, err)
+		}
 		if m.Yanked == nil {
 			m.Yanked = map[string]bool{}
 		}
@@ -377,7 +391,7 @@ func (s *State) loadMeta(ctx context.Context, name string) meta {
 
 func (s *State) saveMeta(ctx context.Context, name string, m meta) {
 	b, _ := json.Marshal(m)
-	_ = s.Registry.Meta.Put(ctx, artifactkit.Artifact{Format: "cargo", Repository: name, Version: "", Proprietary: b})
+	artifactkit.LogMetaErr("meta put", s.Registry.Meta.Put(ctx, artifactkit.Artifact{Format: "cargo", Repository: name, Version: "", Proprietary: b}))
 }
 
 func (s *State) registrySubRemote(format, sub string) (*artifactkit.Remote, error) {
@@ -431,7 +445,7 @@ func storeVersionSource(reg *artifactkit.Registry, name, version string, data []
 			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: name + "-" + version + ".crate"})
 		}
 	}
-	_ = reg.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func jsonStr(data []byte, key string) string {

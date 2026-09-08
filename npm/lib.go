@@ -229,7 +229,12 @@ func (s *State) distTags(w http.ResponseWriter, r *http.Request, rel, method str
 		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
-		body, _ := io.ReadAll(r.Body)
+		artifactkit.LimitBody(w, r)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			artifactkit.WriteReadErr(w, err)
+			return
+		}
 		version := strings.Trim(strings.TrimSpace(string(body)), `"`)
 		if version == "" {
 			artifactkit.Error(w, http.StatusNotFound, "missing version")
@@ -280,12 +285,17 @@ func (s *State) distTagsMap(ctx context.Context, pkg string) map[string]any {
 func (s *State) saveDistTags(ctx context.Context, pkg string, dt map[string]any) {
 	root := map[string]any{"dist-tags": dt}
 	b, _ := json.Marshal(root)
-	_ = s.Registry.Meta.Put(ctx, artifactkit.Artifact{Format: "npm", Repository: pkg, Version: "", Proprietary: b})
+	artifactkit.LogMetaErr("meta put", s.Registry.Meta.Put(ctx, artifactkit.Artifact{Format: "npm", Repository: pkg, Version: "", Proprietary: b}))
 }
 
 func (s *State) deprecate(w http.ResponseWriter, r *http.Request, name string) {
 	name = unescapeName(name)
-	body, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	var doc map[string]any
 	if json.Unmarshal(body, &doc) == nil {
 		if versions, ok := doc["versions"].(map[string]any); ok {
@@ -307,7 +317,7 @@ func (s *State) deprecate(w http.ResponseWriter, r *http.Request, name string) {
 					delete(pj, "deprecated")
 				}
 				art.Proprietary, _ = json.Marshal(pj)
-				_ = s.Registry.Meta.Put(r.Context(), art)
+				artifactkit.LogMetaErr("meta put", s.Registry.Meta.Put(r.Context(), art))
 			}
 		}
 	}
@@ -327,10 +337,15 @@ func (s *State) rev(w http.ResponseWriter, r *http.Request, rel, method string) 
 		for _, v := range vs {
 			s.removeVersion(r.Context(), pkg, v)
 		}
-		_ = s.Registry.Meta.Delete(r.Context(), "npm", pkg, "")
+		artifactkit.LogMetaErr("meta delete", s.Registry.Meta.Delete(r.Context(), "npm", pkg, ""))
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	case http.MethodPut:
-		body, _ := io.ReadAll(r.Body)
+		artifactkit.LimitBody(w, r)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			artifactkit.WriteReadErr(w, err)
+			return
+		}
 		var doc map[string]any
 		if json.Unmarshal(body, &doc) == nil {
 			if name, ok := doc["name"].(string); ok {
@@ -368,17 +383,17 @@ func (s *State) deleteName(w http.ResponseWriter, r *http.Request, name string) 
 	for _, v := range vs {
 		s.removeVersion(r.Context(), name, v)
 	}
-	_ = s.Registry.Meta.Delete(r.Context(), "npm", name, "")
+	artifactkit.LogMetaErr("meta delete", s.Registry.Meta.Delete(r.Context(), "npm", name, ""))
 	artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *State) removeVersion(ctx context.Context, pkg, version string) {
 	if art, err := s.Registry.Meta.Get(ctx, "npm", pkg, version); err == nil {
 		for _, b := range art.Blobs {
-			_ = s.Registry.Blobs.Delete(ctx, b.Digest)
+			artifactkit.LogMetaErr("blob delete", s.Registry.Blobs.Delete(ctx, b.Digest))
 		}
 	}
-	_ = s.Registry.Meta.Delete(ctx, "npm", pkg, version)
+	artifactkit.LogMetaErr("meta delete", s.Registry.Meta.Delete(ctx, "npm", pkg, version))
 }
 
 func (s *State) metadata(w http.ResponseWriter, r *http.Request, name string) {
@@ -507,7 +522,7 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, name, file strin
 						continue
 					}
 					data, _ := io.ReadAll(rd)
-					rd.Close()
+					_ = rd.Close()
 					artifactkit.BlobResponse(w, data, file)
 					return
 				}
@@ -549,7 +564,7 @@ func parseTarballPackageJSON(data []byte) (string, map[string]any) {
 	if err != nil {
 		return "", nil
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
@@ -572,7 +587,12 @@ func parseTarballPackageJSON(data []byte) (string, map[string]any) {
 }
 
 func (s *State) publish(w http.ResponseWriter, r *http.Request, name string) {
-	data, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	// Raw tarball (gzip magic).
 	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
 		ver, pkgJSON := parseTarballPackageJSON(data)
@@ -647,7 +667,7 @@ func (s *State) storeVersion(ctx context.Context, name, version string, tarball 
 			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(tarball)), Name: tarballFilename(name, version)})
 		}
 	}
-	_ = s.Registry.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", s.Registry.Meta.Put(ctx, art))
 }
 
 func hexBytes(s string) []byte {

@@ -101,7 +101,7 @@ func (r *Remote) GetBytes(ctx context.Context, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, &UpstreamStatusError{Path: path, Status: resp.StatusCode}
 	}
@@ -146,7 +146,7 @@ func (r *Registry) Fetch(ctx context.Context, format, upstreamBase, path string)
 	if err != nil {
 		return Fetched{}, fmt.Errorf("http: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return Fetched{}, &UpstreamStatusError{Path: path, Status: resp.StatusCode}
 	}
@@ -165,7 +165,7 @@ func (r *Registry) FetchAbsolute(ctx context.Context, url string) (Fetched, erro
 	if err != nil {
 		return Fetched{}, fmt.Errorf("http: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return Fetched{}, &UpstreamStatusError{Path: url, Status: resp.StatusCode}
 	}

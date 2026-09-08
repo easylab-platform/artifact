@@ -241,8 +241,8 @@ func (s *State) specs(w http.ResponseWriter, r *http.Request) {
 	data := marshalSpecs(tuples)
 	var gz bytes.Buffer
 	zw := gzip.NewWriter(&gz)
-	zw.Write(data)
-	zw.Close()
+	_, _ = zw.Write(data)
+	_ = zw.Close()
 	artifactkit.OctetResponse(w, gz.Bytes())
 }
 
@@ -262,8 +262,8 @@ func (s *State) quickMarshal(w http.ResponseWriter, r *http.Request, rel string)
 		spec := marshalSpecification(name, version)
 		var z bytes.Buffer
 		zw := zlib.NewWriter(&z)
-		zw.Write(spec)
-		zw.Close()
+		_, _ = zw.Write(spec)
+		_ = zw.Close()
 		artifactkit.OctetResponse(w, z.Bytes())
 		return
 	}
@@ -280,7 +280,12 @@ func (s *State) quickMarshal(w http.ResponseWriter, r *http.Request, rel string)
 func (s *State) dependencies(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("gems")
 	if q == "" && r.Method == http.MethodPost {
-		body, _ := io.ReadAll(r.Body)
+		artifactkit.LimitBody(w, r)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			artifactkit.WriteReadErr(w, err)
+			return
+		}
 		for _, pair := range strings.Split(string(body), "&") {
 			kv := strings.SplitN(pair, "=", 2)
 			if len(kv) == 2 && kv[0] == "gems" {
@@ -288,7 +293,7 @@ func (s *State) dependencies(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	var b []byte = []byte{0x04, 0x08}
+	b := []byte{0x04, 0x08}
 	if q == "" {
 		b = marshalArrayLen(b, 0)
 		artifactkit.OctetResponse(w, b)
@@ -300,17 +305,13 @@ func (s *State) dependencies(w http.ResponseWriter, r *http.Request) {
 		if g == "" {
 			continue
 		}
-		name, ver := g, ""
+		// Strip a trailing -version suffix if present: the dependency array
+		// below carries only the name and a wildcard requirement.
+		name := g
 		if i := strings.LastIndex(g, "-"); i >= 0 {
-			cand := g[i+1:]
-			if cand != "" && cand[0] >= '0' && cand[0] <= '9' {
-				ver = cand
+			if cand := g[i+1:]; cand != "" && cand[0] >= '0' && cand[0] <= '9' {
 				name = g[:i]
 			}
-		}
-		if ver == "" {
-			vs, _ := s.Registry.Meta.ListVersions(r.Context(), "rubygems", name)
-			ver = artifactkit.HighestVersion(vs)
 		}
 		b = marshalArrayLen(b, 2)
 		b = marshalArrayLen(b, 3)
@@ -326,7 +327,12 @@ func (s *State) upload(w http.ResponseWriter, r *http.Request) {
 	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
-	data, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	name, version := extractNameVersionGem(data)
 	if name == "" {
 		name = "unknown"
@@ -365,7 +371,12 @@ func (s *State) yank(w http.ResponseWriter, r *http.Request, name, version strin
 func (s *State) yankFromRequest(w http.ResponseWriter, r *http.Request) {
 	name, version := "", ""
 	if r.Method == http.MethodDelete {
-		body, _ := io.ReadAll(r.Body)
+		artifactkit.LimitBody(w, r)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			artifactkit.WriteReadErr(w, err)
+			return
+		}
 		vals, _ := url.ParseQuery(string(body))
 		name = vals.Get("gem_name")
 		version = vals.Get("version")
@@ -392,7 +403,7 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, filename string
 				continue
 			}
 			data, _ := io.ReadAll(rd)
-			rd.Close()
+			_ = rd.Close()
 			artifactkit.OctetResponse(w, data)
 			return
 		}
@@ -448,10 +459,10 @@ func nameVersionFromStem(stem string) (string, string) {
 func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.Context) {
 	if art, err := reg.Meta.Get(ctx, "rubygems", name, version); err == nil {
 		for _, b := range art.Blobs {
-			_ = reg.Blobs.Delete(ctx, b.Digest)
+			artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
 		}
 	}
-	_ = reg.Meta.Delete(ctx, "rubygems", name, version)
+	artifactkit.LogMetaErr("meta delete", reg.Meta.Delete(ctx, "rubygems", name, version))
 }
 
 func storeVersionSource(reg *artifactkit.Registry, name, version, filename string, data []byte, source string, ctx context.Context) {
@@ -463,7 +474,7 @@ func storeVersionSource(reg *artifactkit.Registry, name, version, filename strin
 			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 	}
-	_ = reg.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 // extractNameVersionGem reads metadata.gz (YAML gemspec) from a .gem archive.
@@ -486,7 +497,7 @@ func extractNameVersionGem(data []byte) (string, string) {
 			return "", ""
 		}
 		ym, _ := io.ReadAll(gz)
-		gz.Close()
+		_ = gz.Close()
 		return yamlField(string(ym), "name"), yamlVersion(string(ym))
 	}
 	return "", ""

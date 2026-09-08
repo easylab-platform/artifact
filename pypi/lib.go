@@ -215,41 +215,6 @@ func (s *State) simpleProjectJSON(w http.ResponseWriter, r *http.Request, name s
 	artifactkit.Text(w, http.StatusOK, string(out), "application/vnd.pypi.simple.v1+json")
 }
 
-// proxySimpleProject rewrites an upstream /simple/{name}/ index page. JSON
-// (PEP 691) and HTML (PEP 503) are both proxied, with hrefs rewritten to self.
-func (s *State) proxySimpleProject(w http.ResponseWriter, r *http.Request, name string) bool {
-	remote, err := s.Registry.Remote("pypi", "")
-	if err != nil {
-		return false
-	}
-	path := "/simple/" + artifactkit.URLencode(name) + "/"
-	if wantsJSON(r) {
-		// Request the JSON flavor upstream and rewrite each file URL to self.
-		// NOTE: fetched uncached — the shared index cache is keyed by URL only,
-		// so an HTML probe and a JSON probe would collide on the same key.
-		jsonRemote := remote.WithHeader("Accept", "application/vnd.pypi.simple.v1+json")
-		body, err := jsonRemote.GetBytes(r.Context(), path)
-		if err != nil {
-			return false
-		}
-		rewritten := mergeJSONHrefs(string(body), s.base(), name, nil, nil, s.Registry)
-		artifactkit.Text(w, http.StatusOK, rewritten, "application/vnd.pypi.simple.v1+json")
-		return true
-	}
-	body, err := remote.GetCached(r.Context(), sharedCache(), path)
-	if err != nil {
-		return false
-	}
-	rewritten := rewriteLinks(body, s.base(), name)
-	artifactkit.Text(w, http.StatusOK, rewritten, "text/html")
-	return true
-}
-
-// rewriteJSONHrefs converts upstream PEP 691 "url" fields to self URLs.
-func rewriteJSONHrefs(body, selfBase, project string) []byte {
-	return []byte(mergeJSONHrefs(body, selfBase, project, nil, nil, nil))
-}
-
 // mergeJSONHrefs rewrites upstream PEP 691 "url" fields to self and appends
 // locally pushed files (analogous to the HTML rewriteLinks path). The caller
 // supplies the request only to read local blobs' hashes. It is a free function
@@ -261,13 +226,11 @@ func mergeJSONHrefs(body, selfBase, project string, versions []string, req *http
 	}
 	files, _ := doc["files"].([]any)
 	seen := map[string]bool{}
-	if files != nil {
-		for _, f := range files {
-			if m, ok := f.(map[string]any); ok {
-				if fname, _ := m["filename"].(string); fname != "" {
-					seen[fname] = true
-					m["url"] = selfBase + "/simple/" + artifactkit.URLencode(project) + "/" + artifactkit.URLencode(fname)
-				}
+	for _, f := range files {
+		if m, ok := f.(map[string]any); ok {
+			if fname, _ := m["filename"].(string); fname != "" {
+				seen[fname] = true
+				m["url"] = selfBase + "/simple/" + artifactkit.URLencode(project) + "/" + artifactkit.URLencode(fname)
 			}
 		}
 	}
@@ -348,7 +311,7 @@ func (s *State) simpleFile(w http.ResponseWriter, r *http.Request, project, file
 					continue
 				}
 				data, _ := io.ReadAll(rd)
-				rd.Close()
+				_ = rd.Close()
 				artifactkit.BlobResponse(w, data, filename)
 				return
 			}
@@ -453,7 +416,7 @@ func (s *State) metadataFile(w http.ResponseWriter, r *http.Request, project, fi
 				continue
 			}
 			data, _ := io.ReadAll(rd)
-			rd.Close()
+			_ = rd.Close()
 			meta := extractWheelMetadata(data)
 			if meta == "" {
 				meta = "Metadata-Version: 2.1\nName: " + project + "\nVersion: " + v + "\n"
@@ -513,7 +476,12 @@ func (s *State) upload(w http.ResponseWriter, r *http.Request) {
 	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
-	data, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	ct := r.Header.Get("Content-Type")
 	var name, version, filename string
 	if strings.HasPrefix(ct, "multipart/form-data") {
@@ -571,16 +539,16 @@ func (s *State) storeVersion(name, version, filename string, data []byte, source
 		}
 	}
 	art.Proprietary = []byte(`{"upload_time":"2024-01-01T00:00:00.000000Z"}`)
-	_ = s.Registry.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", s.Registry.Meta.Put(ctx, art))
 }
 
 func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.Context) {
 	if art, err := reg.Meta.Get(ctx, "pypi", name, version); err == nil {
 		for _, b := range art.Blobs {
-			_ = reg.Blobs.Delete(ctx, b.Digest)
+			artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
 		}
 	}
-	_ = reg.Meta.Delete(ctx, "pypi", name, version)
+	artifactkit.LogMetaErr("meta delete", reg.Meta.Delete(ctx, "pypi", name, version))
 }
 
 func sharedCache() *artifactkit.IndexCache {

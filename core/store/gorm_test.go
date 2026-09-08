@@ -13,7 +13,7 @@ func TestOpenStoreSQLiteRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	ctx := context.Background()
 	art := artifactkit.Artifact{Format: "oci", Repository: "alpine", Version: "3", Digest: "d1", Source: "push"}
 	if err := s.Put(ctx, art); err != nil {
@@ -39,7 +39,7 @@ func TestOpenStoreBackendSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if err := s.Put(context.Background(), artifactkit.Artifact{Format: "g", Repository: "r", Version: "1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -59,13 +59,9 @@ func TestOpenBlobStoreFilesystem(t *testing.T) {
 }
 
 func TestOpenBlobStoreS3Placeholder(t *testing.T) {
-	// s3 is a placeholder: falls back to filesystem (does not crash).
-	b, err := OpenBlobStore(BlobS3, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if b == nil {
-		t.Fatal("nil blob store")
+	// s3 is unimplemented: it must fail startup loudly, not fall back.
+	if _, err := OpenBlobStore(BlobS3, t.TempDir()); err == nil {
+		t.Fatal("s3 backend should fail loudly until implemented")
 	}
 }
 
@@ -86,7 +82,7 @@ func TestOpenStorePostgresGated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if err := s.Put(context.Background(), artifactkit.Artifact{Format: "g", Repository: "r", Version: "1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +97,7 @@ func TestOpenStoreMySQLGated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if err := s.Put(context.Background(), artifactkit.Artifact{Format: "g", Repository: "r", Version: "1"}); err != nil {
 		t.Fatal(err)
 	}

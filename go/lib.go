@@ -132,7 +132,7 @@ func (s *State) goMod(w http.ResponseWriter, r *http.Request, module, version st
 				continue
 			}
 			data, _ := io.ReadAll(rd)
-			rd.Close()
+			_ = rd.Close()
 			if gm := extractGoMod(data); gm != "" {
 				artifactkit.Text(w, http.StatusOK, gm, "text/plain; charset=utf-8")
 				return
@@ -151,7 +151,7 @@ func (s *State) moduleZip(w http.ResponseWriter, r *http.Request, module, versio
 				continue
 			}
 			data, _ := io.ReadAll(rd)
-			rd.Close()
+			_ = rd.Close()
 			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
@@ -196,7 +196,12 @@ func (s *State) upload(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = r.URL.Query().Get("module")
 	}
-	data, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	if name == "" {
 		name = jsonStr(data, "name")
 		if name == "" {
@@ -228,7 +233,7 @@ func storeVersionSource(reg *artifactkit.Registry, module, version string, data 
 			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: module + "-" + version + ".zip"})
 		}
 	}
-	_ = reg.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func jsonStr(data []byte, key string) string {
@@ -255,7 +260,7 @@ func extractGoMod(zipData []byte) string {
 				return ""
 			}
 			buf, _ := io.ReadAll(io.LimitReader(rc, 1<<20))
-			rc.Close()
+			_ = rc.Close()
 			return string(buf)
 		}
 	}

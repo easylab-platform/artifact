@@ -183,7 +183,7 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, rest string) {
 				continue
 			}
 			data, _ := io.ReadAll(rd)
-			rd.Close()
+			_ = rd.Close()
 			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
@@ -226,7 +226,12 @@ func (s *State) publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name, version := r.URL.Query().Get("name"), r.URL.Query().Get("version")
-	data, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	if tn, tv := tarballNameVersion(data); tn != "" {
 		if name == "" {
 			name = tn
@@ -254,7 +259,12 @@ func (s *State) createRelease(w http.ResponseWriter, r *http.Request, trimmed st
 	parts := strings.Split(rest, "/")
 	name := parts[0]
 	version := r.URL.Query().Get("version")
-	data, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	if tn, tv := tarballNameVersion(data); tn != "" {
 		name = tn
 		if version == "" {
@@ -296,8 +306,8 @@ func (s *State) signedGzip(w http.ResponseWriter, payload []byte) {
 	env = pbBytes(env, 2, nil) // empty signature
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
-	zw.Write(env)
-	zw.Close()
+	_, _ = zw.Write(env)
+	_ = zw.Close()
 	artifactkit.OctetResponse(w, buf.Bytes())
 }
 
@@ -311,10 +321,10 @@ func nameVersionFromStem(stem string) (string, string) {
 func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.Context) {
 	if art, err := reg.Meta.Get(ctx, "hex", name, version); err == nil {
 		for _, b := range art.Blobs {
-			_ = reg.Blobs.Delete(ctx, b.Digest)
+			artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
 		}
 	}
-	_ = reg.Meta.Delete(ctx, "hex", name, version)
+	artifactkit.LogMetaErr("meta delete", reg.Meta.Delete(ctx, "hex", name, version))
 }
 
 func storeVersionSource(reg *artifactkit.Registry, name, version, filename string, data []byte, source string, ctx context.Context) {
@@ -331,7 +341,7 @@ func storeVersionSource(reg *artifactkit.Registry, name, version, filename strin
 			art.Proprietary = []byte(`{"inner_checksum":"` + inner + `"}`)
 		}
 	}
-	_ = reg.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 // innerChecksumOf extracts the inner checksum a hex package publishes:
@@ -344,7 +354,7 @@ func innerChecksumOf(data []byte) string {
 		if err != nil {
 			return ""
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		r = gz
 	}
 	tr := tar.NewReader(r)
@@ -386,7 +396,7 @@ func tarballNameVersion(data []byte) (string, string) {
 		if err != nil {
 			return "", ""
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		r = gz
 	}
 	tr := tar.NewReader(r)

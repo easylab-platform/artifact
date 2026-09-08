@@ -204,7 +204,7 @@ func (s *State) gitArchive(ctx context.Context, url, tag string) []byte {
 	if err != nil {
 		return nil
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	tctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	if err := exec.CommandContext(tctx, "git", "clone", "--depth", "1", "--branch", tag, url, filepath.Join(dir, "repo")).Run(); err != nil {
@@ -286,11 +286,11 @@ func (s *State) sourceZip(w http.ResponseWriter, r *http.Request, id, version, n
 				continue
 			}
 			data, _ := io.ReadAll(rd)
-			rd.Close()
+			_ = rd.Close()
 			w.Header().Set("Content-Type", "application/zip")
 			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 			w.WriteHeader(http.StatusOK)
-			w.Write(data)
+			_, _ = w.Write(data)
 			return
 		}
 	}
@@ -303,7 +303,7 @@ func (s *State) sourceZip(w http.ResponseWriter, r *http.Request, id, version, n
 				w.Header().Set("Content-Type", "application/zip")
 				w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 				w.WriteHeader(http.StatusOK)
-				w.Write(data)
+				_, _ = w.Write(data)
 				return
 			}
 		}
@@ -314,7 +314,7 @@ func (s *State) sourceZip(w http.ResponseWriter, r *http.Request, id, version, n
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Length", fmt.Sprint(len(fetched.Data)))
 	w.WriteHeader(http.StatusOK)
-	w.Write(fetched.Data)
+	_, _ = w.Write(fetched.Data)
 }
 
 func (s *State) packageSwift(w http.ResponseWriter, r *http.Request, id, version, name string) {
@@ -325,7 +325,7 @@ func (s *State) packageSwift(w http.ResponseWriter, r *http.Request, id, version
 				continue
 			}
 			data, _ := io.ReadAll(rd)
-			rd.Close()
+			_ = rd.Close()
 			if manifest, ok := extractPackageSwift(data); ok {
 				w.Header().Set("Content-Version", "1")
 				artifactkit.Text(w, http.StatusOK, manifest, "text/x-swift")
@@ -346,7 +346,12 @@ func (s *State) putPath(w http.ResponseWriter, r *http.Request, path string) {
 	}
 	scope, name, ver := parts[0], parts[1], parts[2]
 	full := scope + "." + name
-	raw, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	ct := r.Header.Get("Content-Type")
 	zipData := raw
 	if strings.HasPrefix(ct, "multipart/form-data") {
@@ -378,7 +383,7 @@ func storeVersionSource(reg *artifactkit.Registry, full, version, filename strin
 			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 	}
-	_ = reg.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func extractPackageSwift(zipData []byte) (string, bool) {
@@ -390,7 +395,7 @@ func extractPackageSwift(zipData []byte) (string, bool) {
 		if f.Name == "Package.swift" || strings.HasSuffix(f.Name, "/Package.swift") {
 			rc, _ := f.Open()
 			buf, _ := io.ReadAll(io.LimitReader(rc, 1<<20))
-			rc.Close()
+			_ = rc.Close()
 			return string(buf), true
 		}
 	}

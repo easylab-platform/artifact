@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 )
 
 // Digest is the canonical content-addressed identifier of a blob. The OCI
@@ -90,4 +91,13 @@ func IsUnknown(err error) bool {
 	return errors.Is(err, ErrArtifactUnknown) ||
 		errors.Is(err, ErrBlobUnknown) ||
 		errors.Is(err, ErrUploadUnknown)
+}
+
+// LogMetaErr is used by adapter helper flows (storeVersion / removeVersion)
+// where an index write failure must not abort a proxied download but must be
+// visible in the server log. Returns the error for callers that CAN act.
+func LogMetaErr(op string, err error) {
+	if err != nil {
+		log.Printf("artifactkit: %s: %v", op, err)
+	}
 }

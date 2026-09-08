@@ -160,7 +160,12 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 					if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 						return
 					}
-					data, _ := io.ReadAll(r.Body)
+					artifactkit.LimitBody(w, r)
+					data, err := io.ReadAll(r.Body)
+					if err != nil {
+						artifactkit.WriteReadErr(w, err)
+						return
+					}
 					storeFile(s.Registry, name, ver, verSlot, data, r.Context())
 					artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 					return
@@ -208,7 +213,12 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 				if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 					return
 				}
-				data, _ := io.ReadAll(r.Body)
+				artifactkit.LimitBody(w, r)
+				data, err := io.ReadAll(r.Body)
+				if err != nil {
+					artifactkit.WriteReadErr(w, err)
+					return
+				}
 				storeFile(s.Registry, name, ver, filename, data, r.Context())
 				u := s.base() + "/v2/conans/" + artifactkit.URLencode(name) + "/" + artifactkit.URLencode(ver) + "/_/_/revisions/0/files/" + artifactkit.URLencode(filename)
 				artifactkit.JSON(w, http.StatusOK, map[string]any{"files": map[string]any{filename: u}})
@@ -308,7 +318,12 @@ func (s *State) fileGet(w http.ResponseWriter, r *http.Request, name, ver, sub s
 		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
-		data, _ := io.ReadAll(r.Body)
+		artifactkit.LimitBody(w, r)
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			artifactkit.WriteReadErr(w, err)
+			return
+		}
 		storeFile(s.Registry, name, ver, filename, data, r.Context())
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
@@ -404,7 +419,7 @@ func (s *State) replyOrProxy(w http.ResponseWriter, r *http.Request, local any, 
 		if body, err := remote.GetBytes(r.Context(), upstreamPath); err == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write(body)
+			_, _ = w.Write(body)
 			return
 		}
 	}
@@ -465,7 +480,7 @@ func (s *State) loadFile(ctx context.Context, name, ver, filename string) ([]byt
 			return nil, false
 		}
 		data, _ := io.ReadAll(rd)
-		rd.Close()
+		_ = rd.Close()
 		return data, true
 	}
 	// Fall back: any recorded artifact blob named this filename.
@@ -482,7 +497,7 @@ func (s *State) loadFile(ctx context.Context, name, ver, filename string) ([]byt
 						continue
 					}
 					data, _ := io.ReadAll(rd)
-					rd.Close()
+					_ = rd.Close()
 					return data, true
 				}
 			}
@@ -594,13 +609,13 @@ func storeFile(reg *artifactkit.Registry, name, ver, filename string, data []byt
 		h, _ := artifactkit.ComputeHashesBytes(data)
 		digest := "sha256:" + h.SHA256
 		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			_ = reg.Meta.Put(ctx, artifactkit.Artifact{Format: "conan", Repository: name, Version: filename, Source: "push", Blobs: []artifactkit.Descriptor{{Digest: digest, Size: int64(len(data)), Name: filename}}})
+			artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, artifactkit.Artifact{Format: "conan", Repository: name, Version: filename, Source: "push", Blobs: []artifactkit.Descriptor{{Digest: digest, Size: int64(len(data)), Name: filename}}}))
 		}
 	}
 }
 
 func removeVersion(reg *artifactkit.Registry, name, ver string, ctx context.Context) {
-	_ = reg.Meta.Delete(ctx, "conan", name, ver)
+	artifactkit.LogMetaErr("meta delete", reg.Meta.Delete(ctx, "conan", name, ver))
 }
 
 func globMatch(name, pattern string) bool {

@@ -124,7 +124,7 @@ func (s *State) chart(w http.ResponseWriter, r *http.Request, filename string) {
 						continue
 					}
 					data, _ := io.ReadAll(rd)
-					rd.Close()
+					_ = rd.Close()
 					artifactkit.BlobResponse(w, data, filename)
 					return
 				}
@@ -146,14 +146,19 @@ func (s *State) upload(w http.ResponseWriter, r *http.Request) {
 	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
-	data, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	ct := r.Header.Get("Content-Type")
 	var fname string
 	if strings.HasPrefix(ct, "multipart/form-data") {
 		fname, data, _ = artifactkit.ExtractFirstFile(data, ct)
 	}
 	if len(data) == 0 {
-		data = bodyOf(r)
+		data = bodyOf(w, r)
 	}
 	name, version := queryPair(r.URL.Query(), "name"), queryPair(r.URL.Query(), "version")
 	if name == "" || version == "" {
@@ -209,16 +214,16 @@ func storeChart(reg *artifactkit.Registry, name, version, filename string, data 
 			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 	}
-	_ = reg.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.Context) {
 	if art, err := reg.Meta.Get(ctx, "helm", name, version); err == nil {
 		for _, b := range art.Blobs {
-			_ = reg.Blobs.Delete(ctx, b.Digest)
+			artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
 		}
 	}
-	_ = reg.Meta.Delete(ctx, "helm", name, version)
+	artifactkit.LogMetaErr("meta delete", reg.Meta.Delete(ctx, "helm", name, version))
 }
 
 // chartNameVersion reads Chart.yaml (name/version) out of a chart .tgz.
@@ -227,7 +232,7 @@ func chartNameVersion(data []byte) (string, string, bool) {
 	if err != nil {
 		return "", "", false
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
@@ -263,7 +268,12 @@ func queryPair(v url.Values, key string) string {
 	return strings.ReplaceAll(val, "+", " ")
 }
 
-func bodyOf(r *http.Request) []byte {
-	b, _ := io.ReadAll(r.Body)
+func bodyOf(w http.ResponseWriter, r *http.Request) []byte {
+	artifactkit.LimitBody(w, r)
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return nil
+	}
 	return b
 }

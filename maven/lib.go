@@ -108,7 +108,7 @@ func (s *State) getPath(w http.ResponseWriter, r *http.Request, p string, c coor
 					continue
 				}
 				data, _ := io.ReadAll(rd)
-				rd.Close()
+				_ = rd.Close()
 				artifactkit.BlobResponse(w, data, filename)
 				return
 			}
@@ -143,7 +143,12 @@ func (s *State) putPath(w http.ResponseWriter, r *http.Request, p string, c coor
 		return
 	}
 	filename := pathLast(p)
-	data, _ := io.ReadAll(r.Body)
+	artifactkit.LimitBody(w, r)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		artifactkit.WriteReadErr(w, err)
+		return
+	}
 	storeVersionSource(s.Registry, c.artifactID, c.version, filename, data, "push", r.Context())
 	artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
 }
@@ -161,12 +166,12 @@ func (s *State) deletePath(w http.ResponseWriter, r *http.Request, p string, c c
 		}
 		art.Blobs = kept
 		if len(kept) == 0 {
-			_ = s.Registry.Meta.Delete(r.Context(), "maven", c.artifactID, c.version)
+			artifactkit.LogMetaErr("meta delete", s.Registry.Meta.Delete(r.Context(), "maven", c.artifactID, c.version))
 		} else {
-			_ = s.Registry.Meta.Put(r.Context(), art)
+			artifactkit.LogMetaErr("meta put", s.Registry.Meta.Put(r.Context(), art))
 		}
 		for _, b := range removed {
-			_ = s.Registry.Blobs.Delete(r.Context(), b.Digest)
+			artifactkit.LogMetaErr("blob delete", s.Registry.Blobs.Delete(r.Context(), b.Digest))
 		}
 	}
 	artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -329,11 +334,11 @@ func storeVersionSource(reg *artifactkit.Registry, artifactID, version, filename
 		}
 		for _, b := range removed {
 			if b.Digest != digest {
-				_ = reg.Blobs.Delete(ctx, b.Digest)
+				artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
 			}
 		}
 	}
-	_ = reg.Meta.Put(ctx, art)
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func splitPath(p string) []string {

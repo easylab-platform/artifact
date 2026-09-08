@@ -5,7 +5,6 @@
 package system
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -184,8 +183,6 @@ func (s *State) packages(w http.ResponseWriter, r *http.Request) {
 	}
 	artifactkit.JSON(w, http.StatusOK, map[string]any{"packages": pkgs})
 }
-
-var _ = context.Background
 
 func stringsTrimPrefix(s, p string) string {
 	if len(s) >= len(p) && s[:len(p)] == p {

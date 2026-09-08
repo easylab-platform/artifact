@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	_ "github.com/easylab-platform/artifact/cmd/adapters" // registers all enabled protocols
 	"github.com/easylab-platform/artifact/core"
@@ -47,7 +48,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("open metadata: %v", err)
 	}
-	defer meta.Close()
+	defer func() { _ = meta.Close() }()
 
 	var blobs artifactkit.BlobStore
 	// Blob backend: filesystem (default) via the factory, or S3 placeholder. The
@@ -72,7 +73,7 @@ func main() {
 		if name == "" {
 			continue
 		}
-		handler, err := artifactkit.Build(name, reg, configFor(name, *selfBase, auth))
+		handler, err := artifactkit.Build(name, reg, configFor(name, *selfBase, auth, *dataDir))
 		if err != nil {
 			log.Fatalf("build protocol %q: %v", name, err)
 		}
@@ -102,7 +103,16 @@ func main() {
 	addr := *listen
 	log.Printf("artifact listening on %s (%d protocols: %s), data=%s, airgap=%v",
 		addr, mounted, names, *dataDir, *airGap)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       10 * time.Minute, // large layer uploads stream slowly
+		WriteTimeout:      10 * time.Minute, // large layer downloads stream slowly
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -142,7 +152,7 @@ func defaultUpstreams(airGap bool) *artifactkit.Upstreams {
 	}
 }
 
-func configFor(name, selfBase string, auth artifactkit.Auth) map[string]any {
+func configFor(name, selfBase string, auth artifactkit.Auth, dataDir string) map[string]any {
 	cfg := map[string]any{}
 	// Each protocol mounts under /pkgs/<name> (OCI is special-cased to /v2),
 	// so its emitted self-URLs must carry that prefix. selfBase is the global
@@ -158,28 +168,42 @@ func configFor(name, selfBase string, auth artifactkit.Auth) map[string]any {
 	if auth != nil {
 		cfg["auth"] = auth
 	}
+	if name == "oci" {
+		// Upload sessions live under the data dir (survive restarts, one
+		// place to back up).
+		cfg["upload_dir"] = filepath.Join(dataDir, "oci-uploads")
+	}
 	return cfg
 }
 
-// serveToken issues an OCI bearer token from the configured auth.
+// serveToken issues an OCI bearer token from the configured auth. Pull-only
+// scopes are granted to anyone (an anonymous pull token carries no write
+// privilege); push/delete scopes require an authenticated write-level
+// principal, and the minted token never exposes the static credential.
 func serveToken(w http.ResponseWriter, r *http.Request, auth artifactkit.Auth) {
 	scopes := collectScopes(r.URL.Query()["scope"])
 	username := auth.Authenticate(r.Context(), r)
-	if !canPush(scopes) || username != "" {
-		tok := auth.IssueToken(r.Context(), username, scopes, 3600)
-		writeJSON(w, map[string]any{
-			"token": tok, "access_token": tok, "expires_in": 3600,
-		})
-		return
-	}
 	if username == "" && canPush(scopes) {
+		// Anonymous push scope: challenge rather than mint anything.
 		w.Header().Set("WWW-Authenticate", `Basic realm="/token"`)
-		w.WriteHeader(http.StatusUnauthorized)
-		writeJSON(w, map[string]any{"errors": []any{
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"errors": []any{
 			map[string]any{"code": "UNAUTHORIZED", "message": "authentication required"},
 		}})
 		return
 	}
+	tok := auth.IssueToken(r.Context(), username, scopes, 3600)
+	if tok == "" && canPush(scopes) {
+		// The auth layer refused to mint (e.g. a read-level principal asking
+		// for push): the credential is valid but not privileged enough.
+		w.Header().Set("WWW-Authenticate", `Basic realm="/token"`)
+		writeJSON(w, http.StatusForbidden, map[string]any{"errors": []any{
+			map[string]any{"code": "DENIED", "message": "insufficient privilege for requested scope"},
+		}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token": tok, "access_token": tok, "expires_in": 3600,
+	})
 }
 
 func collectScopes(vals []string) []string {
@@ -209,9 +233,10 @@ func canPush(scopes []string) bool {
 	return false
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
+func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, "%s", mustJSON(v))
+	w.WriteHeader(code)
+	_, _ = fmt.Fprintf(w, "%s", mustJSON(v))
 }
 
 func mustJSON(v any) string {
