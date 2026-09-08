@@ -191,7 +191,7 @@ func serveToken(w http.ResponseWriter, r *http.Request, auth artifactkit.Auth) {
 		}})
 		return
 	}
-	tok := auth.IssueToken(r.Context(), username, scopes, 3600)
+	tok := auth.IssueToken(r.Context(), username, scopes, time.Hour)
 	if tok == "" && canPush(scopes) {
 		// The auth layer refused to mint (e.g. a read-level principal asking
 		// for push): the credential is valid but not privileged enough.

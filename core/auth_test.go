@@ -212,3 +212,31 @@ func TestAuthorizeWriteAllSchemes(t *testing.T) {
 }
 
 func hasPrefix(s, p string) bool { return len(s) >= len(p) && s[:len(p)] == p }
+
+// TestIssueTokenTTLUnit guards against the classic Duration bug: a caller
+// passing a bare 3600 means 3600 NANOSECONDS, and the mint would expire
+// instantly. This test fails if IssueToken ever mishandles sub-millisecond
+// TTLs by treating them as "already expired" silently — the contract is: ttl
+// <= 0 is replaced by the default; tiny positive TTLs are honored (and thus
+// expire), which callers must express in real Duration units.
+func TestIssueTokenTTLUnit(t *testing.T) {
+	a := NewTokenAuth("w=write")
+	ctx := context.Background()
+
+	// A bare integer like 3600 is 3600ns: honored, so expired immediately
+	// after. This documents the trap; serveToken callers must pass time.Hour.
+	tok := a.IssueToken(ctx, "token:w", []string{"repository:x:pull"}, 3600)
+	if tok == "" {
+		t.Fatal("mint should still be created for a tiny TTL")
+	}
+	time.Sleep(2 * time.Millisecond)
+	if _, ok := a.CheckBearer(ctx, tok, "repository:x:pull"); ok {
+		t.Fatal("3600ns TTL mint must already be expired (Duration units!)")
+	}
+
+	// A real hour works.
+	tok2 := a.IssueToken(ctx, "token:w", []string{"repository:x:pull"}, time.Hour)
+	if _, ok := a.CheckBearer(ctx, tok2, "repository:x:pull"); !ok {
+		t.Fatal("1h TTL mint should be valid")
+	}
+}
