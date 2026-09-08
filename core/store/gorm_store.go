@@ -32,7 +32,7 @@ type DriverConfig struct {
 }
 
 // OpenStore opens the metadata store on the configured backend. The semantic
-// layer (pkrkit protocol handlers) is agnostic — only this boundary changes.
+// layer (artifactkit protocol handlers) is agnostic — only this boundary changes.
 // sqlite uses the same pure-Go dialector (glebarez/sqlite) as easyvcs, so the
 // "sqlite" database/sql driver is registered exactly once per process.
 func OpenStore(cfg DriverConfig) (*Store, error) {
@@ -82,7 +82,7 @@ func (s *Store) Close() error {
 }
 
 // Put implements IndexStore.
-func (s *Store) Put(ctx context.Context, a pkrkit.Artifact) error {
+func (s *Store) Put(ctx context.Context, a artifactkit.Artifact) error {
 	if a.Repository == "" {
 		return errors.New("artifact: empty repository")
 	}
@@ -102,16 +102,16 @@ func (s *Store) Put(ctx context.Context, a pkrkit.Artifact) error {
 }
 
 // Get implements IndexStore.
-func (s *Store) Get(ctx context.Context, format, repository, version string) (pkrkit.Artifact, error) {
+func (s *Store) Get(ctx context.Context, format, repository, version string) (artifactkit.Artifact, error) {
 	var row artifactRow
 	err := s.db.Where("format=? AND repository=? AND version=?", format, repository, version).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return pkrkit.Artifact{}, pkrkit.ErrArtifactUnknown
+		return artifactkit.Artifact{}, artifactkit.ErrArtifactUnknown
 	}
 	if err != nil {
-		return pkrkit.Artifact{}, err
+		return artifactkit.Artifact{}, err
 	}
-	var a pkrkit.Artifact
+	var a artifactkit.Artifact
 	_ = json.Unmarshal([]byte(row.Blobs), &a.Blobs)
 	a.Format, a.Repository, a.Version = row.Format, row.Repository, row.Version
 	a.MediaType, a.Digest, a.Source = row.MediaType, row.Digest, row.Source
@@ -126,7 +126,7 @@ func (s *Store) Delete(ctx context.Context, format, repository, version string) 
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return pkrkit.ErrArtifactUnknown
+		return artifactkit.ErrArtifactUnknown
 	}
 	return nil
 }
@@ -159,17 +159,17 @@ func (s *Store) ListRepositories(ctx context.Context) ([]string, error) {
 }
 
 // ListPackages implements IndexStore.
-func (s *Store) ListPackages(ctx context.Context) ([]pkrkit.PackageSummary, error) {
+func (s *Store) ListPackages(ctx context.Context) ([]artifactkit.PackageSummary, error) {
 	var rows []artifactRow
 	if err := s.db.Order("format, repository, version").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	out := make([]pkrkit.PackageSummary, 0, len(rows))
+	out := make([]artifactkit.PackageSummary, 0, len(rows))
 	for i := range rows {
 		// size approximated by blob count (kept minimal for the sketch).
 		var des []json.RawMessage
 		_ = json.Unmarshal([]byte(rows[i].Blobs), &des)
-		out = append(out, pkrkit.PackageSummary{
+		out = append(out, artifactkit.PackageSummary{
 			Format: rows[i].Format, Repository: rows[i].Repository, Version: rows[i].Version,
 			MediaType: rows[i].MediaType, Digest: rows[i].Digest, Size: int64(len(des)),
 		})
@@ -187,7 +187,7 @@ func (s *Store) DeleteRepo(ctx context.Context, format, repository string) (int,
 }
 
 // SaveUpload implements IndexStore.
-func (s *Store) SaveUpload(ctx context.Context, u pkrkit.UploadRecord) error {
+func (s *Store) SaveUpload(ctx context.Context, u artifactkit.UploadRecord) error {
 	row := &uploadRow{ID: u.ID, Format: u.Format, Repository: u.Repository, Digest: u.Digest, Bytes: u.Bytes, Complete: boolToInt(u.Complete)}
 	return s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "id"}},
@@ -196,16 +196,16 @@ func (s *Store) SaveUpload(ctx context.Context, u pkrkit.UploadRecord) error {
 }
 
 // GetUpload implements IndexStore.
-func (s *Store) GetUpload(ctx context.Context, id string) (pkrkit.UploadRecord, error) {
+func (s *Store) GetUpload(ctx context.Context, id string) (artifactkit.UploadRecord, error) {
 	var row uploadRow
 	err := s.db.Where("id=?", id).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return pkrkit.UploadRecord{}, pkrkit.ErrUploadUnknown
+		return artifactkit.UploadRecord{}, artifactkit.ErrUploadUnknown
 	}
 	if err != nil {
-		return pkrkit.UploadRecord{}, err
+		return artifactkit.UploadRecord{}, err
 	}
-	return pkrkit.UploadRecord{ID: row.ID, Format: row.Format, Repository: row.Repository, Digest: row.Digest, Bytes: row.Bytes, Complete: row.Complete != 0}, nil
+	return artifactkit.UploadRecord{ID: row.ID, Format: row.Format, Repository: row.Repository, Digest: row.Digest, Bytes: row.Bytes, Complete: row.Complete != 0}, nil
 }
 
 // DeleteUpload implements IndexStore.
@@ -215,7 +215,7 @@ func (s *Store) DeleteUpload(ctx context.Context, id string) error {
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return pkrkit.ErrUploadUnknown
+		return artifactkit.ErrUploadUnknown
 	}
 	return nil
 }
@@ -234,7 +234,7 @@ func (s *Store) GetMeta(ctx context.Context, format, repository string) ([]byte,
 	var row metaRow
 	err := s.db.Where("format=? AND repository=?", format, repository).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("%s/%s: %w", format, repository, pkrkit.ErrArtifactUnknown)
+		return nil, fmt.Errorf("%s/%s: %w", format, repository, artifactkit.ErrArtifactUnknown)
 	}
 	if err != nil {
 		return nil, err

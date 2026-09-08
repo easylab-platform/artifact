@@ -29,7 +29,6 @@ func dialector(kind, dsn string) gorm.Dialector {
 	}
 }
 
-
 // GORM models for the metadata index. Table names are pinned to the legacy
 // schema so any existing raw-SQL callers remain consistent.
 type artifactRow struct {
@@ -61,4 +60,3 @@ type metaRow struct {
 func (artifactRow) TableName() string { return "artifacts" }
 func (uploadRow) TableName() string   { return "uploads" }
 func (metaRow) TableName() string     { return "meta" }
-

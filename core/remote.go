@@ -1,4 +1,4 @@
-package pkrkit
+package artifactkit
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ import (
 // UserAgent is sent on every upstream request. Registries rate-limit generic
 // user agents (Maven Central 429s the default Go UA), so a stable bespoke one
 // is used.
-const UserAgent = "pkrkit/1.0 (pull-through mirror)"
+const UserAgent = "artifactkit/1.0 (pull-through mirror)"
 
 // ClientFactory builds (and caches) an http.Client for a proxy policy:
 //   - nil           -> follow the environment proxy configuration

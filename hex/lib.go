@@ -20,14 +20,14 @@ import (
 )
 
 type State struct {
-	Registry *pkrkit.Registry
-	Auth     pkrkit.Auth
+	Registry *artifactkit.Registry
+	Auth     artifactkit.Auth
 	SelfBase string
 }
 
-func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) {
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	s := &State{Registry: reg}
-	if a, ok := cfg["auth"].(pkrkit.Auth); ok {
+	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
 	if v, ok := cfg["self_base"].(string); ok {
@@ -36,7 +36,7 @@ func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) 
 	return s, nil
 }
 
-func init() { pkrkit.Register("hex", NewHandler) }
+func init() { artifactkit.Register("hex", NewHandler) }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/pkgs/hex")
@@ -61,7 +61,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(trimmed, "packages/") && strings.Contains(trimmed, "/releases/"):
 		s.releaseInfo(w, r, trimmed)
 	case strings.HasPrefix(trimmed, "packages/") && strings.HasSuffix(trimmed, "/owners"):
-		pkrkit.JSON(w, http.StatusOK, []any{})
+		artifactkit.JSON(w, http.StatusOK, []any{})
 	case strings.HasPrefix(trimmed, "packages/"):
 		name := strings.TrimPrefix(trimmed, "packages/")
 		if r.Method == http.MethodGet {
@@ -83,7 +83,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) publicKey(w http.ResponseWriter, r *http.Request) {
-	pkrkit.Text(w, http.StatusOK, staticPublicKey, "application/x-pem-file")
+	artifactkit.Text(w, http.StatusOK, staticPublicKey, "application/x-pem-file")
 }
 
 func (s *State) names(w http.ResponseWriter, r *http.Request) {
@@ -117,12 +117,12 @@ func (s *State) pkg(w http.ResponseWriter, r *http.Request, name string) {
 	if len(versionList) == 0 {
 		if base := s.Registry.Upstreams.Get("hex"); base != "" {
 			remote := s.Registry.RemoteAt(base)
-			if body, err := remote.GetBytes(r.Context(), "/packages/"+pkrkit.URLencode(name)); err == nil {
-				pkrkit.OctetResponse(w, body)
+			if body, err := remote.GetBytes(r.Context(), "/packages/"+artifactkit.URLencode(name)); err == nil {
+				artifactkit.OctetResponse(w, body)
 				return
 			}
 		}
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	payload := []byte{}
@@ -184,18 +184,18 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, rest string) {
 			}
 			data, _ := io.ReadAll(rd)
 			rd.Close()
-			pkrkit.BlobResponse(w, data, filename)
+			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
 	}
 	if base := s.Registry.Upstreams.Get("hex"); base != "" {
 		remote := s.Registry.RemoteAt(base)
 		if data, err := remote.GetBytes(r.Context(), "/tarballs/"+filename); err == nil {
-			pkrkit.BlobResponse(w, data, filename)
+			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
 	}
-	pkrkit.Error(w, http.StatusNotFound, "not found")
+	artifactkit.Error(w, http.StatusNotFound, "not found")
 }
 
 func (s *State) releaseInfo(w http.ResponseWriter, r *http.Request, trimmed string) {
@@ -204,25 +204,25 @@ func (s *State) releaseInfo(w http.ResponseWriter, r *http.Request, trimmed stri
 	if len(parts) >= 3 && parts[1] == "releases" {
 		name, version := parts[0], parts[2]
 		if r.Method == http.MethodDelete {
-			if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+			if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 				return
 			}
 			if _, err := s.Registry.Meta.Get(r.Context(), "hex", name, version); err != nil {
-				pkrkit.Error(w, http.StatusNotFound, "release not found")
+				artifactkit.Error(w, http.StatusNotFound, "release not found")
 				return
 			}
 			removeVersion(s.Registry, name, version, r.Context())
 			w.WriteHeader(http.StatusCreated)
 			return
 		}
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"name": name, "version": version, "inserted_at": "2024-01-01T00:00:00Z"})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"name": name, "version": version, "inserted_at": "2024-01-01T00:00:00Z"})
 		return
 	}
 	w.WriteHeader(http.StatusNotFound)
 }
 
 func (s *State) publish(w http.ResponseWriter, r *http.Request) {
-	if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
 	name, version := r.URL.Query().Get("name"), r.URL.Query().Get("version")
@@ -243,11 +243,11 @@ func (s *State) publish(w http.ResponseWriter, r *http.Request) {
 	}
 	filename := name + "-" + version + ".tar"
 	storeVersionSource(s.Registry, name, version, filename, data, "push", r.Context())
-	pkrkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
+	artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
 }
 
 func (s *State) createRelease(w http.ResponseWriter, r *http.Request, trimmed string) {
-	if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
 	rest := strings.TrimSuffix(strings.TrimPrefix(trimmed, "packages/"), "/releases")
@@ -271,7 +271,7 @@ func (s *State) createRelease(w http.ResponseWriter, r *http.Request, trimmed st
 
 func (s *State) proxyAll(w http.ResponseWriter, r *http.Request, path string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		pkrkit.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		artifactkit.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	upPath := strings.TrimPrefix(path, "pkgs/hex/")
@@ -279,11 +279,11 @@ func (s *State) proxyAll(w http.ResponseWriter, r *http.Request, path string) {
 	if base := s.Registry.Upstreams.Get("hex"); base != "" {
 		remote := s.Registry.RemoteAt(base)
 		if body, err := remote.GetBytes(r.Context(), "/"+strings.Trim(upPath, "/")); err == nil {
-			pkrkit.OctetResponse(w, body)
+			artifactkit.OctetResponse(w, body)
 			return
 		}
 	}
-	pkrkit.Error(w, http.StatusBadGateway, "upstream")
+	artifactkit.Error(w, http.StatusBadGateway, "upstream")
 }
 
 func (s *State) signedGzip(w http.ResponseWriter, payload []byte) {
@@ -298,7 +298,7 @@ func (s *State) signedGzip(w http.ResponseWriter, payload []byte) {
 	zw := gzip.NewWriter(&buf)
 	zw.Write(env)
 	zw.Close()
-	pkrkit.OctetResponse(w, buf.Bytes())
+	artifactkit.OctetResponse(w, buf.Bytes())
 }
 
 func nameVersionFromStem(stem string) (string, string) {
@@ -308,7 +308,7 @@ func nameVersionFromStem(stem string) (string, string) {
 	return stem, "0.1.0"
 }
 
-func removeVersion(reg *pkrkit.Registry, name, version string, ctx context.Context) {
+func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.Context) {
 	if art, err := reg.Meta.Get(ctx, "hex", name, version); err == nil {
 		for _, b := range art.Blobs {
 			_ = reg.Blobs.Delete(ctx, b.Digest)
@@ -317,13 +317,13 @@ func removeVersion(reg *pkrkit.Registry, name, version string, ctx context.Conte
 	_ = reg.Meta.Delete(ctx, "hex", name, version)
 }
 
-func storeVersionSource(reg *pkrkit.Registry, name, version, filename string, data []byte, source string, ctx context.Context) {
-	art := pkrkit.Artifact{Format: "hex", Repository: name, Version: version, Source: source}
+func storeVersionSource(reg *artifactkit.Registry, name, version, filename string, data []byte, source string, ctx context.Context) {
+	art := artifactkit.Artifact{Format: "hex", Repository: name, Version: version, Source: source}
 	if len(data) > 0 {
-		h, _ := pkrkit.ComputeHashesBytes(data)
+		h, _ := artifactkit.ComputeHashesBytes(data)
 		digest := "sha256:" + h.SHA256
 		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, pkrkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
+			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 		// Persist the inner checksum (contents.tar.gz sha256) so the release
 		// protobuf can emit a real inner_checksum rather than a placeholder.
@@ -373,7 +373,7 @@ func innerChecksumOf(data []byte) string {
 	blob = append(blob, version...)
 	blob = append(blob, metadata...)
 	blob = append(blob, contents...)
-	h, _ := pkrkit.ComputeHashesBytes(blob)
+	h, _ := artifactkit.ComputeHashesBytes(blob)
 	return h.SHA256
 }
 

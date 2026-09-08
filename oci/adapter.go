@@ -19,9 +19,9 @@ import (
 // OciState configures the OCI adapter.
 type OciState struct {
 	// Registry is the substrate (metadata + blob + upstreams).
-	Registry *pkrkit.Registry
+	Registry *artifactkit.Registry
 	// Auth is optional; nil disables auth (anonymous pull-only).
-	Auth pkrkit.Auth
+	Auth artifactkit.Auth
 	// DefaultUpstream is the pull-through base (scheme://host). Empty "https://registry-1.docker.io".
 	DefaultUpstream string
 	// SelfBase is the external base URL (scheme://host[:port]) used for auth
@@ -50,11 +50,11 @@ func New(state *OciState) *Adapter {
 	return &Adapter{state: state, registryUpstreams: map[string]*Upstream{}}
 }
 
-// Name implements pkrkit.Protocol.
+// Name implements artifactkit.Protocol.
 func (a *Adapter) Name() string { return "oci" }
 
-// NewHandler is the constructor signature for pkrkit.Register.
-func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) {
+// NewHandler is the constructor signature for artifactkit.Register.
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	state := &OciState{Registry: reg}
 	if v, ok := cfg["default_upstream"].(string); ok && v != "" {
 		state.DefaultUpstream = v
@@ -62,7 +62,7 @@ func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) 
 	if v, ok := cfg["self_base"].(string); ok && v != "" {
 		state.SelfBase = v
 	}
-	if v, ok := cfg["auth"].(pkrkit.Auth); ok {
+	if v, ok := cfg["auth"].(artifactkit.Auth); ok {
 		state.Auth = v
 	}
 	return New(state), nil
@@ -110,7 +110,7 @@ func (a *Adapter) upstreamForRegistry(host string) *Upstream {
 	}
 }
 
-func proxyOf(u *pkrkit.Upstreams, key string) *string {
+func proxyOf(u *artifactkit.Upstreams, key string) *string {
 	if v, ok := u.ProxyURL(key); ok {
 		return &v
 	}
@@ -147,7 +147,7 @@ func (a *Adapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *Adapter) authorize(r *http.Request, name string, act pkrkit.Action) bool {
+func (a *Adapter) authorize(r *http.Request, name string, act artifactkit.Action) bool {
 	if a.state.Auth == nil {
 		return true
 	}
@@ -165,7 +165,7 @@ func (a *Adapter) authorize(r *http.Request, name string, act pkrkit.Action) boo
 }
 
 // challenge emits a Distribution-spec Bearer auth challenge.
-func (a *Adapter) challenge(w http.ResponseWriter, name string, act pkrkit.Action) {
+func (a *Adapter) challenge(w http.ResponseWriter, name string, act artifactkit.Action) {
 	scope := "repository:" + name + ":" + string(act)
 	realm := a.tokenRealm()
 	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s",service="oci-registry",scope="%s"`, realm, scope))
@@ -192,8 +192,8 @@ func (a *Adapter) catalog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Adapter) listTags(w http.ResponseWriter, r *http.Request, name string) {
-	if !a.authorize(r, name, pkrkit.ActionPull) {
-		a.challenge(w, name, pkrkit.ActionPull)
+	if !a.authorize(r, name, artifactkit.ActionPull) {
+		a.challenge(w, name, artifactkit.ActionPull)
 		return
 	}
 	registry, repo := splitRegistry(name)
@@ -216,7 +216,7 @@ func (a *Adapter) listTags(w http.ResponseWriter, r *http.Request, name string) 
 
 func (a *Adapter) manifest(w http.ResponseWriter, r *http.Request, name, ref string) {
 	if strings.Contains(ref, ":") {
-		if _, err := pkrkit.ParseDigest(ref); err != nil {
+		if _, err := artifactkit.ParseDigest(ref); err != nil {
 			writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "invalid digest reference"))
 			return
 		}
@@ -225,30 +225,30 @@ func (a *Adapter) manifest(w http.ResponseWriter, r *http.Request, name, ref str
 
 	switch r.Method {
 	case http.MethodHead:
-		if !a.authorize(r, name, pkrkit.ActionPull) {
-			a.challenge(w, name, pkrkit.ActionPull)
+		if !a.authorize(r, name, artifactkit.ActionPull) {
+			a.challenge(w, name, artifactkit.ActionPull)
 			return
 		}
 		a.getManifest(w, r, name, ref, false)
 	case http.MethodGet:
-		if !a.authorize(r, name, pkrkit.ActionPull) {
-			a.challenge(w, name, pkrkit.ActionPull)
+		if !a.authorize(r, name, artifactkit.ActionPull) {
+			a.challenge(w, name, artifactkit.ActionPull)
 			return
 		}
 		a.getManifest(w, r, name, ref, true)
 	case http.MethodPut:
-		if !a.authorize(r, name, pkrkit.ActionPush) {
-			a.challenge(w, name, pkrkit.ActionPush)
+		if !a.authorize(r, name, artifactkit.ActionPush) {
+			a.challenge(w, name, artifactkit.ActionPush)
 			return
 		}
 		a.putManifest(w, r, name, ref, registry)
 	case http.MethodDelete:
-		if !a.authorize(r, name, pkrkit.ActionDelete) {
-			a.challenge(w, name, pkrkit.ActionDelete)
+		if !a.authorize(r, name, artifactkit.ActionDelete) {
+			a.challenge(w, name, artifactkit.ActionDelete)
 			return
 		}
 		if err := a.state.Registry.Meta.Delete(r.Context(), "oci", name, ref); err != nil {
-			if pkrkit.IsUnknown(err) {
+			if artifactkit.IsUnknown(err) {
 				writeJSON(w, http.StatusNotFound, ociError("MANIFEST_UNKNOWN", "manifest unknown"))
 			} else {
 				writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
@@ -279,11 +279,11 @@ func (a *Adapter) getManifest(w http.ResponseWriter, r *http.Request, name, ref 
 			dgst := "sha256:" + hexDigest(mbody)
 			blobs := extractBlobs(mbody)
 			// Store both the reference and the digest as versions.
-			a.state.Registry.Meta.Put(r.Context(), pkrkit.Artifact{
+			a.state.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
 				Format: "oci", Repository: repo, Version: ref,
 				MediaType: ct, Proprietary: mbody, Digest: dgst, Blobs: blobs, Source: "pull",
 			})
-			a.state.Registry.Meta.Put(r.Context(), pkrkit.Artifact{
+			a.state.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
 				Format: "oci", Repository: repo, Version: dgst,
 				MediaType: ct, Proprietary: mbody, Digest: dgst, Blobs: blobs, Source: "pull",
 			})
@@ -307,7 +307,7 @@ func (a *Adapter) putManifest(w http.ResponseWriter, r *http.Request, name, ref,
 	sha := "sha256:" + hexDigest(body)
 	eff := sha
 	if strings.Contains(ref, ":") {
-		if _, err := pkrkit.ParseDigest(ref); err != nil {
+		if _, err := artifactkit.ParseDigest(ref); err != nil {
 			writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "invalid digest"))
 			return
 		}
@@ -321,7 +321,7 @@ func (a *Adapter) putManifest(w http.ResponseWriter, r *http.Request, name, ref,
 		}
 	}
 	blobs := extractBlobs(body)
-	art := pkrkit.Artifact{Format: "oci", Repository: name, Version: ref,
+	art := artifactkit.Artifact{Format: "oci", Repository: name, Version: ref,
 		MediaType: mt, Proprietary: body, Digest: eff, Blobs: blobs, Source: "push"}
 	if err := a.state.Registry.Meta.Put(r.Context(), art); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
@@ -344,26 +344,26 @@ func (a *Adapter) putManifest(w http.ResponseWriter, r *http.Request, name, ref,
 }
 
 func (a *Adapter) blob(w http.ResponseWriter, r *http.Request, name, digest string) {
-	if _, err := pkrkit.ParseDigest(digest); err != nil {
+	if _, err := artifactkit.ParseDigest(digest); err != nil {
 		writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "invalid digest"))
 		return
 	}
 	switch r.Method {
 	case http.MethodHead:
-		if !a.authorize(r, name, pkrkit.ActionPull) {
-			a.challenge(w, name, pkrkit.ActionPull)
+		if !a.authorize(r, name, artifactkit.ActionPull) {
+			a.challenge(w, name, artifactkit.ActionPull)
 			return
 		}
 		a.checkBlob(w, r, digest)
 	case http.MethodGet:
-		if !a.authorize(r, name, pkrkit.ActionPull) {
-			a.challenge(w, name, pkrkit.ActionPull)
+		if !a.authorize(r, name, artifactkit.ActionPull) {
+			a.challenge(w, name, artifactkit.ActionPull)
 			return
 		}
 		a.getBlob(w, r, name, digest)
 	case http.MethodDelete:
-		if !a.authorize(r, name, pkrkit.ActionDelete) {
-			a.challenge(w, name, pkrkit.ActionDelete)
+		if !a.authorize(r, name, artifactkit.ActionDelete) {
+			a.challenge(w, name, artifactkit.ActionDelete)
 			return
 		}
 		if err := a.state.Registry.Blobs.Delete(r.Context(), digest); err != nil {
@@ -457,8 +457,8 @@ func (a *Adapter) getBlob(w http.ResponseWriter, r *http.Request, name, digest s
 }
 
 func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session string) {
-	if !a.authorize(r, name, pkrkit.ActionPush) {
-		a.challenge(w, name, pkrkit.ActionPush)
+	if !a.authorize(r, name, artifactkit.ActionPush) {
+		a.challenge(w, name, artifactkit.ActionPush)
 		return
 	}
 	switch r.Method {
@@ -473,7 +473,7 @@ func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session s
 			}
 		}
 		if dgst := r.URL.Query().Get("digest"); dgst != "" {
-			if _, err := pkrkit.ParseDigest(dgst); err != nil {
+			if _, err := artifactkit.ParseDigest(dgst); err != nil {
 				writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "invalid digest"))
 				return
 			}
@@ -494,7 +494,7 @@ func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session s
 		}
 		// Start a session.
 		sessID := "sess-" + a.nextSessionID()
-		a.state.Registry.Meta.SaveUpload(r.Context(), pkrkit.UploadRecord{ID: sessID, Format: "oci", Repository: name})
+		a.state.Registry.Meta.SaveUpload(r.Context(), artifactkit.UploadRecord{ID: sessID, Format: "oci", Repository: name})
 		w.Header().Set("Location", "/v2/"+name+"/blobs/uploads/"+sessID)
 		w.Header().Set("Docker-Upload-UUID", sessID)
 		w.WriteHeader(http.StatusAccepted)
@@ -528,7 +528,7 @@ func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session s
 			writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "digest parameter missing"))
 			return
 		}
-		if _, err := pkrkit.ParseDigest(dgst); err != nil {
+		if _, err := artifactkit.ParseDigest(dgst); err != nil {
 			writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "invalid digest"))
 			return
 		}
@@ -556,15 +556,15 @@ func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session s
 }
 
 func (a *Adapter) listReferrers(w http.ResponseWriter, r *http.Request, name, subject string) {
-	if !a.authorize(r, name, pkrkit.ActionPull) {
-		a.challenge(w, name, pkrkit.ActionPull)
+	if !a.authorize(r, name, artifactkit.ActionPull) {
+		a.challenge(w, name, artifactkit.ActionPull)
 		return
 	}
 	filter := r.URL.Query().Get("artifactType")
 	var manifestList []map[string]any
 	versions, _ := a.state.Registry.Meta.ListVersions(r.Context(), "oci", name)
 	for _, v := range versions {
-		if _, err := pkrkit.ParseDigest(v); err != nil {
+		if _, err := artifactkit.ParseDigest(v); err != nil {
 			continue
 		}
 		art, err := a.state.Registry.Meta.Get(r.Context(), "oci", name, v)

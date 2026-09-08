@@ -24,14 +24,14 @@ import (
 )
 
 type State struct {
-	Registry *pkrkit.Registry
-	Auth     pkrkit.Auth
+	Registry *artifactkit.Registry
+	Auth     artifactkit.Auth
 	SelfBase string
 }
 
-func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) {
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	s := &State{Registry: reg}
-	if a, ok := cfg["auth"].(pkrkit.Auth); ok {
+	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
 	if v, ok := cfg["self_base"].(string); ok {
@@ -40,7 +40,7 @@ func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) 
 	return s, nil
 }
 
-func init() { pkrkit.Register("npm", NewHandler) }
+func init() { artifactkit.Register("npm", NewHandler) }
 
 func (s *State) base() string {
 	if s.SelfBase == "" {
@@ -74,19 +74,19 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case path == "":
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"db_name": "registry", "doc_count": 0})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"db_name": "registry", "doc_count": 0})
 	case path == "-/ping":
-		pkrkit.JSON(w, http.StatusOK, map[string]any{})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{})
 	case path == "-/whoami":
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"username": "anonymous"})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"username": "anonymous"})
 	case path == "-/all":
 		s.allPackages(w, r)
 	case path == "-/v1/login":
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true, "token": "npm-anonymous"})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true, "token": "npm-anonymous"})
 	case strings.HasPrefix(path, "-/npm/v1/security"):
 		s.securityStub(w, r, path)
 	case path == "-/npm/v1/user":
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"name": "anonymous", "email": "", "email_verified": false, "tfa": nil})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"name": "anonymous", "email": "", "email_verified": false, "tfa": nil})
 	case strings.HasPrefix(path, "-/npm/v1/tokens"):
 		s.tokens(w, r, method)
 	case strings.HasPrefix(path, "-/user/"):
@@ -101,12 +101,12 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimSuffix(path, "/deprecate")
 		s.deprecate(w, r, name)
 	case method == http.MethodPut:
-		if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
 		s.publish(w, r, unescapeName(path))
 	case method == http.MethodDelete:
-		if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
 		s.deleteName(w, r, unescapeName(path))
@@ -138,31 +138,31 @@ func (s *State) allPackages(w http.ResponseWriter, r *http.Request) {
 	entries := map[string]any{}
 	for _, repo := range repos {
 		versions, _ := s.Registry.Meta.ListVersions(r.Context(), "npm", repo)
-		latest := pkrkit.HighestVersion(versions)
+		latest := artifactkit.HighestVersion(versions)
 		if latest == "" && len(versions) > 0 {
 			latest = versions[len(versions)-1]
 		}
 		entries[repo] = map[string]any{"name": repo, "latest": latest}
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"db_name": "registry", "_updated": 0, "entries": entries})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"db_name": "registry", "_updated": 0, "entries": entries})
 }
 
 func (s *State) securityStub(w http.ResponseWriter, r *http.Request, path string) {
 	if strings.Contains(path, "/quick") {
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"secret": "audits-quick"})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"secret": "audits-quick"})
 		return
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{})
 }
 
 func (s *State) tokens(w http.ResponseWriter, r *http.Request, method string) {
 	switch method {
 	case http.MethodDelete:
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	case http.MethodPost:
-		pkrkit.JSON(w, http.StatusCreated, map[string]any{"token": "npm-anonymous", "key": "npm-anonymous"})
+		artifactkit.JSON(w, http.StatusCreated, map[string]any{"token": "npm-anonymous", "key": "npm-anonymous"})
 	default:
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"objects": []any{}, "total": 0})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"objects": []any{}, "total": 0})
 	}
 }
 
@@ -172,11 +172,11 @@ func (s *State) couchUser(w http.ResponseWriter, r *http.Request, path, method s
 	name = name[strings.LastIndex(name, ":")+1:]
 	switch method {
 	case http.MethodPut, http.MethodPost:
-		pkrkit.JSON(w, http.StatusCreated, map[string]any{"ok": true, "name": name, "token": "npm-anonymous", "id": "org.couchdb.user:" + name, "rev": "1"})
+		artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true, "name": name, "token": "npm-anonymous", "id": "org.couchdb.user:" + name, "rev": "1"})
 	case http.MethodDelete:
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"_id": path, "name": path})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"_id": path, "name": path})
 	}
 }
 
@@ -189,25 +189,25 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		versions, _ := s.Registry.Meta.ListVersions(r.Context(), "npm", repo)
-		latest := pkrkit.HighestVersion(versions)
+		latest := artifactkit.HighestVersion(versions)
 		if latest == "" && len(versions) > 0 {
 			latest = versions[len(versions)-1]
 		}
 		objects = append(objects, map[string]any{"package": map[string]any{"name": repo, "version": latest}})
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"objects": objects, "total": len(objects), "time": ""})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"objects": objects, "total": len(objects), "time": ""})
 }
 
 func (s *State) distTags(w http.ResponseWriter, r *http.Request, rel, method string) {
 	rest := strings.TrimSuffix(rel, "/")
 	if !strings.HasPrefix(rest, "-/package/") {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	rest = strings.TrimPrefix(rest, "-/package/")
 	idx := strings.Index(rest, "/dist-tags")
 	if idx < 0 {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	pkg := unescapeName(rest[:idx])
@@ -218,39 +218,39 @@ func (s *State) distTags(w http.ResponseWriter, r *http.Request, rel, method str
 		dt := s.distTagsMap(r.Context(), pkg)
 		if tag != "" {
 			if v, ok := dt[tag]; ok {
-				pkrkit.JSON(w, http.StatusOK, v)
+				artifactkit.JSON(w, http.StatusOK, v)
 				return
 			}
-			pkrkit.Error(w, http.StatusNotFound, "not found")
+			artifactkit.Error(w, http.StatusNotFound, "not found")
 			return
 		}
-		pkrkit.JSON(w, http.StatusOK, dt)
+		artifactkit.JSON(w, http.StatusOK, dt)
 	case http.MethodPut:
-		if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
 		version := strings.Trim(strings.TrimSpace(string(body)), `"`)
 		if version == "" {
-			pkrkit.Error(w, http.StatusNotFound, "missing version")
+			artifactkit.Error(w, http.StatusNotFound, "missing version")
 			return
 		}
 		dt := s.distTagsMap(r.Context(), pkg)
 		if _, err := s.Registry.Meta.Get(r.Context(), "npm", pkg, version); err != nil {
-			pkrkit.Error(w, http.StatusNotFound, "version "+version+" not found")
+			artifactkit.Error(w, http.StatusNotFound, "version "+version+" not found")
 			return
 		}
 		dt[tag] = version
 		s.saveDistTags(r.Context(), pkg, dt)
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	case http.MethodDelete:
-		if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
 		dt := s.distTagsMap(r.Context(), pkg)
 		delete(dt, tag)
 		s.saveDistTags(r.Context(), pkg, dt)
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -259,7 +259,7 @@ func (s *State) distTags(w http.ResponseWriter, r *http.Request, rel, method str
 func (s *State) distTagsMap(ctx context.Context, pkg string) map[string]any {
 	m := map[string]any{}
 	versions, _ := s.Registry.Meta.ListVersions(ctx, "npm", pkg)
-	latest := pkrkit.HighestVersion(versions)
+	latest := artifactkit.HighestVersion(versions)
 	if latest == "" && len(versions) > 0 {
 		latest = versions[len(versions)-1]
 	}
@@ -280,7 +280,7 @@ func (s *State) distTagsMap(ctx context.Context, pkg string) map[string]any {
 func (s *State) saveDistTags(ctx context.Context, pkg string, dt map[string]any) {
 	root := map[string]any{"dist-tags": dt}
 	b, _ := json.Marshal(root)
-	_ = s.Registry.Meta.Put(ctx, pkrkit.Artifact{Format: "npm", Repository: pkg, Version: "", Proprietary: b})
+	_ = s.Registry.Meta.Put(ctx, artifactkit.Artifact{Format: "npm", Repository: pkg, Version: "", Proprietary: b})
 }
 
 func (s *State) deprecate(w http.ResponseWriter, r *http.Request, name string) {
@@ -311,13 +311,13 @@ func (s *State) deprecate(w http.ResponseWriter, r *http.Request, name string) {
 			}
 		}
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *State) rev(w http.ResponseWriter, r *http.Request, rel, method string) {
 	i := strings.Index(rel, "/-rev/")
 	if i < 0 {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	pkg := unescapeName(rel[:i])
@@ -328,7 +328,7 @@ func (s *State) rev(w http.ResponseWriter, r *http.Request, rel, method string) 
 			s.removeVersion(r.Context(), pkg, v)
 		}
 		_ = s.Registry.Meta.Delete(r.Context(), "npm", pkg, "")
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	case http.MethodPut:
 		body, _ := io.ReadAll(r.Body)
 		var doc map[string]any
@@ -337,9 +337,9 @@ func (s *State) rev(w http.ResponseWriter, r *http.Request, rel, method string) 
 				s.reconcileVersions(r.Context(), name, doc)
 			}
 		}
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
-		pkrkit.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		artifactkit.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -361,7 +361,7 @@ func (s *State) reconcileVersions(ctx context.Context, pkg string, doc map[strin
 func (s *State) deleteName(w http.ResponseWriter, r *http.Request, name string) {
 	if i := strings.LastIndex(name, "/"); i > 0 {
 		s.removeVersion(r.Context(), name[:i], name[i+1:])
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
 	vs, _ := s.Registry.Meta.ListVersions(r.Context(), "npm", name)
@@ -369,7 +369,7 @@ func (s *State) deleteName(w http.ResponseWriter, r *http.Request, name string) 
 		s.removeVersion(r.Context(), name, v)
 	}
 	_ = s.Registry.Meta.Delete(r.Context(), "npm", name, "")
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *State) removeVersion(ctx context.Context, pkg, version string) {
@@ -383,20 +383,20 @@ func (s *State) removeVersion(ctx context.Context, pkg, version string) {
 
 func (s *State) metadata(w http.ResponseWriter, r *http.Request, name string) {
 	if body := s.aggregateMetadata(r.Context(), name); body != "" {
-		pkrkit.JSON(w, http.StatusOK, json.RawMessage(body))
+		artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
 		return
 	}
 	remote, err := s.Registry.Remote("npm", "")
 	if err != nil {
-		pkrkit.Error(w, http.StatusNotFound, "package not found")
+		artifactkit.Error(w, http.StatusNotFound, "package not found")
 		return
 	}
-	body, err := remote.GetCached(r.Context(), pkrkit.SharedIndexCache(), "/"+encodeName(name))
+	body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/"+encodeName(name))
 	if err != nil {
-		pkrkit.Error(w, http.StatusNotFound, "package not found")
+		artifactkit.Error(w, http.StatusNotFound, "package not found")
 		return
 	}
-	pkrkit.JSON(w, http.StatusOK, json.RawMessage(s.rewriteTarballURLs(body, name)))
+	artifactkit.JSON(w, http.StatusOK, json.RawMessage(s.rewriteTarballURLs(body, name)))
 }
 
 func (s *State) aggregateMetadata(ctx context.Context, name string) string {
@@ -410,7 +410,7 @@ func (s *State) aggregateMetadata(ctx context.Context, name string) string {
 	// 3.0.1 is cached). Overlay upstream versions (tarballs rewritten to self)
 	// beneath them, then re-apply local metadata over the same version.
 	if remote, err := s.Registry.Remote("npm", ""); err == nil {
-		if body, err := remote.GetCached(ctx, pkrkit.SharedIndexCache(), "/"+encodeName(name)); err == nil {
+		if body, err := remote.GetCached(ctx, artifactkit.SharedIndexCache(), "/"+encodeName(name)); err == nil {
 			var up map[string]any
 			if json.Unmarshal([]byte(body), &up) == nil {
 				if uv, ok := up["versions"].(map[string]any); ok {
@@ -461,7 +461,7 @@ func (s *State) aggregateMetadata(ctx context.Context, name string) string {
 		pj["dist"] = dist
 		vmap[v] = pj
 	}
-	latest := pkrkit.HighestVersion(versions)
+	latest := artifactkit.HighestVersion(versions)
 	if latest == "" && len(versions) > 0 {
 		latest = versions[len(versions)-1]
 	}
@@ -508,7 +508,7 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, name, file strin
 					}
 					data, _ := io.ReadAll(rd)
 					rd.Close()
-					pkrkit.BlobResponse(w, data, file)
+					artifactkit.BlobResponse(w, data, file)
 					return
 				}
 			}
@@ -516,12 +516,12 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, name, file strin
 	}
 	remote, err := s.Registry.Remote("npm", "")
 	if err != nil {
-		pkrkit.Error(w, http.StatusNotFound, "tarball not found")
+		artifactkit.Error(w, http.StatusNotFound, "tarball not found")
 		return
 	}
 	data, err := remote.GetBytes(r.Context(), "/"+encodeName(name)+"/-/"+file)
 	if err != nil {
-		pkrkit.Error(w, http.StatusNotFound, "tarball not found")
+		artifactkit.Error(w, http.StatusNotFound, "tarball not found")
 		return
 	}
 	ver, pkgJSON := parseTarballPackageJSON(data)
@@ -529,7 +529,7 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, name, file strin
 		ver = versionFromTarballName(file, name)
 	}
 	s.storeVersion(r.Context(), name, ver, data, pkgJSON, "pull")
-	pkrkit.BlobResponse(w, data, file)
+	artifactkit.BlobResponse(w, data, file)
 }
 
 func versionFromTarballName(file, name string) string {
@@ -581,13 +581,13 @@ func (s *State) publish(w http.ResponseWriter, r *http.Request, name string) {
 			pkgName = v
 		}
 		s.storeVersion(r.Context(), pkgName, ver, data, pkgJSON, "push")
-		pkrkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
 		return
 	}
 	// CouchDB-style publish document.
 	var payload map[string]any
 	if json.Unmarshal(data, &payload) != nil {
-		pkrkit.Error(w, http.StatusBadRequest, "invalid payload")
+		artifactkit.Error(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
 	pkgName := name
@@ -609,7 +609,7 @@ func (s *State) publish(w http.ResponseWriter, r *http.Request, name string) {
 		}
 	}
 	if version == "" {
-		pkrkit.Error(w, http.StatusBadRequest, "cannot determine version")
+		artifactkit.Error(w, http.StatusBadRequest, "cannot determine version")
 		return
 	}
 	var tarball []byte
@@ -626,7 +626,7 @@ func (s *State) publish(w http.ResponseWriter, r *http.Request, name string) {
 		}
 	}
 	s.storeVersion(r.Context(), pkgName, version, tarball, pkgJSON, "push")
-	pkrkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
+	artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
 }
 
 func (s *State) storeVersion(ctx context.Context, name, version string, tarball []byte, pkgJSON map[string]any, source string) {
@@ -636,15 +636,15 @@ func (s *State) storeVersion(ctx context.Context, name, version string, tarball 
 	if version == "" {
 		version = "0.0.0"
 	}
-	art := pkrkit.Artifact{Format: "npm", Repository: name, Version: version, MediaType: "application/json", Source: source}
+	art := artifactkit.Artifact{Format: "npm", Repository: name, Version: version, MediaType: "application/json", Source: source}
 	if pkgJSON != nil {
 		art.Proprietary, _ = json.Marshal(pkgJSON)
 	}
 	if len(tarball) > 0 {
-		h, _ := pkrkit.ComputeHashesBytes(tarball)
+		h, _ := artifactkit.ComputeHashesBytes(tarball)
 		digest := "sha256:" + h.SHA256
 		if _, err := s.Registry.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(tarball)); err == nil {
-			art.Blobs = append(art.Blobs, pkrkit.Descriptor{Digest: digest, Size: int64(len(tarball)), Name: tarballFilename(name, version)})
+			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(tarball)), Name: tarballFilename(name, version)})
 		}
 	}
 	_ = s.Registry.Meta.Put(ctx, art)

@@ -1,4 +1,4 @@
-package pkrkit
+package artifactkit
 
 import (
 	"encoding/json"

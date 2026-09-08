@@ -11,7 +11,7 @@ import (
 	"github.com/easylab-platform/artifact/core/store"
 )
 
-func testRegistry(t *testing.T) *pkrkit.Registry {
+func testRegistry(t *testing.T) *artifactkit.Registry {
 	t.Helper()
 	blobs, err := store.NewFileBlobStore(t.TempDir())
 	if err != nil {
@@ -22,9 +22,9 @@ func testRegistry(t *testing.T) *pkrkit.Registry {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { meta.Close() })
-	return &pkrkit.Registry{
+	return &artifactkit.Registry{
 		Blobs: blobs, Meta: meta,
-		Upstreams: &pkrkit.Upstreams{Defaults: map[string]string{"oci": "https://registry-1.docker.io"}, AirGap: true},
+		Upstreams: &artifactkit.Upstreams{Defaults: map[string]string{"oci": "https://registry-1.docker.io"}, AirGap: true},
 	}
 }
 
@@ -55,7 +55,7 @@ func TestServeHTTPPingAndCatalog(t *testing.T) {
 
 	// put blob single-shot
 	data := []byte("hello oci")
-	digest := pkrkit.DigestOf(data)
+	digest := artifactkit.DigestOf(data)
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v2/myorg/myrepo/blobs/uploads/?digest="+digest, strings.NewReader(string(data)))
 	putResp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -91,7 +91,7 @@ func TestServeHTTPPingAndCatalog(t *testing.T) {
 
 func TestSplitRegistry(t *testing.T) {
 	cases := map[string][2]string{
-		"ghcr.io/foo/bar": {"ghcr.io", "foo/bar"},
+		"ghcr.io/foo/bar":  {"ghcr.io", "foo/bar"},
 		"localhost:5000/x": {"localhost:5000", "x"},
 		"library/alpine":   {"", "library/alpine"},
 		"alpine":           {"", "alpine"},

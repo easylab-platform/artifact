@@ -1,4 +1,4 @@
-package pkrkit
+package artifactkit
 
 type Hashes struct {
 	SHA256 string

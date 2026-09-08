@@ -17,14 +17,14 @@ import (
 )
 
 type State struct {
-	Registry *pkrkit.Registry
-	Auth     pkrkit.Auth
+	Registry *artifactkit.Registry
+	Auth     artifactkit.Auth
 	SelfBase string
 }
 
-func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) {
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	s := &State{Registry: reg}
-	if a, ok := cfg["auth"].(pkrkit.Auth); ok {
+	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
 	if v, ok := cfg["self_base"].(string); ok {
@@ -33,7 +33,7 @@ func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) 
 	return s, nil
 }
 
-func init() { pkrkit.Register("helm", NewHandler) }
+func init() { artifactkit.Register("helm", NewHandler) }
 
 func (s *State) base() string {
 	if s.SelfBase == "" {
@@ -52,7 +52,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if s.indexYaml(w, r) {
 			return
 		}
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 	case strings.HasPrefix(path, "charts/"):
 		s.chart(w, r, strings.TrimPrefix(path, "charts/"))
 	case path == "api/charts":
@@ -64,7 +64,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "api/charts/"):
 		s.deleteChart(w, r, strings.TrimPrefix(path, "api/charts/"))
 	default:
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 	}
 }
 
@@ -104,7 +104,7 @@ func (s *State) indexYaml(w http.ResponseWriter, r *http.Request) bool {
 			}
 		}
 	}
-	pkrkit.Text(w, http.StatusOK, out.String(), "application/yaml")
+	artifactkit.Text(w, http.StatusOK, out.String(), "application/yaml")
 	return true
 }
 
@@ -125,7 +125,7 @@ func (s *State) chart(w http.ResponseWriter, r *http.Request, filename string) {
 					}
 					data, _ := io.ReadAll(rd)
 					rd.Close()
-					pkrkit.BlobResponse(w, data, filename)
+					artifactkit.BlobResponse(w, data, filename)
 					return
 				}
 			}
@@ -135,22 +135,22 @@ func (s *State) chart(w http.ResponseWriter, r *http.Request, filename string) {
 	remote, _ := s.Registry.Remote("helm", "")
 	if remote != nil {
 		if body, err := remote.GetBytes(r.Context(), "/packages/"+filename); err == nil {
-			pkrkit.BlobResponse(w, body, filename)
+			artifactkit.BlobResponse(w, body, filename)
 			return
 		}
 	}
-	pkrkit.Error(w, http.StatusNotFound, "chart not found")
+	artifactkit.Error(w, http.StatusNotFound, "chart not found")
 }
 
 func (s *State) upload(w http.ResponseWriter, r *http.Request) {
-	if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
 	data, _ := io.ReadAll(r.Body)
 	ct := r.Header.Get("Content-Type")
 	var fname string
 	if strings.HasPrefix(ct, "multipart/form-data") {
-		fname, data, _ = pkrkit.ExtractFirstFile(data, ct)
+		fname, data, _ = artifactkit.ExtractFirstFile(data, ct)
 	}
 	if len(data) == 0 {
 		data = bodyOf(r)
@@ -176,7 +176,7 @@ func (s *State) upload(w http.ResponseWriter, r *http.Request) {
 		fname = name + "-" + version + ".tgz"
 	}
 	storeChart(s.Registry, name, version, fname, data, r.Context())
-	pkrkit.JSON(w, http.StatusCreated, map[string]any{"saved": true})
+	artifactkit.JSON(w, http.StatusCreated, map[string]any{"saved": true})
 }
 
 func (s *State) deleteChart(w http.ResponseWriter, r *http.Request, rest string) {
@@ -184,7 +184,7 @@ func (s *State) deleteChart(w http.ResponseWriter, r *http.Request, rest string)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
 	parts := strings.Split(rest, "/")
@@ -197,22 +197,22 @@ func (s *State) deleteChart(w http.ResponseWriter, r *http.Request, rest string)
 			removeVersion(s.Registry, name, v, r.Context())
 		}
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"deleted": true})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
-func storeChart(reg *pkrkit.Registry, name, version, filename string, data []byte, ctx context.Context) {
-	art := pkrkit.Artifact{Format: "helm", Repository: name, Version: version}
+func storeChart(reg *artifactkit.Registry, name, version, filename string, data []byte, ctx context.Context) {
+	art := artifactkit.Artifact{Format: "helm", Repository: name, Version: version}
 	if len(data) > 0 {
-		h, _ := pkrkit.ComputeHashesBytes(data)
+		h, _ := artifactkit.ComputeHashesBytes(data)
 		digest := "sha256:" + h.SHA256
 		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, pkrkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
+			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 	}
 	_ = reg.Meta.Put(ctx, art)
 }
 
-func removeVersion(reg *pkrkit.Registry, name, version string, ctx context.Context) {
+func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.Context) {
 	if art, err := reg.Meta.Get(ctx, "helm", name, version); err == nil {
 		for _, b := range art.Blobs {
 			_ = reg.Blobs.Delete(ctx, b.Digest)

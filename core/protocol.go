@@ -1,4 +1,4 @@
-package pkrkit
+package artifactkit
 
 import "net/http"
 
@@ -15,7 +15,7 @@ const (
 // adapter implements Register so the registry knows its format name; the
 // concrete handler is a http.Handler mounted at a caller-chosen prefix.
 //
-// Implementations must only depend on *pkrkit.Registry and never on other
+// Implementations must only depend on *artifactkit.Registry and never on other
 // protocol packages. This invariant is what keeps the multi-repository
 // module graph free of version conflicts.
 type Protocol interface {
@@ -32,7 +32,7 @@ type ProtocolEntry struct {
 }
 
 // registry is the process-global compile-time protocol registry. Third-party
-// adapters call Register in their init() or a callable; cmd-pkr imports the
+// adapters call Register in their init() or a callable; cmd-artifact imports the
 // adapter package (blank import) to pull it in.
 var registry = map[string]func(reg *Registry, cfg map[string]any) (http.Handler, error){}
 
@@ -40,7 +40,7 @@ var registry = map[string]func(reg *Registry, cfg map[string]any) (http.Handler,
 // at start-up time, which is a programmer error we want surfaced eagerly.
 func Register(name string, build func(reg *Registry, cfg map[string]any) (http.Handler, error)) {
 	if _, ok := registry[name]; ok {
-		panic("pkrkit: protocol already registered: " + name)
+		panic("artifactkit: protocol already registered: " + name)
 	}
 	registry[name] = build
 }

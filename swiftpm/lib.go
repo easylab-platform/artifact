@@ -21,14 +21,14 @@ import (
 )
 
 type State struct {
-	Registry *pkrkit.Registry
-	Auth     pkrkit.Auth
+	Registry *artifactkit.Registry
+	Auth     artifactkit.Auth
 	SelfBase string
 }
 
-func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) {
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	s := &State{Registry: reg}
-	if a, ok := cfg["auth"].(pkrkit.Auth); ok {
+	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
 	if v, ok := cfg["self_base"].(string); ok {
@@ -37,7 +37,7 @@ func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) 
 	return s, nil
 }
 
-func init() { pkrkit.Register("swift", NewHandler) }
+func init() { artifactkit.Register("swift", NewHandler) }
 
 func (s *State) base() string {
 	if s.SelfBase == "" {
@@ -69,14 +69,14 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Version", "1")
 		w.WriteHeader(http.StatusOK)
 	case method == http.MethodPut:
-		if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
 		s.putPath(w, r, path)
 	case method == http.MethodGet || method == http.MethodHead:
 		parts := strings.Split(path, "/")
 		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-			pkrkit.Error(w, http.StatusNotFound, "invalid path")
+			artifactkit.Error(w, http.StatusNotFound, "invalid path")
 			return
 		}
 		scope, name := parts[0], parts[1]
@@ -93,7 +93,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else if len(parts) == 4 && parts[3] == "Package.swift" {
 			s.packageSwift(w, r, id, parts[2], name)
 		} else {
-			pkrkit.Error(w, http.StatusNotFound, "release not found")
+			artifactkit.Error(w, http.StatusNotFound, "release not found")
 		}
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -104,11 +104,11 @@ func (s *State) login(w http.ResponseWriter, r *http.Request) {
 	if s.Auth != nil {
 		if u := s.Auth.Authenticate(r.Context(), r); u != "" {
 			tok := s.Auth.IssueToken(r.Context(), u, nil, 3600)
-			pkrkit.JSON(w, http.StatusOK, map[string]any{"token": tok})
+			artifactkit.JSON(w, http.StatusOK, map[string]any{"token": tok})
 			return
 		}
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"token": "valid"})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"token": "valid"})
 }
 
 func (s *State) identifiers(w http.ResponseWriter, r *http.Request) {
@@ -119,11 +119,11 @@ func (s *State) identifiers(w http.ResponseWriter, r *http.Request) {
 		// Persist the git URL so SCM-to-registry can enumerate tags + serve
 		// source archives (mirrors the reference `swift-git:{id}` meta slot).
 		_ = s.Registry.Meta.SetMeta(r.Context(), "swift", "swift-git:"+result, []byte(id))
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"identifiers": []string{result}})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"identifiers": []string{result}})
 		return
 	}
 	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "swift")
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"identifiers": repos})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"identifiers": repos})
 }
 
 // gitURLFor returns the persisted git URL for an identifier ("" when absent).
@@ -200,7 +200,7 @@ func tryParseSemver(raw string) (major, minor, patch int, prerelease string, ok 
 // gitArchive builds a source archive (zip) of a repo at a tag using
 // `git archive`. Falls back to an empty zip on error.
 func (s *State) gitArchive(ctx context.Context, url, tag string) []byte {
-	dir, err := os.MkdirTemp("", "pkr-swift-git-*")
+	dir, err := os.MkdirTemp("", "artifact-swift-git-*")
 	if err != nil {
 		return nil
 	}
@@ -236,7 +236,7 @@ func (s *State) releases(w http.ResponseWriter, r *http.Request, scope, name, id
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "swift", id)
 	rels := map[string]any{}
 	for _, v := range versions {
-		rels[v] = map[string]any{"url": s.base() + "/" + pkrkit.URLencode(scope) + "/" + pkrkit.URLencode(name) + "/" + v + ".zip"}
+		rels[v] = map[string]any{"url": s.base() + "/" + artifactkit.URLencode(scope) + "/" + artifactkit.URLencode(name) + "/" + v + ".zip"}
 	}
 	if len(rels) == 0 {
 		// SCM-to-registry: if a git URL was persisted for this id, enumerate
@@ -244,24 +244,24 @@ func (s *State) releases(w http.ResponseWriter, r *http.Request, scope, name, id
 		if gu := s.gitURLFor(r.Context(), id); gu != "" {
 			if tags := s.gitTags(r.Context(), gu); len(tags) > 0 {
 				for _, t := range tags {
-					rels[t] = map[string]any{"url": s.base() + "/" + pkrkit.URLencode(scope) + "/" + pkrkit.URLencode(name) + "/" + t + ".zip"}
+					rels[t] = map[string]any{"url": s.base() + "/" + artifactkit.URLencode(scope) + "/" + artifactkit.URLencode(name) + "/" + t + ".zip"}
 				}
 				w.Header().Set("Content-Version", "1")
-				pkrkit.JSON(w, http.StatusOK, map[string]any{"releases": rels})
+				artifactkit.JSON(w, http.StatusOK, map[string]any{"releases": rels})
 				return
 			}
 		}
 		remote, err := s.Registry.Remote("swift", "")
 		if err == nil {
-			if body, err := remote.GetCached(r.Context(), pkrkit.SharedIndexCache(), "/"+pkrkit.URLencode(scope)+"="+pkrkit.URLencode(name)); err == nil {
+			if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/"+artifactkit.URLencode(scope)+"="+artifactkit.URLencode(name)); err == nil {
 				w.Header().Set("Content-Version", "1")
-				pkrkit.JSON(w, http.StatusOK, json.RawMessage(body))
+				artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
 				return
 			}
 		}
 	}
 	w.Header().Set("Content-Version", "1")
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"releases": rels})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"releases": rels})
 }
 
 func (s *State) versionMeta(w http.ResponseWriter, r *http.Request, id, version string) {
@@ -270,7 +270,7 @@ func (s *State) versionMeta(w http.ResponseWriter, r *http.Request, id, version 
 		checksum = art.Blobs[0].Hex()
 	}
 	w.Header().Set("Content-Version", "1")
-	pkrkit.JSON(w, http.StatusOK, map[string]any{
+	artifactkit.JSON(w, http.StatusOK, map[string]any{
 		"id": id, "version": version,
 		"resources": []any{map[string]any{"name": "source-archive", "type": "application/zip", "checksum": checksum}},
 		"metadata":  map[string]any{"description": ""}, "publishedAt": "2024-01-01T00:00:00Z",
@@ -294,7 +294,7 @@ func (s *State) sourceZip(w http.ResponseWriter, r *http.Request, id, version, n
 			return
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "swift", "", "/"+pkrkit.URLencode(id)+"/"+version+".zip")
+	fetched, err := s.Registry.Fetch(r.Context(), "swift", "", "/"+artifactkit.URLencode(id)+"/"+version+".zip")
 	if err != nil {
 		// SCM-to-registry: build a source archive from the persisted git repo.
 		if gu := s.gitURLFor(r.Context(), id); gu != "" {
@@ -307,7 +307,7 @@ func (s *State) sourceZip(w http.ResponseWriter, r *http.Request, id, version, n
 				return
 			}
 		}
-		pkrkit.JSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+		artifactkit.JSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
 		return
 	}
 	storeVersionSource(s.Registry, id, version, filename, fetched.Data, "pull", r.Context())
@@ -328,20 +328,20 @@ func (s *State) packageSwift(w http.ResponseWriter, r *http.Request, id, version
 			rd.Close()
 			if manifest, ok := extractPackageSwift(data); ok {
 				w.Header().Set("Content-Version", "1")
-				pkrkit.Text(w, http.StatusOK, manifest, "text/x-swift")
+				artifactkit.Text(w, http.StatusOK, manifest, "text/x-swift")
 				return
 			}
 		}
 	}
 	manifest := "// swift-tools-version:5.9\nimport PackageDescription\n\nlet package = Package(\n    name: \"" + name + "\",\n    products: [.library(name: \"" + name + "\", targets: [\"" + name + "\"])],\n    targets: [.target(name: \"" + name + "\")]\n)\n"
 	w.Header().Set("Content-Version", "1")
-	pkrkit.Text(w, http.StatusOK, manifest, "text/x-swift")
+	artifactkit.Text(w, http.StatusOK, manifest, "text/x-swift")
 }
 
 func (s *State) putPath(w http.ResponseWriter, r *http.Request, path string) {
 	parts := strings.Split(path, "/")
 	if len(parts) != 3 {
-		pkrkit.JSON(w, http.StatusBadRequest, map[string]any{"error": "invalid upload path"})
+		artifactkit.JSON(w, http.StatusBadRequest, map[string]any{"error": "invalid upload path"})
 		return
 	}
 	scope, name, ver := parts[0], parts[1], parts[2]
@@ -350,32 +350,32 @@ func (s *State) putPath(w http.ResponseWriter, r *http.Request, path string) {
 	ct := r.Header.Get("Content-Type")
 	zipData := raw
 	if strings.HasPrefix(ct, "multipart/form-data") {
-		if d, ok := pkrkit.ExtractField(raw, ct, "source-archive"); ok {
+		if d, ok := artifactkit.ExtractField(raw, ct, "source-archive"); ok {
 			zipData = d
 		}
 	}
 	if len(zipData) == 0 {
-		pkrkit.JSON(w, http.StatusBadRequest, map[string]any{"error": "missing source-archive"})
+		artifactkit.JSON(w, http.StatusBadRequest, map[string]any{"error": "missing source-archive"})
 		return
 	}
-	h, _ := pkrkit.ComputeHashesBytes(zipData)
+	h, _ := artifactkit.ComputeHashesBytes(zipData)
 	filename := name + "-" + ver + ".zip"
 	storeVersionSource(s.Registry, full, ver, filename, zipData, "push", r.Context())
 	w.Header().Set("Content-Version", "1")
-	w.Header().Set("Location", s.base()+"/"+pkrkit.URLencode(scope)+"/"+pkrkit.URLencode(name)+"/"+ver+".zip")
-	pkrkit.JSON(w, http.StatusCreated, map[string]any{
+	w.Header().Set("Location", s.base()+"/"+artifactkit.URLencode(scope)+"/"+artifactkit.URLencode(name)+"/"+ver+".zip")
+	artifactkit.JSON(w, http.StatusCreated, map[string]any{
 		"id": full, "version": ver,
 		"resources": []any{map[string]any{"name": "source-archive", "type": "application/zip", "checksum": h.SHA256}},
 	})
 }
 
-func storeVersionSource(reg *pkrkit.Registry, full, version, filename string, data []byte, source string, ctx context.Context) {
-	art := pkrkit.Artifact{Format: "swift", Repository: full, Version: version, Source: source}
+func storeVersionSource(reg *artifactkit.Registry, full, version, filename string, data []byte, source string, ctx context.Context) {
+	art := artifactkit.Artifact{Format: "swift", Repository: full, Version: version, Source: source}
 	if len(data) > 0 {
-		h, _ := pkrkit.ComputeHashesBytes(data)
+		h, _ := artifactkit.ComputeHashesBytes(data)
 		digest := "sha256:" + h.SHA256
 		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, pkrkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
+			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 	}
 	_ = reg.Meta.Put(ctx, art)

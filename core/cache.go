@@ -1,4 +1,4 @@
-package pkrkit
+package artifactkit
 
 import (
 	"net/url"
@@ -11,7 +11,7 @@ import (
 func mustParseURL(s string) *url.URL {
 	u, err := url.Parse(s)
 	if err != nil {
-		panic("pkrkit: invalid proxy URL: " + s)
+		panic("artifactkit: invalid proxy URL: " + s)
 	}
 	return u
 }
@@ -67,7 +67,7 @@ func (c *MemCache) Get(key string) (string, bool) {
 func (c *MemCache) Set(key, body string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.data) >= c.cap && !pkrkitHas(c.data, key) {
+	if len(c.data) >= c.cap && !artifactkitHas(c.data, key) {
 		// Drop the first expired (or arbitrary) entry.
 		now := time.Now()
 		for k, e := range c.data {
@@ -80,7 +80,7 @@ func (c *MemCache) Set(key, body string) {
 	c.data[key] = &entry{body: body, expires: time.Now().Add(c.ttl)}
 }
 
-func pkrkitHas(m map[string]*entry, key string) bool {
+func artifactkitHas(m map[string]*entry, key string) bool {
 	_, ok := m[key]
 	return ok
 }
@@ -95,6 +95,6 @@ func SharedIndexCache() *MemCache {
 }
 
 var (
-	once              sync.Once
+	once             sync.Once
 	globalIndexCache *MemCache
 )

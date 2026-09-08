@@ -3,7 +3,7 @@
 // miss, fetches manifests/blobs from an upstream registry (default Docker
 // Hub), caches them, and streams to the client.
 //
-// The adapter depends only on *pkrkit.Registry, so an embedder can wire any
+// The adapter depends only on *artifactkit.Registry, so an embedder can wire any
 // BlobStore / IndexStore / Upstreams implementation.
 package oci
 
@@ -24,7 +24,7 @@ const Accept = "application/vnd.oci.image.manifest.v1+json," +
 
 // ParseDigest validates "algo:hex" and returns the lowercase hex portion.
 // sha256/sha512 only.
-func ParseDigest(d string) (string, error) { return pkrkit.ParseDigest(d) }
+func ParseDigest(d string) (string, error) { return artifactkit.ParseDigest(d) }
 
 // ReferenceIsDigest reports whether a tag-or-digest reference is a digest.
 func ReferenceIsDigest(ref string) bool { return strings.Contains(ref, ":") }
@@ -47,7 +47,7 @@ func splitRegistry(name string) (string, string) {
 
 // extractBlobs returns the blob digests referenced by a manifest or index
 // body (config + layers, or nested manifests for an index).
-func extractBlobs(body []byte) []pkrkit.Descriptor {
+func extractBlobs(body []byte) []artifactkit.Descriptor {
 	var probe struct {
 		MediaType string `json:"mediaType"`
 	}
@@ -65,9 +65,9 @@ func extractBlobs(body []byte) []pkrkit.Descriptor {
 		if json.Unmarshal(body, &idx) != nil {
 			return nil
 		}
-		var out []pkrkit.Descriptor
+		var out []artifactkit.Descriptor
 		for _, m := range idx.Manifests {
-			out = append(out, pkrkit.Descriptor{Digest: m.Digest, MediaType: m.MediaType, Size: m.Size})
+			out = append(out, artifactkit.Descriptor{Digest: m.Digest, MediaType: m.MediaType, Size: m.Size})
 		}
 		return out
 	}
@@ -87,12 +87,12 @@ func extractBlobs(body []byte) []pkrkit.Descriptor {
 	if json.Unmarshal(body, &m) != nil {
 		return nil
 	}
-	var out []pkrkit.Descriptor
+	var out []artifactkit.Descriptor
 	if m.Config.Digest != "" {
-		out = append(out, pkrkit.Descriptor{Digest: m.Config.Digest, MediaType: m.Config.MediaType, Size: m.Config.Size})
+		out = append(out, artifactkit.Descriptor{Digest: m.Config.Digest, MediaType: m.Config.MediaType, Size: m.Config.Size})
 	}
 	for _, l := range m.Layers {
-		out = append(out, pkrkit.Descriptor{Digest: l.Digest, MediaType: l.MediaType, Size: l.Size})
+		out = append(out, artifactkit.Descriptor{Digest: l.Digest, MediaType: l.MediaType, Size: l.Size})
 	}
 	return out
 }

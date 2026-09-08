@@ -15,19 +15,19 @@ import (
 )
 
 type State struct {
-	Registry *pkrkit.Registry
-	Auth     pkrkit.Auth
+	Registry *artifactkit.Registry
+	Auth     artifactkit.Auth
 }
 
-func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) {
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	s := &State{Registry: reg}
-	if a, ok := cfg["auth"].(pkrkit.Auth); ok {
+	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
 	return s, nil
 }
 
-func init() { pkrkit.Register("maven", NewHandler) }
+func init() { artifactkit.Register("maven", NewHandler) }
 
 type coords struct {
 	artifactID string
@@ -51,7 +51,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path = strings.Trim(path, "/")
 
 	if path == "archetype-catalog.xml" {
-		pkrkit.Text(w, http.StatusOK, `<?xml version="1.0" encoding="UTF-8"?><archetype-catalog></archetype-catalog>`, "application/xml")
+		artifactkit.Text(w, http.StatusOK, `<?xml version="1.0" encoding="UTF-8"?><archetype-catalog></archetype-catalog>`, "application/xml")
 		return
 	}
 
@@ -67,7 +67,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
 			c, ok := parseMavenPath(path)
 			if !ok {
-				pkrkit.Error(w, http.StatusNotFound, "invalid path")
+				artifactkit.Error(w, http.StatusNotFound, "invalid path")
 				return
 			}
 			s.putPath(w, r, path, coords{c.artifactID, "maven-metadata"})
@@ -77,7 +77,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		c, ok := parseMavenPath(path)
 		if !ok {
-			pkrkit.Error(w, http.StatusNotFound, "invalid maven path")
+			artifactkit.Error(w, http.StatusNotFound, "invalid maven path")
 			return
 		}
 		switch r.Method {
@@ -88,7 +88,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case http.MethodGet:
 			s.getPath(w, r, path, c)
 		case http.MethodDelete:
-			if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+			if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 				return
 			}
 			s.deletePath(w, r, path, c)
@@ -109,18 +109,18 @@ func (s *State) getPath(w http.ResponseWriter, r *http.Request, p string, c coor
 				}
 				data, _ := io.ReadAll(rd)
 				rd.Close()
-				pkrkit.BlobResponse(w, data, filename)
+				artifactkit.BlobResponse(w, data, filename)
 				return
 			}
 		}
 	}
 	fetched, err := s.Registry.Fetch(r.Context(), "maven", "", "/"+p)
 	if err != nil {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	storeVersionSource(s.Registry, c.artifactID, c.version, filename, fetched.Data, "pull", r.Context())
-	pkrkit.BlobResponse(w, fetched.Data, filename)
+	artifactkit.BlobResponse(w, fetched.Data, filename)
 }
 
 func (s *State) headPath(w http.ResponseWriter, r *http.Request, p string, c coords) {
@@ -139,19 +139,19 @@ func (s *State) headPath(w http.ResponseWriter, r *http.Request, p string, c coo
 }
 
 func (s *State) putPath(w http.ResponseWriter, r *http.Request, p string, c coords) {
-	if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
 	filename := pathLast(p)
 	data, _ := io.ReadAll(r.Body)
 	storeVersionSource(s.Registry, c.artifactID, c.version, filename, data, "push", r.Context())
-	pkrkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
+	artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
 }
 
 func (s *State) deletePath(w http.ResponseWriter, r *http.Request, p string, c coords) {
 	filename := pathLast(p)
 	if art, err := s.Registry.Meta.Get(r.Context(), "maven", c.artifactID, c.version); err == nil {
-		var kept, removed []pkrkit.Descriptor
+		var kept, removed []artifactkit.Descriptor
 		for _, b := range art.Blobs {
 			if b.Name == filename {
 				removed = append(removed, b)
@@ -169,7 +169,7 @@ func (s *State) deletePath(w http.ResponseWriter, r *http.Request, p string, c c
 			_ = s.Registry.Blobs.Delete(r.Context(), b.Digest)
 		}
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *State) hashFile(w http.ResponseWriter, r *http.Request, p string) {
@@ -177,7 +177,7 @@ func (s *State) hashFile(w http.ResponseWriter, r *http.Request, p string) {
 	orig := strings.TrimSuffix(strings.TrimSuffix(p, ".md5"), ".sha1")
 	c, ok := parseMavenPath(orig)
 	if !ok {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	filename := pathLast(orig)
@@ -191,7 +191,7 @@ func (s *State) hashFile(w http.ResponseWriter, r *http.Request, p string) {
 						val = h.MD5
 					}
 					if val != "" {
-						pkrkit.Text(w, http.StatusOK, val, "text/plain")
+						artifactkit.Text(w, http.StatusOK, val, "text/plain")
 						return
 					}
 				}
@@ -200,17 +200,17 @@ func (s *State) hashFile(w http.ResponseWriter, r *http.Request, p string) {
 	}
 	fetched, err := s.Registry.Fetch(r.Context(), "maven", "", "/"+p)
 	if err != nil {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
-	pkrkit.Text(w, http.StatusOK, string(fetched.Data), "text/plain")
+	artifactkit.Text(w, http.StatusOK, string(fetched.Data), "text/plain")
 }
 
 func (s *State) metadataXML(w http.ResponseWriter, r *http.Request, p string) {
 	clean := strings.Trim(strings.TrimSuffix(p, "maven-metadata.xml"), "/")
 	parts := splitPath(clean)
 	if len(parts) == 0 || parts[0] == "" {
-		pkrkit.Text(w, http.StatusOK, "<metadata></metadata>", "application/xml")
+		artifactkit.Text(w, http.StatusOK, "<metadata></metadata>", "application/xml")
 		return
 	}
 	if len(parts) >= 3 && strings.HasSuffix(parts[len(parts)-1], "-SNAPSHOT") {
@@ -220,12 +220,12 @@ func (s *State) metadataXML(w http.ResponseWriter, r *http.Request, p string) {
 	artifactID := parts[len(parts)-1]
 	groupID := strings.Join(parts[:len(parts)-1], ".")
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "maven", artifactID)
-	pkrkit.SortSemver(versions)
+	artifactkit.SortSemver(versions)
 	if len(versions) == 0 {
-		pkrkit.Text(w, http.StatusOK, `<?xml version="1.0" encoding="UTF-8"?><metadata><groupId>`+groupID+`</groupId><artifactId>`+artifactID+`</artifactId><versioning><versions></versions></versioning></metadata>`, "application/xml")
+		artifactkit.Text(w, http.StatusOK, `<?xml version="1.0" encoding="UTF-8"?><metadata><groupId>`+groupID+`</groupId><artifactId>`+artifactID+`</artifactId><versioning><versions></versions></versioning></metadata>`, "application/xml")
 		return
 	}
-	latest := pkrkit.HighestVersion(versions)
+	latest := artifactkit.HighestVersion(versions)
 	if latest == "" && len(versions) > 0 {
 		latest = versions[len(versions)-1]
 	}
@@ -242,7 +242,7 @@ func (s *State) metadataXML(w http.ResponseWriter, r *http.Request, p string) {
 		sb.WriteString(`<version>` + v + `</version>`)
 	}
 	sb.WriteString(`</versions><lastUpdated>20240101120000</lastUpdated></versioning></metadata>`)
-	pkrkit.Text(w, http.StatusOK, sb.String(), "application/xml")
+	artifactkit.Text(w, http.StatusOK, sb.String(), "application/xml")
 }
 
 func (s *State) versionMetadataXML(w http.ResponseWriter, r *http.Request, parts []string) {
@@ -261,7 +261,7 @@ func (s *State) versionMetadataXML(w http.ResponseWriter, r *http.Request, parts
 	}
 	timestamped := strings.Replace(version, "-SNAPSHOT", "-"+ts+"-"+build, 1)
 	sb := `<?xml version="1.0" encoding="UTF-8"?><metadata><groupId>` + groupID + `</groupId><artifactId>` + artifactID + `</artifactId><version>` + version + `</version><versioning><snapshot><timestamp>` + ts + `</timestamp><buildNumber>` + build + `</buildNumber></snapshot><lastUpdated>20240101120000</lastUpdated><snapshotVersions><snapshotVersion><extension>jar</extension><value>` + timestamped + `</value><updated>20240101120000</updated></snapshotVersion><snapshotVersion><extension>pom</extension><value>` + timestamped + `</value><updated>20240101120000</updated></snapshotVersion></snapshotVersions></versioning></metadata>`
-	pkrkit.Text(w, http.StatusOK, sb, "application/xml")
+	artifactkit.Text(w, http.StatusOK, sb, "application/xml")
 }
 
 func snapshotTimestampFromName(name string) string {
@@ -303,7 +303,7 @@ func allDigits(b []byte) bool {
 	return len(b) > 0
 }
 
-func storeVersionSource(reg *pkrkit.Registry, artifactID, version, filename string, data []byte, source string, ctx context.Context) {
+func storeVersionSource(reg *artifactkit.Registry, artifactID, version, filename string, data []byte, source string, ctx context.Context) {
 	if version == "" {
 		version = "0.0.0"
 	}
@@ -313,9 +313,9 @@ func storeVersionSource(reg *pkrkit.Registry, artifactID, version, filename stri
 	art.Repository = artifactID
 	art.Version = version
 	if len(data) > 0 {
-		h, _ := pkrkit.ComputeHashesBytes(data)
+		h, _ := artifactkit.ComputeHashesBytes(data)
 		digest := "sha256:" + h.SHA256
-		var removed, kept []pkrkit.Descriptor
+		var removed, kept []artifactkit.Descriptor
 		for _, b := range art.Blobs {
 			if b.Name == filename {
 				removed = append(removed, b)
@@ -325,7 +325,7 @@ func storeVersionSource(reg *pkrkit.Registry, artifactID, version, filename stri
 		}
 		art.Blobs = kept
 		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, pkrkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
+			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 		for _, b := range removed {
 			if b.Digest != digest {

@@ -1,4 +1,4 @@
-package pkrkit
+package artifactkit
 
 import (
 	"crypto/md5"

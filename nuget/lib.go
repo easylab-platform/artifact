@@ -18,14 +18,14 @@ import (
 )
 
 type State struct {
-	Registry *pkrkit.Registry
-	Auth     pkrkit.Auth
+	Registry *artifactkit.Registry
+	Auth     artifactkit.Auth
 	SelfBase string
 }
 
-func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) {
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	s := &State{Registry: reg}
-	if a, ok := cfg["auth"].(pkrkit.Auth); ok {
+	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
 	if v, ok := cfg["self_base"].(string); ok {
@@ -34,7 +34,7 @@ func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) 
 	return s, nil
 }
 
-func init() { pkrkit.Register("nuget", NewHandler) }
+func init() { artifactkit.Register("nuget", NewHandler) }
 
 func (s *State) base() string {
 	if s.SelfBase == "" {
@@ -106,7 +106,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *State) serviceIndex(w http.ResponseWriter, r *http.Request) {
 	base := s.base()
-	pkrkit.JSON(w, http.StatusOK, map[string]any{
+	artifactkit.JSON(w, http.StatusOK, map[string]any{
 		"version": "3.0.0",
 		"resources": []any{
 			map[string]any{"@id": base + "/v3/query", "@type": "SearchQueryService/3.5.0"},
@@ -133,7 +133,7 @@ func (s *State) autocomplete(w http.ResponseWriter, r *http.Request) {
 			}
 			versions = v2
 		}
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"totalHits": total, "data": versions})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"totalHits": total, "data": versions})
 		return
 	}
 	var data []string
@@ -142,7 +142,7 @@ func (s *State) autocomplete(w http.ResponseWriter, r *http.Request) {
 			data = append(data, name)
 		}
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"totalHits": len(data), "data": data})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"totalHits": len(data), "data": data})
 }
 
 func (s *State) search(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +155,7 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		versions, _ := s.Registry.Meta.ListVersions(r.Context(), "nuget", name)
-		latest := pkrkit.HighestVersion(versions)
+		latest := artifactkit.HighestVersion(versions)
 		if latest == "" && len(versions) > 0 {
 			latest = versions[len(versions)-1]
 		}
@@ -166,15 +166,15 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 	if len(data) == 0 && q != "" {
 		if base := s.Registry.Upstreams.Sub("nuget", "search"); base != "" {
 			remote := s.Registry.RemoteAt(base)
-			if body, err := remote.GetBytes(r.Context(), "/query?q="+pkrkit.URLencode(q)+"&prerelease=false"); err == nil {
-				pkrkit.JSON(w, http.StatusOK, json.RawMessage(s.rewriteReg(body)))
+			if body, err := remote.GetBytes(r.Context(), "/query?q="+artifactkit.URLencode(q)+"&prerelease=false"); err == nil {
+				artifactkit.JSON(w, http.StatusOK, json.RawMessage(s.rewriteReg(body)))
 				return
 			}
 		}
-		pkrkit.Error(w, http.StatusBadGateway, "upstream")
+		artifactkit.Error(w, http.StatusBadGateway, "upstream")
 		return
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"totalHits": len(data), "data": data})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"totalHits": len(data), "data": data})
 }
 
 func (s *State) registrationIndex(w http.ResponseWriter, r *http.Request, id string) {
@@ -183,12 +183,12 @@ func (s *State) registrationIndex(w http.ResponseWriter, r *http.Request, id str
 	if len(versions) == 0 {
 		if base := s.Registry.Upstreams.Sub("nuget", "registration"); base != "" {
 			remote := s.Registry.RemoteAt(base)
-			if body, err := remote.GetCached(r.Context(), pkrkit.SharedIndexCache(), "/v3/registration5-semver1/"+lid+"/index.json"); err == nil {
-				pkrkit.Text(w, http.StatusOK, s.rewriteReg([]byte(body)), "application/json")
+			if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/v3/registration5-semver1/"+lid+"/index.json"); err == nil {
+				artifactkit.Text(w, http.StatusOK, s.rewriteReg([]byte(body)), "application/json")
 				return
 			}
 		}
-		pkrkit.Error(w, http.StatusNotFound, "package not found")
+		artifactkit.Error(w, http.StatusNotFound, "package not found")
 		return
 	}
 	base := s.base()
@@ -209,7 +209,7 @@ func (s *State) registrationIndex(w http.ResponseWriter, r *http.Request, id str
 			items = append(items, map[string]any{"@id": base + "/v3/registration/" + lid + "/page/" + itoa(i/pageSize) + ".json", "count": end - i, "items": leaves[i:end]})
 		}
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"count": len(items), "items": items})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"count": len(items), "items": items})
 }
 
 func registrationLeaf(base, lid, id, v string) map[string]any {
@@ -229,7 +229,7 @@ func (s *State) registrationVersion(w http.ResponseWriter, r *http.Request, id, 
 		"packageContent": base + "/v3/flatcontainer/" + lid + "/" + ver + "/" + lid + "." + ver + ".nupkg",
 		"catalogEntry":   map[string]any{"@id": base + "/v3/registration/" + lid + "/" + ver + ".json", "id": id, "version": ver, "listed": true, "published": "2024-01-01T00:00:00Z"},
 	}
-	pkrkit.JSON(w, http.StatusOK, entry)
+	artifactkit.JSON(w, http.StatusOK, entry)
 }
 
 func (s *State) rewriteReg(body []byte) string {
@@ -245,17 +245,17 @@ func (s *State) flatIndex(w http.ResponseWriter, r *http.Request, id string) {
 	lid := lower(id)
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "nuget", id)
 	if len(versions) > 0 {
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"versions": versions})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"versions": versions})
 		return
 	}
 	if base := s.Registry.Upstreams.Sub("nuget", "registration"); base != "" {
 		remote := s.Registry.RemoteAt(base)
 		if data, err := remote.GetBytes(r.Context(), "/v3-flatcontainer/"+lid+"/index.json"); err == nil {
-			pkrkit.JSON(w, http.StatusOK, json.RawMessage(data))
+			artifactkit.JSON(w, http.StatusOK, json.RawMessage(data))
 			return
 		}
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"versions": versions})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"versions": versions})
 }
 
 func (s *State) flatFile(w http.ResponseWriter, r *http.Request, id, ver, filename string) {
@@ -267,7 +267,7 @@ func (s *State) flatFile(w http.ResponseWriter, r *http.Request, id, ver, filena
 			}
 			data, _ := io.ReadAll(rd)
 			rd.Close()
-			pkrkit.BlobResponse(w, data, filename)
+			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
 	}
@@ -276,15 +276,15 @@ func (s *State) flatFile(w http.ResponseWriter, r *http.Request, id, ver, filena
 		lid := lower(id)
 		if data, err := remote.GetBytes(r.Context(), "/v3-flatcontainer/"+lid+"/"+ver+"/"+filename); err == nil {
 			storeVersionSource(s.Registry, id, ver, filename, data, "pull", r.Context())
-			pkrkit.BlobResponse(w, data, filename)
+			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
 	}
-	pkrkit.Error(w, http.StatusNotFound, "not found")
+	artifactkit.Error(w, http.StatusNotFound, "not found")
 }
 
 func (s *State) deletePkg(w http.ResponseWriter, r *http.Request, id, ver string) {
-	if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
 	if art, err := s.Registry.Meta.Get(r.Context(), "nuget", id, ver); err == nil {
@@ -297,14 +297,14 @@ func (s *State) deletePkg(w http.ResponseWriter, r *http.Request, id, ver string
 }
 
 func (s *State) push(w http.ResponseWriter, r *http.Request) {
-	if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
 	raw, _ := io.ReadAll(r.Body)
 	ct := r.Header.Get("Content-Type")
 	data := raw
 	if strings.HasPrefix(ct, "multipart/form-data") {
-		if _, part, ok := pkrkit.ExtractFirstFile(raw, ct); ok {
+		if _, part, ok := artifactkit.ExtractFirstFile(raw, ct); ok {
 			data = part
 		}
 	}
@@ -318,19 +318,19 @@ func (s *State) push(w http.ResponseWriter, r *http.Request) {
 	}
 	filename := id + "." + version + ".nupkg"
 	storeVersionSource(s.Registry, id, version, filename, data, "push", r.Context())
-	pkrkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
+	artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
 }
 
-func storeVersionSource(reg *pkrkit.Registry, id, ver, filename string, data []byte, source string, ctx context.Context) {
+func storeVersionSource(reg *artifactkit.Registry, id, ver, filename string, data []byte, source string, ctx context.Context) {
 	if ver == "" {
 		ver = "0.0.0"
 	}
-	art := pkrkit.Artifact{Format: "nuget", Repository: id, Version: ver, Source: source}
+	art := artifactkit.Artifact{Format: "nuget", Repository: id, Version: ver, Source: source}
 	if len(data) > 0 {
-		h, _ := pkrkit.ComputeHashesBytes(data)
+		h, _ := artifactkit.ComputeHashesBytes(data)
 		digest := "sha256:" + h.SHA256
 		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, pkrkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
+			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 	}
 	_ = reg.Meta.Put(ctx, art)

@@ -20,7 +20,7 @@ const acceptManifests = Accept
 type Upstream struct {
 	scheme  string
 	host    string
-	factory *pkrkit.ClientFactory
+	factory *artifactkit.ClientFactory
 	proxy   *string
 
 	mu     sync.Mutex
@@ -29,7 +29,7 @@ type Upstream struct {
 
 // NewUpstream parses a host string (with or without scheme), defaulting to
 // https unless the host is localhost or an IP literal (insecure convention).
-func NewUpstream(factory *pkrkit.ClientFactory, host string, proxy *string) *Upstream {
+func NewUpstream(factory *artifactkit.ClientFactory, host string, proxy *string) *Upstream {
 	scheme := "https"
 	h := host
 	for _, p := range []string{"https://", "http://"} {
@@ -44,7 +44,7 @@ func NewUpstream(factory *pkrkit.ClientFactory, host string, proxy *string) *Ups
 
 // ForRegistry builds an upstream for an explicitly prefixed registry host,
 // honoring the insecure-registry convention (http for localhost/IP).
-func ForRegistry(factory *pkrkit.ClientFactory, host string, proxy *string) *Upstream {
+func ForRegistry(factory *artifactkit.ClientFactory, host string, proxy *string) *Upstream {
 	scheme := "https"
 	h := host
 	for _, p := range []string{"https://", "http://"} {
@@ -103,7 +103,7 @@ func (u *Upstream) doGet(scope, path string, accept string) (*http.Response, err
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", pkrkit.UserAgent)
+	req.Header.Set("User-Agent", artifactkit.UserAgent)
 	req.Header.Set("Accept", accept)
 	if tok := u.tokenFor(scope); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
@@ -128,7 +128,7 @@ func (u *Upstream) doGet(scope, path string, accept string) (*http.Response, err
 	if err != nil {
 		return nil, err
 	}
-	req2.Header.Set("User-Agent", pkrkit.UserAgent)
+	req2.Header.Set("User-Agent", artifactkit.UserAgent)
 	req2.Header.Set("Accept", accept)
 	req2.Header.Set("Authorization", "Bearer "+tok)
 	return u.client().Do(req2)
@@ -179,7 +179,7 @@ func (u *Upstream) fetchToken(realm string, params map[string]string, scope stri
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", pkrkit.UserAgent)
+	req.Header.Set("User-Agent", artifactkit.UserAgent)
 	resp, err := u.client().Do(req)
 	if err != nil {
 		return "", err

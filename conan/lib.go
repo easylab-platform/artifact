@@ -17,14 +17,14 @@ import (
 )
 
 type State struct {
-	Registry *pkrkit.Registry
-	Auth     pkrkit.Auth
+	Registry *artifactkit.Registry
+	Auth     artifactkit.Auth
 	SelfBase string
 }
 
-func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) {
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	s := &State{Registry: reg}
-	if a, ok := cfg["auth"].(pkrkit.Auth); ok {
+	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
 	if v, ok := cfg["self_base"].(string); ok {
@@ -33,7 +33,7 @@ func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) 
 	return s, nil
 }
 
-func init() { pkrkit.Register("conan", NewHandler) }
+func init() { artifactkit.Register("conan", NewHandler) }
 
 const capabilities = "json,rev2,revisions,checksums,upload_zip"
 
@@ -54,7 +54,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "users/authenticate":
 		s.authenticate(w, r)
 	case path == "users/check_credentials":
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	case strings.HasPrefix(path, "conans/"):
 		s.conans(w, r, path)
 	case strings.HasPrefix(path, "files/"):
@@ -68,11 +68,11 @@ func (s *State) authenticate(w http.ResponseWriter, r *http.Request) {
 	if s.Auth != nil {
 		if u := s.Auth.Authenticate(r.Context(), r); u != "" {
 			tok := s.Auth.IssueToken(r.Context(), u, nil, 3600)
-			pkrkit.Text(w, http.StatusOK, tok, "text/plain")
+			artifactkit.Text(w, http.StatusOK, tok, "text/plain")
 			return
 		}
 	}
-	pkrkit.Text(w, http.StatusOK, "anonymous-token", "text/plain")
+	artifactkit.Text(w, http.StatusOK, "anonymous-token", "text/plain")
 }
 
 func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
@@ -97,7 +97,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 	if parts[4] == "revisions" {
 		// DELETE /revisions/{rev} — remove the whole recipe.
 		if r.Method == http.MethodDelete {
-			if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+			if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 				return
 			}
 			vs, _ := s.Registry.Meta.ListVersions(r.Context(), "conan", name)
@@ -114,7 +114,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 				// Package revision lookup: return the recorded package revision
 				// if we have package files for this pid, else proxy.
 				if prev, ok := s.packageRev(r.Context(), name, ver, parts); ok {
-					pkrkit.JSON(w, http.StatusOK, map[string]any{"revision": prev, "time": "2024-01-01T00:00:00Z"})
+					artifactkit.JSON(w, http.StatusOK, map[string]any{"revision": prev, "time": "2024-01-01T00:00:00Z"})
 					return
 				}
 				s.replyOrProxy(w, r, nil, "/v2/conans/"+rest)
@@ -122,7 +122,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 			}
 			if strings.HasSuffix(rest, "/revisions") {
 				// Package binary revisions list: empty (brand-new package).
-				pkrkit.JSON(w, http.StatusOK, map[string]any{"revisions": []any{}})
+				artifactkit.JSON(w, http.StatusOK, map[string]any{"revisions": []any{}})
 				return
 			}
 			if fi := strings.Index(rest, "/files"); fi >= 0 {
@@ -131,7 +131,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 				// Package /files LISTING (no filename): return the dict of
 				// package files for the pid, so the client knows what to GET.
 				if filename == "" {
-					pkrkit.JSON(w, http.StatusOK, map[string]any{
+					artifactkit.JSON(w, http.StatusOK, map[string]any{
 						"files": s.packageFiles(r.Context(), name, parts),
 					})
 					return
@@ -157,23 +157,23 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 					}
 				}
 				if r.Method == http.MethodPut {
-					if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+					if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 						return
 					}
 					data, _ := io.ReadAll(r.Body)
 					storeFile(s.Registry, name, ver, verSlot, data, r.Context())
-					pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+					artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 					return
 				}
 				if data, ok := s.loadFile(r.Context(), name, ver, verSlot); ok {
-					pkrkit.OctetResponse(w, data)
+					artifactkit.OctetResponse(w, data)
 					return
 				}
 				if data, ok := s.loadFile(r.Context(), name, ver, filename); ok {
-					pkrkit.OctetResponse(w, data)
+					artifactkit.OctetResponse(w, data)
 					return
 				}
-				pkrkit.Error(w, http.StatusNotFound, "not found")
+				artifactkit.Error(w, http.StatusNotFound, "not found")
 				return
 			}
 			// other package sub-paths -> proxy.
@@ -199,36 +199,36 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 			if filename == "" {
 				// Listing: return a dict filename->download URL (Conan's
 				// /files response shape), for the recipe files we recorded.
-				pkrkit.JSON(w, http.StatusOK, map[string]any{
+				artifactkit.JSON(w, http.StatusOK, map[string]any{
 					"files": s.recipeFiles(r.Context(), name),
 				})
 				return
 			}
 			if r.Method == http.MethodPut {
-				if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+				if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 					return
 				}
 				data, _ := io.ReadAll(r.Body)
 				storeFile(s.Registry, name, ver, filename, data, r.Context())
-				u := s.base() + "/v2/conans/" + pkrkit.URLencode(name) + "/" + pkrkit.URLencode(ver) + "/_/_/revisions/0/files/" + pkrkit.URLencode(filename)
-				pkrkit.JSON(w, http.StatusOK, map[string]any{"files": map[string]any{filename: u}})
+				u := s.base() + "/v2/conans/" + artifactkit.URLencode(name) + "/" + artifactkit.URLencode(ver) + "/_/_/revisions/0/files/" + artifactkit.URLencode(filename)
+				artifactkit.JSON(w, http.StatusOK, map[string]any{"files": map[string]any{filename: u}})
 				return
 			}
 			if data, ok := s.loadFile(r.Context(), name, ver, filename); ok {
-				pkrkit.OctetResponse(w, data)
+				artifactkit.OctetResponse(w, data)
 				return
 			}
-			pkrkit.Error(w, http.StatusNotFound, "not found")
+			artifactkit.Error(w, http.StatusNotFound, "not found")
 			return
 		}
 		if len(parts) == 5 {
 			if r.Method == http.MethodGet {
 				if !s.recipeExists(r.Context(), name, ver) {
-					pkrkit.JSON(w, http.StatusOK, map[string]any{"revisions": []any{}})
+					artifactkit.JSON(w, http.StatusOK, map[string]any{"revisions": []any{}})
 					return
 				}
 				rev := s.loadRecipeRev(r.Context(), name)
-				pkrkit.JSON(w, http.StatusOK, map[string]any{
+				artifactkit.JSON(w, http.StatusOK, map[string]any{
 					"reference": name + "/" + ver + "@_/_",
 					"revisions": []any{map[string]any{"revision": rev, "time": "2024-01-01T00:00:00Z"}},
 				})
@@ -249,7 +249,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 	switch {
 	case len(parts) == 5 || sub == "latest":
 		if r.Method == http.MethodDelete {
-			if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+			if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 				return
 			}
 			// Remove the recipe + all its recorded files/package slots.
@@ -258,27 +258,27 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 				removeVersion(s.Registry, name, v, r.Context())
 			}
 			removeVersion(s.Registry, name, ver, r.Context())
-			pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+			artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 			return
 		}
 		if _, err := s.Registry.Meta.Get(r.Context(), "conan", name, ver); err != nil {
 			rev := s.loadRecipeRev(r.Context(), name)
 			fallback := map[string]any{"revision": rev, "time": "2024-01-01T00:00:00Z"}
-			s.replyOrProxy(w, r, fallback, "/v2/conans/"+pkrkit.URLencode(name)+"/"+pkrkit.URLencode(ver)+"/_/_/latest")
+			s.replyOrProxy(w, r, fallback, "/v2/conans/"+artifactkit.URLencode(name)+"/"+artifactkit.URLencode(ver)+"/_/_/latest")
 			return
 		}
 		rev := s.loadRecipeRev(r.Context(), name)
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"revision": rev, "time": "2024-01-01T00:00:00Z"})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"revision": rev, "time": "2024-01-01T00:00:00Z"})
 	case strings.HasPrefix(sub, "revisions"):
 		if _, err := s.Registry.Meta.Get(r.Context(), "conan", name, ver); err != nil {
 			// Recipe not yet uploaded: return 404 so the Conan client treats
 			// it as brand new (it does NOT re-list revisions on 404 and
 			// proceeds to upload).
-			pkrkit.Error(w, http.StatusNotFound, "revision not found")
+			artifactkit.Error(w, http.StatusNotFound, "revision not found")
 			return
 		}
 		rev := s.loadRecipeRev(r.Context(), name)
-		pkrkit.JSON(w, http.StatusOK, map[string]any{
+		artifactkit.JSON(w, http.StatusOK, map[string]any{
 			"revisions": []any{map[string]any{"revision": rev, "time": "2024-01-01T00:00:00Z"}},
 		})
 	case strings.HasPrefix(sub, "revisions/") && strings.HasSuffix(sub, "/files"):
@@ -286,7 +286,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 	case strings.Contains(sub, "revisions/") && strings.Contains(sub, "/files/"):
 		s.fileGet(w, r, name, ver, sub)
 	case strings.HasSuffix(sub, "/upload_urls"):
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"upload_urls": map[string]any{}})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"upload_urls": map[string]any{}})
 	case strings.HasSuffix(sub, "/download_urls"):
 		s.downloadURLs(w, r, name, ver, sub)
 	case strings.HasSuffix(sub, "/search"):
@@ -305,19 +305,19 @@ func (s *State) fileGet(w http.ResponseWriter, r *http.Request, name, ver, sub s
 	}
 	filename := sub[idx+len("/files/"):]
 	if r.Method == http.MethodPut {
-		if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
 		data, _ := io.ReadAll(r.Body)
 		storeFile(s.Registry, name, ver, filename, data, r.Context())
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
 	if data, ok := s.loadFile(r.Context(), name, ver, filename); ok {
-		pkrkit.OctetResponse(w, data)
+		artifactkit.OctetResponse(w, data)
 		return
 	}
-	s.replyOrProxy(w, r, nil, "/v2/conans/"+pkrkit.URLencode(name)+"/"+pkrkit.URLencode(ver)+"/"+sub)
+	s.replyOrProxy(w, r, nil, "/v2/conans/"+artifactkit.URLencode(name)+"/"+artifactkit.URLencode(ver)+"/"+sub)
 }
 
 func (s *State) downloadURLs(w http.ResponseWriter, r *http.Request, name, ver, sub string) {
@@ -329,10 +329,10 @@ func (s *State) downloadURLs(w http.ResponseWriter, r *http.Request, name, ver, 
 	}
 	for _, fn := range []string{"conanfile.py", "conanmanifest.txt", "conaninfo.txt"} {
 		if _, ok := s.loadFile(r.Context(), name, ver, fn); ok {
-			urls[fn] = s.base() + "/v2/files/" + pkrkit.URLencode(name) + "/" + pkrkit.URLencode(ver) + "/_/_/0/" + fn
+			urls[fn] = s.base() + "/v2/files/" + artifactkit.URLencode(name) + "/" + artifactkit.URLencode(ver) + "/_/_/0/" + fn
 		}
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"download_urls": urls})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"download_urls": urls})
 }
 
 // search returns a merged local + upstream Conan search.
@@ -349,7 +349,7 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 	upstream := map[string]bool{}
 	if base := s.Registry.Upstreams.Get("conan"); base != "" {
 		remote := s.Registry.RemoteAt(base)
-		if body, err := remote.GetBytes(r.Context(), "/v2/conans/search?q="+pkrkit.URLencode(q)); err == nil {
+		if body, err := remote.GetBytes(r.Context(), "/v2/conans/search?q="+artifactkit.URLencode(q)); err == nil {
 			var m map[string]any
 			if json.Unmarshal(body, &m) == nil {
 				if res, ok := m["results"].([]any); ok {
@@ -371,13 +371,13 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 			local = append(local, u)
 		}
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"results": local})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"results": local})
 }
 
 func (s *State) files(w http.ResponseWriter, r *http.Request, rest string) {
 	// /files/{name}/{ver}/{user}/{channel}/{rev}/recipe/{filename}
 	if r.Method == http.MethodPut {
-		if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
 	}
@@ -385,12 +385,12 @@ func (s *State) files(w http.ResponseWriter, r *http.Request, rest string) {
 	// For GET of "/{version}/files/{name}/{ver}/{user}/{channel}/{rev}/recipe/{file}"
 	// we route based on the raw request path (handled in ServeHTTP via conans).
 	// This branch stubs the listing endpoint.
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"files": []any{}})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"files": []any{}})
 }
 
 func (s *State) replyOrProxy(w http.ResponseWriter, r *http.Request, local any, upstreamPath string) {
 	if local != nil {
-		pkrkit.JSON(w, http.StatusOK, local)
+		artifactkit.JSON(w, http.StatusOK, local)
 		return
 	}
 	base := s.Registry.Upstreams.Get("conan")
@@ -408,7 +408,7 @@ func (s *State) replyOrProxy(w http.ResponseWriter, r *http.Request, local any, 
 			return
 		}
 	}
-	pkrkit.Error(w, http.StatusBadGateway, "upstream")
+	artifactkit.Error(w, http.StatusBadGateway, "upstream")
 }
 
 func (s *State) proxyRecipe(w http.ResponseWriter, r *http.Request, path string) {
@@ -426,15 +426,15 @@ func (s *State) proxyRecipe(w http.ResponseWriter, r *http.Request, path string)
 		base = c
 	}
 	if base == "" {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	remote := s.Registry.RemoteAt(base)
 	if body, err := remote.GetBytes(r.Context(), "/v2/"+strings.TrimLeft(path, "/")); err == nil {
-		pkrkit.OctetResponse(w, body)
+		artifactkit.OctetResponse(w, body)
 		return
 	}
-	pkrkit.Error(w, http.StatusNotFound, "not found")
+	artifactkit.Error(w, http.StatusNotFound, "not found")
 }
 
 func (s *State) base() string {
@@ -512,7 +512,7 @@ func (s *State) packageFiles(ctx context.Context, name string, parts []string) m
 			continue
 		}
 		fname := v[strings.LastIndex(v, "/")+1:]
-		url := base + "/v2/conans/" + pkrkit.URLencode(name) + "/_/_/_/_/revisions/0/packages/" + pkrkit.URLencode(pid) + "/revisions/0/files/" + pkrkit.URLencode(fname)
+		url := base + "/v2/conans/" + artifactkit.URLencode(name) + "/_/_/_/_/revisions/0/packages/" + artifactkit.URLencode(pid) + "/revisions/0/files/" + artifactkit.URLencode(fname)
 		out[fname] = url
 	}
 	return out
@@ -567,6 +567,7 @@ func (s *State) recipeExists(ctx context.Context, name, ver string) bool {
 	}
 	return len(vs) > 0
 }
+
 // recorded files (Conan's /files response is a dict keyed by filename).
 func (s *State) recipeFiles(ctx context.Context, name string) map[string]any {
 	vs, err := s.Registry.Meta.ListVersions(ctx, "conan", name)
@@ -580,25 +581,25 @@ func (s *State) recipeFiles(ctx context.Context, name string) map[string]any {
 			continue
 		}
 		if _, err := s.Registry.Meta.Get(ctx, "conan", name, v); err == nil {
-			out[v] = s.base() + "/v2/conans/" + pkrkit.URLencode(name) + "/0.0.0/ci/stable/revisions/0/files/" + pkrkit.URLencode(v)
+			out[v] = s.base() + "/v2/conans/" + artifactkit.URLencode(name) + "/0.0.0/ci/stable/revisions/0/files/" + artifactkit.URLencode(v)
 		}
 	}
 	return out
 }
 
-func storeFile(reg *pkrkit.Registry, name, ver, filename string, data []byte, ctx context.Context) {
+func storeFile(reg *artifactkit.Registry, name, ver, filename string, data []byte, ctx context.Context) {
 	// Store the file body as a blob and index it under (conan, name, filename)
 	// so loadFile can find it; keep the recipe version as metadata.
 	if len(data) > 0 {
-		h, _ := pkrkit.ComputeHashesBytes(data)
+		h, _ := artifactkit.ComputeHashesBytes(data)
 		digest := "sha256:" + h.SHA256
 		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			_ = reg.Meta.Put(ctx, pkrkit.Artifact{Format: "conan", Repository: name, Version: filename, Source: "push", Blobs: []pkrkit.Descriptor{{Digest: digest, Size: int64(len(data)), Name: filename}}})
+			_ = reg.Meta.Put(ctx, artifactkit.Artifact{Format: "conan", Repository: name, Version: filename, Source: "push", Blobs: []artifactkit.Descriptor{{Digest: digest, Size: int64(len(data)), Name: filename}}})
 		}
 	}
 }
 
-func removeVersion(reg *pkrkit.Registry, name, ver string, ctx context.Context) {
+func removeVersion(reg *artifactkit.Registry, name, ver string, ctx context.Context) {
 	_ = reg.Meta.Delete(ctx, "conan", name, ver)
 }
 

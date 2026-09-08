@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	pkrkit "github.com/easylab-platform/artifact/core"
+	artifactkit "github.com/easylab-platform/artifact/core"
 )
 
 func TestOpenStoreSQLiteRoundTrip(t *testing.T) {
@@ -15,7 +15,7 @@ func TestOpenStoreSQLiteRoundTrip(t *testing.T) {
 	}
 	defer s.Close()
 	ctx := context.Background()
-	art := pkrkit.Artifact{Format: "oci", Repository: "alpine", Version: "3", Digest: "d1", Source: "push"}
+	art := artifactkit.Artifact{Format: "oci", Repository: "alpine", Version: "3", Digest: "d1", Source: "push"}
 	if err := s.Put(ctx, art); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestOpenStoreBackendSwitch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if err := s.Put(context.Background(), pkrkit.Artifact{Format: "g", Repository: "r", Version: "1"}); err != nil {
+	if err := s.Put(context.Background(), artifactkit.Artifact{Format: "g", Repository: "r", Version: "1"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -52,7 +52,7 @@ func TestOpenBlobStoreFilesystem(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Stat of an absent but valid-shaped digest returns (nil,nil), not error.
-	digest := "sha256:"+hex64
+	digest := "sha256:" + hex64
 	if n, err := b.Stat(context.Background(), digest); err != nil || n != nil {
 		t.Fatalf("stat absent = (%v,%v)", n, err)
 	}
@@ -75,8 +75,6 @@ func TestOpenBlobStoreUnknownErr(t *testing.T) {
 	}
 }
 
-
-
 const hex64 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func TestOpenStorePostgresGated(t *testing.T) {
@@ -89,7 +87,7 @@ func TestOpenStorePostgresGated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if err := s.Put(context.Background(), pkrkit.Artifact{Format: "g", Repository: "r", Version: "1"}); err != nil {
+	if err := s.Put(context.Background(), artifactkit.Artifact{Format: "g", Repository: "r", Version: "1"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -104,7 +102,7 @@ func TestOpenStoreMySQLGated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if err := s.Put(context.Background(), pkrkit.Artifact{Format: "g", Repository: "r", Version: "1"}); err != nil {
+	if err := s.Put(context.Background(), artifactkit.Artifact{Format: "g", Repository: "r", Version: "1"}); err != nil {
 		t.Fatal(err)
 	}
 }

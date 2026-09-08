@@ -1,4 +1,4 @@
-// Package store provides reference implementations of the pkrkit storage
+// Package store provides reference implementations of the artifactkit storage
 // interfaces. It ships two blob stores — a filesystem CAS and a SQLite-BLOB
 // CAS — plus a SQLite IndexStore, so a deployment can choose where each layer
 // physically lives.
@@ -36,7 +36,7 @@ func NewFileBlobStore(dir string) (*FileBlobStore, error) {
 }
 
 func (s *FileBlobStore) path(digest string) (string, error) {
-	hexpart, err := pkrkit.ParseDigest(digest)
+	hexpart, err := artifactkit.ParseDigest(digest)
 	if err != nil {
 		return "", err
 	}
@@ -82,7 +82,7 @@ func (s *FileBlobStore) Open(ctx context.Context, digest string) (io.ReadSeekClo
 // PutIfAbsent implements BlobStore with atomic rename so a partially written
 // file is never visible. Returns false when the digest already exists.
 func (s *FileBlobStore) PutIfAbsent(ctx context.Context, digest string, r io.Reader) (bool, error) {
-	hexpart, err := pkrkit.ParseDigest(digest)
+	hexpart, err := artifactkit.ParseDigest(digest)
 	if err != nil {
 		return false, err
 	}
@@ -135,18 +135,18 @@ func (s *FileBlobStore) PutIfAbsent(ctx context.Context, digest string, r io.Rea
 // HashesFor implements BlobStore: recompute (or read cached sidecar) from the
 // stored bytes. We recompute every time — blobs are immutable and the cache is
 // the file itself.
-func (s *FileBlobStore) HashesFor(ctx context.Context, digest string) (pkrkit.Hashes, error) {
+func (s *FileBlobStore) HashesFor(ctx context.Context, digest string) (artifactkit.Hashes, error) {
 	f, err := s.Open(ctx, digest)
 	if err != nil {
-		return pkrkit.Hashes{}, err
+		return artifactkit.Hashes{}, err
 	}
 	if f == nil {
-		return pkrkit.Hashes{}, pkrkit.ErrBlobUnknown
+		return artifactkit.Hashes{}, artifactkit.ErrBlobUnknown
 	}
 	defer f.Close()
-	h, err := pkrkit.ComputeHashes(f)
+	h, err := artifactkit.ComputeHashes(f)
 	if err != nil {
-		return pkrkit.Hashes{}, err
+		return artifactkit.Hashes{}, err
 	}
 	return h, nil
 }

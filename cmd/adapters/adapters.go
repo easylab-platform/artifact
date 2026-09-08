@@ -15,9 +15,9 @@ import (
 	_ "github.com/easylab-platform/artifact/npm"
 	_ "github.com/easylab-platform/artifact/nuget"
 	_ "github.com/easylab-platform/artifact/oci"
-	_ "github.com/easylab-platform/artifact/system"
 	_ "github.com/easylab-platform/artifact/pub"
 	_ "github.com/easylab-platform/artifact/pypi"
 	_ "github.com/easylab-platform/artifact/rubygems"
 	_ "github.com/easylab-platform/artifact/swiftpm"
+	_ "github.com/easylab-platform/artifact/system"
 )

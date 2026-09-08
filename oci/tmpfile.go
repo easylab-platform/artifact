@@ -13,7 +13,7 @@ type tmpFile struct {
 }
 
 func newTempFile() (*tmpFile, error) {
-	f, err := os.CreateTemp("", "pkr-oci-cache-*")
+	f, err := os.CreateTemp("", "artifact-oci-cache-*")
 	if err != nil {
 		return nil, err
 	}

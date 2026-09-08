@@ -13,19 +13,19 @@ import (
 )
 
 type State struct {
-	Registry *pkrkit.Registry
-	Auth     pkrkit.Auth
+	Registry *artifactkit.Registry
+	Auth     artifactkit.Auth
 }
 
-func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) {
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	s := &State{Registry: reg}
-	if a, ok := cfg["auth"].(pkrkit.Auth); ok {
+	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
 	return s, nil
 }
 
-func init() { pkrkit.Register("generic", NewHandler) }
+func init() { artifactkit.Register("generic", NewHandler) }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/pkgs/generic/")
@@ -38,20 +38,20 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		name := strings.TrimSuffix(path, ".version")
-		if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
 		vs, _ := s.Registry.Meta.ListVersions(r.Context(), "generic", name)
 		for _, v := range vs {
 			_ = s.Registry.Meta.Delete(r.Context(), "generic", name, v)
 		}
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
 
 	parts := strings.Split(path, "/")
 	if len(parts) != 3 {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	name, version, filename := parts[0], parts[1], parts[2]
@@ -60,7 +60,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet, http.MethodHead:
 		art, err := s.Registry.Meta.Get(r.Context(), "generic", name, version)
 		if err != nil {
-			pkrkit.Error(w, http.StatusNotFound, "not found")
+			artifactkit.Error(w, http.StatusNotFound, "not found")
 			return
 		}
 		for _, b := range art.Blobs {
@@ -78,36 +78,36 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
-			pkrkit.BlobResponse(w, data, filename)
+			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 	case http.MethodPut:
-		if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
-			pkrkit.Error(w, http.StatusBadRequest, "read error")
+			artifactkit.Error(w, http.StatusBadRequest, "read error")
 			return
 		}
 		store(s.Registry, name, version, filename, data, r.Context())
-		pkrkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
-func store(reg *pkrkit.Registry, name, version, filename string, data []byte, ctx context.Context) {
+func store(reg *artifactkit.Registry, name, version, filename string, data []byte, ctx context.Context) {
 	art, _ := reg.Meta.Get(ctx, "generic", name, version)
 	if art.Repository == "" {
 		art.Format, art.Repository, art.Version = "generic", name, version
 	}
 	if len(data) > 0 {
-		h, _ := pkrkit.ComputeHashesBytes(data)
+		h, _ := artifactkit.ComputeHashesBytes(data)
 		digest := "sha256:" + h.SHA256
-		var removed []pkrkit.Descriptor
-		var kept []pkrkit.Descriptor
+		var removed []artifactkit.Descriptor
+		var kept []artifactkit.Descriptor
 		for _, b := range art.Blobs {
 			if b.Name == filename {
 				removed = append(removed, b)
@@ -117,7 +117,7 @@ func store(reg *pkrkit.Registry, name, version, filename string, data []byte, ct
 		}
 		art.Blobs = kept
 		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, strings.NewReader(string(data))); err == nil {
-			art.Blobs = append(art.Blobs, pkrkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
+			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 		for _, b := range removed {
 			if b.Digest != digest {

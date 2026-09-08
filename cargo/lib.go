@@ -17,14 +17,14 @@ import (
 )
 
 type State struct {
-	Registry *pkrkit.Registry
-	Auth     pkrkit.Auth
+	Registry *artifactkit.Registry
+	Auth     artifactkit.Auth
 	SelfBase string
 }
 
-func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) {
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	s := &State{Registry: reg}
-	if a, ok := cfg["auth"].(pkrkit.Auth); ok {
+	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
 	if v, ok := cfg["self_base"].(string); ok {
@@ -33,7 +33,7 @@ func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) 
 	return s, nil
 }
 
-func init() { pkrkit.Register("cargo", NewHandler) }
+func init() { artifactkit.Register("cargo", NewHandler) }
 
 type meta struct {
 	Yanked map[string]bool `json:"yanked"`
@@ -58,7 +58,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "index/config.json":
 		s.config(w, r)
 	case path == "me":
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"user": map[string]any{"id": 1, "login": "anonymous", "name": "anonymous"}})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"user": map[string]any{"id": 1, "login": "anonymous", "name": "anonymous"}})
 	case strings.HasPrefix(path, "index/"):
 		s.sparseIndex(w, r, strings.TrimPrefix(path, "index/"))
 	case strings.HasPrefix(path, "api/v1/crates/new"):
@@ -102,7 +102,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) config(w http.ResponseWriter, r *http.Request) {
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"dl": s.base() + "/api/v1/crates", "api": s.base()})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"dl": s.base() + "/api/v1/crates", "api": s.base()})
 }
 
 func (s *State) search(w http.ResponseWriter, r *http.Request) {
@@ -114,13 +114,13 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		versions, _ := s.Registry.Meta.ListVersions(r.Context(), "cargo", name)
-		latest := pkrkit.HighestVersion(versions)
+		latest := artifactkit.HighestVersion(versions)
 		if latest == "" && len(versions) > 0 {
 			latest = versions[len(versions)-1]
 		}
 		crates = append(crates, map[string]any{"name": name, "max_version": latest})
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"crates": crates, "meta": map[string]any{"total": len(crates)}})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"crates": crates, "meta": map[string]any{"total": len(crates)}})
 }
 
 func (s *State) apiFallback(w http.ResponseWriter, r *http.Request, name string) {
@@ -129,39 +129,39 @@ func (s *State) apiFallback(w http.ResponseWriter, r *http.Request, name string)
 	if len(versions) == 0 {
 		remote, err := s.Registry.Remote("cargo", "")
 		if err == nil {
-			if body, err := remote.GetBytes(r.Context(), "/api/v1/crates/"+pkrkit.URLencode(name)); err == nil {
-				pkrkit.JSON(w, http.StatusOK, json.RawMessage(body))
+			if body, err := remote.GetBytes(r.Context(), "/api/v1/crates/"+artifactkit.URLencode(name)); err == nil {
+				artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
 				return
 			}
 		}
-		pkrkit.Error(w, http.StatusNotFound, "crate not found")
+		artifactkit.Error(w, http.StatusNotFound, "crate not found")
 		return
 	}
 	m := s.loadMeta(r.Context(), name)
 	var vs []any
 	for _, v := range versions {
 		vs = append(vs, map[string]any{
-			"crate_size": 0, "num": v, "dl_path": "/api/v1/crates/" + pkrkit.URLencode(name) + "/download",
+			"crate_size": 0, "num": v, "dl_path": "/api/v1/crates/" + artifactkit.URLencode(name) + "/download",
 			"yanked": m.Yanked[v],
 		})
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"versions": vs})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"versions": vs})
 }
 
 func (s *State) sparseIndex(w http.ResponseWriter, r *http.Request, rel string) {
 	rel = strings.Trim(rel, "/")
 	if rel == "" {
-		pkrkit.Text(w, http.StatusOK, "", "text/plain")
+		artifactkit.Text(w, http.StatusOK, "", "text/plain")
 		return
 	}
 	name := rel[strings.LastIndex(rel, "/")+1:]
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "cargo", name)
-	pkrkit.SortSemver(versions)
+	artifactkit.SortSemver(versions)
 
 	upstreamBody := s.fetchSparseIndex(rel)
 	if len(versions) == 0 {
 		if upstreamBody != "" {
-			pkrkit.Text(w, http.StatusOK, upstreamBody, "text/plain")
+			artifactkit.Text(w, http.StatusOK, upstreamBody, "text/plain")
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -200,7 +200,7 @@ func (s *State) sparseIndex(w http.ResponseWriter, r *http.Request, rel string) 
 		}
 		out += strings.Join(localLines, "\n")
 	}
-	pkrkit.Text(w, http.StatusOK, out+"\n", "text/plain")
+	artifactkit.Text(w, http.StatusOK, out+"\n", "text/plain")
 }
 
 func (s *State) fetchSparseIndex(rel string) string {
@@ -208,7 +208,7 @@ func (s *State) fetchSparseIndex(rel string) string {
 	if err != nil {
 		return ""
 	}
-	body, err := remote.GetCached(pkrkit.Ctx(), pkrkit.SharedIndexCache(), "/"+strings.Trim(rel, "/"))
+	body, err := remote.GetCached(artifactkit.Ctx(), artifactkit.SharedIndexCache(), "/"+strings.Trim(rel, "/"))
 	if err != nil {
 		return ""
 	}
@@ -248,13 +248,13 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, name, version s
 			}
 			data, _ := io.ReadAll(rd)
 			rd.Close()
-			pkrkit.BlobResponse(w, data, filename)
+			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
 	}
 	remote, err := s.registrySubRemote("cargo", "static")
 	if err == nil {
-		nameEnc := pkrkit.URLencode(name)
+		nameEnc := artifactkit.URLencode(name)
 		cratePath := "/" + nameEnc + "/" + name + "-" + version + ".crate"
 		apiPath := "/api/v1/crates/" + nameEnc + "/" + version + "/download"
 		data, err := remote.GetBytes(r.Context(), cratePath)
@@ -263,15 +263,15 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, name, version s
 		}
 		if err == nil {
 			storeVersionSource(s.Registry, name, version, data, "pull", r.Context())
-			pkrkit.BlobResponse(w, data, filename)
+			artifactkit.BlobResponse(w, data, filename)
 			return
 		}
 	}
-	pkrkit.Error(w, http.StatusNotFound, "not found")
+	artifactkit.Error(w, http.StatusNotFound, "not found")
 }
 
 func (s *State) publish(w http.ResponseWriter, r *http.Request) {
-	if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
 	data, _ := io.ReadAll(r.Body)
@@ -287,22 +287,22 @@ func (s *State) publish(w http.ResponseWriter, r *http.Request) {
 		version = "0.1.0"
 	}
 	if name == "" {
-		pkrkit.Error(w, http.StatusBadRequest, "missing name")
+		artifactkit.Error(w, http.StatusBadRequest, "missing name")
 		return
 	}
 	if len(crate) == 0 {
 		crate = data
 	}
 	storeVersionSource(s.Registry, name, version, crate, "push", r.Context())
-	pkrkit.JSON(w, http.StatusCreated, map[string]any{"warnings": map[string]any{}})
+	artifactkit.JSON(w, http.StatusCreated, map[string]any{"warnings": map[string]any{}})
 }
 
 func (s *State) yank(w http.ResponseWriter, r *http.Request, name, version string, yanked bool) {
-	if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
 	if _, err := s.Registry.Meta.Get(r.Context(), "cargo", name, version); err != nil {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	m := s.loadMeta(r.Context(), name)
@@ -311,7 +311,7 @@ func (s *State) yank(w http.ResponseWriter, r *http.Request, name, version strin
 	}
 	m.Yanked[version] = yanked
 	s.saveMeta(r.Context(), name, m)
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *State) owners(w http.ResponseWriter, r *http.Request, path string) {
@@ -320,7 +320,7 @@ func (s *State) owners(w http.ResponseWriter, r *http.Request, path string) {
 	name := parts[0]
 	// PUT/DELETE mutate the owner set; GET lists it.
 	if (r.Method == http.MethodPut || r.Method == http.MethodDelete) && len(parts) >= 2 && parts[1] == "owners" {
-		if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
 		data, _ := io.ReadAll(r.Body)
@@ -353,7 +353,7 @@ func (s *State) owners(w http.ResponseWriter, r *http.Request, path string) {
 				s.saveMeta(r.Context(), name, m)
 			}
 		}
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true, "msg": "owners updated"})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true, "msg": "owners updated"})
 		return
 	}
 	m := s.loadMeta(r.Context(), name)
@@ -361,7 +361,7 @@ func (s *State) owners(w http.ResponseWriter, r *http.Request, path string) {
 	for _, o := range m.Owners {
 		users = append(users, map[string]any{"login": o, "name": o})
 	}
-	pkrkit.JSON(w, http.StatusOK, map[string]any{"users": users})
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"users": users})
 }
 
 func (s *State) loadMeta(ctx context.Context, name string) meta {
@@ -377,10 +377,10 @@ func (s *State) loadMeta(ctx context.Context, name string) meta {
 
 func (s *State) saveMeta(ctx context.Context, name string, m meta) {
 	b, _ := json.Marshal(m)
-	_ = s.Registry.Meta.Put(ctx, pkrkit.Artifact{Format: "cargo", Repository: name, Version: "", Proprietary: b})
+	_ = s.Registry.Meta.Put(ctx, artifactkit.Artifact{Format: "cargo", Repository: name, Version: "", Proprietary: b})
 }
 
-func (s *State) registrySubRemote(format, sub string) (*pkrkit.Remote, error) {
+func (s *State) registrySubRemote(format, sub string) (*artifactkit.Remote, error) {
 	base := s.Registry.Upstreams.Sub(format, sub)
 	if base == "" {
 		base = s.Registry.Upstreams.Get(format)
@@ -419,16 +419,16 @@ func parsePublishBody(data []byte) (name, version string, crate []byte) {
 	return name, version, data[cratePos+4 : end]
 }
 
-func storeVersionSource(reg *pkrkit.Registry, name, version string, data []byte, source string, ctx context.Context) {
+func storeVersionSource(reg *artifactkit.Registry, name, version string, data []byte, source string, ctx context.Context) {
 	if version == "" {
 		version = "0.1.0"
 	}
-	art := pkrkit.Artifact{Format: "cargo", Repository: name, Version: version, Source: source}
+	art := artifactkit.Artifact{Format: "cargo", Repository: name, Version: version, Source: source}
 	if len(data) > 0 {
-		h, _ := pkrkit.ComputeHashesBytes(data)
+		h, _ := artifactkit.ComputeHashesBytes(data)
 		digest := "sha256:" + h.SHA256
 		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, pkrkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: name + "-" + version + ".crate"})
+			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: name + "-" + version + ".crate"})
 		}
 	}
 	_ = reg.Meta.Put(ctx, art)

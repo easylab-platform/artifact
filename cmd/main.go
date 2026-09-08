@@ -1,12 +1,12 @@
-// Command pkr runs a multi-protocol package registry. Each protocol is a
-// separate module that registers itself with pkrkit at compile time (see the
+// Command artifact runs a multi-protocol package registry. Each protocol is a
+// separate module that registers itself with artifactkit at compile time (see the
 // blank imports in adapters). The server can mount a single protocol or many,
 // so a pull-through mirror may be started per-protocol or all-at-once.
 //
 // Example:
 //
-//	pkr server --protocols=oci,pypi --listen :8080 --data ./data
-//	pkr server --protocols=oci --oci.upstream https://registry-1.docker.io
+//	artifact server --protocols=oci,pypi --listen :8080 --data ./data
+//	artifact server --protocols=oci --oci.upstream https://registry-1.docker.io
 package main
 
 import (
@@ -17,26 +17,26 @@ import (
 	"path/filepath"
 	"strings"
 
+	_ "github.com/easylab-platform/artifact/cmd/adapters" // registers all enabled protocols
 	"github.com/easylab-platform/artifact/core"
 	"github.com/easylab-platform/artifact/core/store"
-_ "github.com/easylab-platform/artifact/cmd/adapters" // registers all enabled protocols
 )
 
 func main() {
 	var (
-		listen     = flag.String("listen", ":8080", "HTTP listen address")
-		dataDir    = flag.String("data", "./data", "substrate root (sqlite + blobs + upstreams)")
-		protocols  = flag.String("protocols", "", "comma-separated protocols to mount (default: all registered)")
-		selfBase   = flag.String("self-base", "", "external base URL for auth realms / self URIs")
-		tokens     = flag.String("tokens", "", "static `token=level` pairs (read|write), comma separated")
-		airGap     = flag.Bool("air-gap", false, "disable all upstream pull-through")
+		listen      = flag.String("listen", ":8080", "HTTP listen address")
+		dataDir     = flag.String("data", "./data", "substrate root (sqlite + blobs + upstreams)")
+		protocols   = flag.String("protocols", "", "comma-separated protocols to mount (default: all registered)")
+		selfBase    = flag.String("self-base", "", "external base URL for auth realms / self URIs")
+		tokens      = flag.String("tokens", "", "static `token=level` pairs (read|write), comma separated")
+		airGap      = flag.Bool("air-gap", false, "disable all upstream pull-through")
 		blobBackend = flag.String("blob-backend", "filesystem", "blob backend: filesystem | s3")
 	)
 	flag.Parse()
 
-	var auth pkrkit.Auth
+	var auth artifactkit.Auth
 	if *tokens != "" {
-		auth = pkrkit.NewTokenAuth(*tokens)
+		auth = artifactkit.NewTokenAuth(*tokens)
 	}
 
 	upstreams := defaultUpstreams(*airGap)
@@ -49,7 +49,7 @@ func main() {
 	}
 	defer meta.Close()
 
-	var blobs pkrkit.BlobStore
+	var blobs artifactkit.BlobStore
 	// Blob backend: filesystem (default) via the factory, or S3 placeholder. The
 	// inline-SQLite blob backend is removed; artifact bytes live on the filesystem.
 	blobs, err = store.OpenBlobStore(*blobBackend, filepath.Join(*dataDir, "blobs"))
@@ -57,12 +57,12 @@ func main() {
 		log.Fatalf("open blob store: %v", err)
 	}
 
-	reg := &pkrkit.Registry{Blobs: blobs, Meta: meta, Upstreams: upstreams}
+	reg := &artifactkit.Registry{Blobs: blobs, Meta: meta, Upstreams: upstreams}
 
 	// Determine which protocols to mount.
 	names := *protocols
 	if names == "" {
-		all := pkrkit.Registered()
+		all := artifactkit.Registered()
 		names = strings.Join(all, ",")
 	}
 	mux := http.NewServeMux()
@@ -72,7 +72,7 @@ func main() {
 		if name == "" {
 			continue
 		}
-		handler, err := pkrkit.Build(name, reg, configFor(name, *selfBase, auth))
+		handler, err := artifactkit.Build(name, reg, configFor(name, *selfBase, auth))
 		if err != nil {
 			log.Fatalf("build protocol %q: %v", name, err)
 		}
@@ -100,41 +100,41 @@ func main() {
 	}
 
 	addr := *listen
-	log.Printf("pkr listening on %s (%d protocols: %s), data=%s, airgap=%v",
+	log.Printf("artifact listening on %s (%d protocols: %s), data=%s, airgap=%v",
 		addr, mounted, names, *dataDir, *airGap)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func defaultUpstreams(airGap bool) *pkrkit.Upstreams {
-	return &pkrkit.Upstreams{
+func defaultUpstreams(airGap bool) *artifactkit.Upstreams {
+	return &artifactkit.Upstreams{
 		Defaults: map[string]string{
-			"oci":     "https://registry-1.docker.io",
-			"cargo":   "https://crates.io",
+			"oci":      "https://registry-1.docker.io",
+			"cargo":    "https://crates.io",
 			"composer": "https://repo.packagist.org",
-			"conan":   "https://center.conan.io",
-			"go":      "https://proxy.golang.org",
-			"helm":    "https://charts.helm.sh/stable",
-			"hex":     "https://repo.hex.pm",
-			"maven":   "https://repo.maven.apache.org/maven2",
-			"npm":     "https://registry.npmjs.org",
-			"nuget":   "https://api.nuget.org",
-			"pub":     "https://pub.dev",
-			"pypi":    "https://pypi.org",
+			"conan":    "https://center.conan.io",
+			"go":       "https://proxy.golang.org",
+			"helm":     "https://charts.helm.sh/stable",
+			"hex":      "https://repo.hex.pm",
+			"maven":    "https://repo.maven.apache.org/maven2",
+			"npm":      "https://registry.npmjs.org",
+			"nuget":    "https://api.nuget.org",
+			"pub":      "https://pub.dev",
+			"pypi":     "https://pypi.org",
 			"rubygems": "https://rubygems.org",
-			"swift":   "https://api.spm.swift.org",
+			"swift":    "https://api.spm.swift.org",
 			// Sub-endpoints that live on a different host than the format's
 			// primary upstream (crates.io: index + static downloads are
 			// served from index.crates.io / static.crates.io).
-			"cargo.index":  "https://index.crates.io",
-			"cargo.static": "https://static.crates.io/crates",
-			"conan.center": "https://center2.conan.io",
-			"nuget.search": "https://azuresearch-usnc.nuget.org",
+			"cargo.index":        "https://index.crates.io",
+			"cargo.static":       "https://static.crates.io/crates",
+			"conan.center":       "https://center2.conan.io",
+			"nuget.search":       "https://azuresearch-usnc.nuget.org",
 			"nuget.registration": "https://api.nuget.org",
-			"hex.repo":  "https://repo.hex.pm",
-			"rubygems.index": "https://index.rubygems.org",
-			"rubygems.gems":  "https://rubygems.org/gems",
+			"hex.repo":           "https://repo.hex.pm",
+			"rubygems.index":     "https://index.rubygems.org",
+			"rubygems.gems":      "https://rubygems.org/gems",
 		},
 		Overrides: map[string]string{},
 		Proxy:     map[string]string{},
@@ -142,7 +142,7 @@ func defaultUpstreams(airGap bool) *pkrkit.Upstreams {
 	}
 }
 
-func configFor(name, selfBase string, auth pkrkit.Auth) map[string]any {
+func configFor(name, selfBase string, auth artifactkit.Auth) map[string]any {
 	cfg := map[string]any{}
 	// Each protocol mounts under /pkgs/<name> (OCI is special-cased to /v2),
 	// so its emitted self-URLs must carry that prefix. selfBase is the global
@@ -162,7 +162,7 @@ func configFor(name, selfBase string, auth pkrkit.Auth) map[string]any {
 }
 
 // serveToken issues an OCI bearer token from the configured auth.
-func serveToken(w http.ResponseWriter, r *http.Request, auth pkrkit.Auth) {
+func serveToken(w http.ResponseWriter, r *http.Request, auth artifactkit.Auth) {
 	scopes := collectScopes(r.URL.Query()["scope"])
 	username := auth.Authenticate(r.Context(), r)
 	if !canPush(scopes) || username != "" {

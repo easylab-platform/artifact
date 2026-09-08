@@ -1,4 +1,4 @@
-package pkrkit
+package artifactkit
 
 import (
 	"context"
@@ -34,12 +34,12 @@ type BlobStore interface {
 
 // UploadRecord is a persisted in-progress multi-chunk upload session.
 type UploadRecord struct {
-	ID       string `json:"id"`
-	Format   string `json:"format"`
+	ID         string `json:"id"`
+	Format     string `json:"format"`
 	Repository string `json:"repository"`
-	Digest   string `json:"digest,omitempty"`
-	Bytes    int64  `json:"bytes"`
-	Complete bool   `json:"complete"`
+	Digest     string `json:"digest,omitempty"`
+	Bytes      int64  `json:"bytes"`
+	Complete   bool   `json:"complete"`
 }
 
 // IndexStore abstracts the structured metadata layer (SQLite reference

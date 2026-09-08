@@ -15,14 +15,14 @@ import (
 )
 
 type State struct {
-	Registry *pkrkit.Registry
-	Auth     pkrkit.Auth
+	Registry *artifactkit.Registry
+	Auth     artifactkit.Auth
 	SelfBase string
 }
 
-func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) {
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	s := &State{Registry: reg}
-	if a, ok := cfg["auth"].(pkrkit.Auth); ok {
+	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
 	if v, ok := cfg["self_base"].(string); ok {
@@ -31,7 +31,7 @@ func NewHandler(reg *pkrkit.Registry, cfg map[string]any) (http.Handler, error) 
 	return s, nil
 }
 
-func init() { pkrkit.Register("pypi", NewHandler) }
+func init() { artifactkit.Register("pypi", NewHandler) }
 
 // NormalizeName follows PEP 503: lowercase and collapse runs of -_. to a
 // single hyphen.
@@ -83,7 +83,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.projectAPI(w, r, path)
 		return
 	default:
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 	}
 }
 
@@ -114,16 +114,16 @@ func (s *State) simpleRoot(w http.ResponseWriter, r *http.Request) {
 		for _, n := range repos {
 			projects = append(projects, map[string]any{"name": n})
 		}
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"meta": map[string]any{"api-version": "1.4"}, "projects": projects})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"meta": map[string]any{"api-version": "1.4"}, "projects": projects})
 		return
 	}
 	var sb strings.Builder
 	sb.WriteString("<!DOCTYPE html><html><body>\n")
 	for _, name := range repos {
-		sb.WriteString(`<a href="` + s.base() + "/simple/" + pkrkit.URLencode(name) + "/\">" + name + "</a>\n")
+		sb.WriteString(`<a href="` + s.base() + "/simple/" + artifactkit.URLencode(name) + "/\">" + name + "</a>\n")
 	}
 	sb.WriteString("</body></html>")
-	pkrkit.Text(w, http.StatusOK, sb.String(), "text/html")
+	artifactkit.Text(w, http.StatusOK, sb.String(), "text/html")
 }
 
 func (s *State) simpleProject(w http.ResponseWriter, r *http.Request, name string) {
@@ -150,11 +150,11 @@ func (s *State) simpleProject(w http.ResponseWriter, r *http.Request, name strin
 			if b.Name == "" {
 				continue
 			}
-			sb.WriteString(`<a href="` + s.base() + "/simple/" + pkrkit.URLencode(name) + "/" + pkrkit.URLencode(b.Name) + "#sha256=" + b.Hex() + `">` + b.Name + "</a>\n")
+			sb.WriteString(`<a href="` + s.base() + "/simple/" + artifactkit.URLencode(name) + "/" + artifactkit.URLencode(b.Name) + "#sha256=" + b.Hex() + `">` + b.Name + "</a>\n")
 		}
 	}
 	sb.WriteString("</body></html>")
-	pkrkit.Text(w, http.StatusOK, sb.String(), "text/html")
+	artifactkit.Text(w, http.StatusOK, sb.String(), "text/html")
 }
 
 // mergeSimpleProject fetches the upstream index (JSON or HTML per the client)
@@ -166,7 +166,7 @@ func (s *State) mergeSimpleProject(w http.ResponseWriter, r *http.Request, name 
 	if err != nil {
 		return false
 	}
-	path := "/simple/" + pkrkit.URLencode(name) + "/"
+	path := "/simple/" + artifactkit.URLencode(name) + "/"
 	if wantsJSON(r) {
 		jsonRemote := remote.WithHeader("Accept", "application/vnd.pypi.simple.v1+json")
 		body, err := jsonRemote.GetBytes(r.Context(), path)
@@ -174,7 +174,7 @@ func (s *State) mergeSimpleProject(w http.ResponseWriter, r *http.Request, name 
 			return false
 		}
 		rewritten := mergeJSONHrefs(string(body), s.base(), name, versions, r, s.Registry)
-		pkrkit.Text(w, http.StatusOK, rewritten, "application/vnd.pypi.simple.v1+json")
+		artifactkit.Text(w, http.StatusOK, rewritten, "application/vnd.pypi.simple.v1+json")
 		return true
 	}
 	body, err := remote.GetCached(r.Context(), sharedCache(), path)
@@ -182,7 +182,7 @@ func (s *State) mergeSimpleProject(w http.ResponseWriter, r *http.Request, name 
 		return false
 	}
 	rewritten := rewriteLinks(body, s.base(), name)
-	pkrkit.Text(w, http.StatusOK, rewritten, "text/html")
+	artifactkit.Text(w, http.StatusOK, rewritten, "text/html")
 	return true
 }
 
@@ -199,7 +199,7 @@ func (s *State) simpleProjectJSON(w http.ResponseWriter, r *http.Request, name s
 			}
 			entry := map[string]any{
 				"filename": b.Name,
-				"url":      s.base() + "/simple/" + pkrkit.URLencode(name) + "/" + pkrkit.URLencode(b.Name),
+				"url":      s.base() + "/simple/" + artifactkit.URLencode(name) + "/" + artifactkit.URLencode(b.Name),
 				"hashes":   map[string]any{"sha256": b.Hex()},
 			}
 			if b.Size > 0 {
@@ -212,7 +212,7 @@ func (s *State) simpleProjectJSON(w http.ResponseWriter, r *http.Request, name s
 	out, _ := json.Marshal(map[string]any{
 		"meta": map[string]any{"api-version": "1.4"}, "name": name, "versions": versions, "files": files,
 	})
-	pkrkit.Text(w, http.StatusOK, string(out), "application/vnd.pypi.simple.v1+json")
+	artifactkit.Text(w, http.StatusOK, string(out), "application/vnd.pypi.simple.v1+json")
 }
 
 // proxySimpleProject rewrites an upstream /simple/{name}/ index page. JSON
@@ -222,7 +222,7 @@ func (s *State) proxySimpleProject(w http.ResponseWriter, r *http.Request, name 
 	if err != nil {
 		return false
 	}
-	path := "/simple/" + pkrkit.URLencode(name) + "/"
+	path := "/simple/" + artifactkit.URLencode(name) + "/"
 	if wantsJSON(r) {
 		// Request the JSON flavor upstream and rewrite each file URL to self.
 		// NOTE: fetched uncached — the shared index cache is keyed by URL only,
@@ -233,7 +233,7 @@ func (s *State) proxySimpleProject(w http.ResponseWriter, r *http.Request, name 
 			return false
 		}
 		rewritten := mergeJSONHrefs(string(body), s.base(), name, nil, nil, s.Registry)
-		pkrkit.Text(w, http.StatusOK, rewritten, "application/vnd.pypi.simple.v1+json")
+		artifactkit.Text(w, http.StatusOK, rewritten, "application/vnd.pypi.simple.v1+json")
 		return true
 	}
 	body, err := remote.GetCached(r.Context(), sharedCache(), path)
@@ -241,7 +241,7 @@ func (s *State) proxySimpleProject(w http.ResponseWriter, r *http.Request, name 
 		return false
 	}
 	rewritten := rewriteLinks(body, s.base(), name)
-	pkrkit.Text(w, http.StatusOK, rewritten, "text/html")
+	artifactkit.Text(w, http.StatusOK, rewritten, "text/html")
 	return true
 }
 
@@ -254,7 +254,7 @@ func rewriteJSONHrefs(body, selfBase, project string) []byte {
 // locally pushed files (analogous to the HTML rewriteLinks path). The caller
 // supplies the request only to read local blobs' hashes. It is a free function
 // (no State) so rewriteJSONHrefs can delegate without a receiver.
-func mergeJSONHrefs(body, selfBase, project string, versions []string, req *http.Request, reg *pkrkit.Registry) string {
+func mergeJSONHrefs(body, selfBase, project string, versions []string, req *http.Request, reg *artifactkit.Registry) string {
 	var doc map[string]any
 	if json.Unmarshal([]byte(body), &doc) != nil {
 		return body
@@ -266,7 +266,7 @@ func mergeJSONHrefs(body, selfBase, project string, versions []string, req *http
 			if m, ok := f.(map[string]any); ok {
 				if fname, _ := m["filename"].(string); fname != "" {
 					seen[fname] = true
-					m["url"] = selfBase + "/simple/" + pkrkit.URLencode(project) + "/" + pkrkit.URLencode(fname)
+					m["url"] = selfBase + "/simple/" + artifactkit.URLencode(project) + "/" + artifactkit.URLencode(fname)
 				}
 			}
 		}
@@ -286,10 +286,10 @@ func mergeJSONHrefs(body, selfBase, project string, versions []string, req *http
 					continue
 				}
 				entry := map[string]any{
-					"filename": b.Name,
-					"url":      selfBase + "/simple/" + pkrkit.URLencode(project) + "/" + pkrkit.URLencode(b.Name),
-					"hashes":   map[string]any{"sha256": b.Hex()},
-					"size":     b.Size,
+					"filename":    b.Name,
+					"url":         selfBase + "/simple/" + artifactkit.URLencode(project) + "/" + artifactkit.URLencode(b.Name),
+					"hashes":      map[string]any{"sha256": b.Hex()},
+					"size":        b.Size,
 					"upload-time": "2024-01-01T00:00:00Z",
 				}
 				files = append(files, entry)
@@ -327,7 +327,7 @@ func rewriteLinks(html, selfBase, project string) string {
 		if i := strings.Index(fname, "#"); i >= 0 {
 			fname = fname[:i]
 		}
-		href := selfBase + "/simple/" + pkrkit.URLencode(project) + "/" + pkrkit.URLencode(fname)
+		href := selfBase + "/simple/" + artifactkit.URLencode(project) + "/" + artifactkit.URLencode(fname)
 		sb.WriteString(`<a href="` + href + `">` + fname + "</a>")
 		rest = after[close+len("</a>"):]
 	}
@@ -349,7 +349,7 @@ func (s *State) simpleFile(w http.ResponseWriter, r *http.Request, project, file
 				}
 				data, _ := io.ReadAll(rd)
 				rd.Close()
-				pkrkit.BlobResponse(w, data, filename)
+				artifactkit.BlobResponse(w, data, filename)
 				return
 			}
 		}
@@ -357,30 +357,30 @@ func (s *State) simpleFile(w http.ResponseWriter, r *http.Request, project, file
 	// Pull-through: resolve from the upstream /simple/ page.
 	base := s.Registry.Upstreams.Get("pypi")
 	if base == "" {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
-	pagePath := "/simple/" + pkrkit.URLencode(project) + "/"
+	pagePath := "/simple/" + artifactkit.URLencode(project) + "/"
 	remote := s.Registry.RemoteAt(base)
 	html, err := remote.GetBytes(r.Context(), pagePath)
 	if err != nil {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	pageURL := base + pagePath
 	href := resolveFileHref(string(html), filename, pageURL)
 	if href == "" {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	fetched, err := s.Registry.FetchAbsolute(r.Context(), href)
 	if err != nil {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	version := versionFromFilename(filename, project)
 	s.storeVersion(project, version, filename, fetched.Data, "pull", r.Context())
-	pkrkit.BlobResponse(w, fetched.Data, filename)
+	artifactkit.BlobResponse(w, fetched.Data, filename)
 }
 
 func resolveFileHref(html, filename, baseURL string) string {
@@ -458,7 +458,7 @@ func (s *State) metadataFile(w http.ResponseWriter, r *http.Request, project, fi
 			if meta == "" {
 				meta = "Metadata-Version: 2.1\nName: " + project + "\nVersion: " + v + "\n"
 			}
-			pkrkit.Text(w, http.StatusOK, meta, "application/octet-stream")
+			artifactkit.Text(w, http.StatusOK, meta, "application/octet-stream")
 			return
 		}
 	}
@@ -466,33 +466,33 @@ func (s *State) metadataFile(w http.ResponseWriter, r *http.Request, project, fi
 	// /simple/ page and fetch "<url>.metadata".
 	base := s.Registry.Upstreams.Get("pypi")
 	if base == "" {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
-	pagePath := "/simple/" + pkrkit.URLencode(project) + "/"
+	pagePath := "/simple/" + artifactkit.URLencode(project) + "/"
 	remote := s.Registry.RemoteAt(base)
 	page, err := remote.GetBytes(r.Context(), pagePath)
 	if err != nil {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	pageURL := base + pagePath
 	fileURL := resolveFileHref(string(page), filename, pageURL)
 	if fileURL == "" {
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
 	meta, err := remote.GetBytes(r.Context(), strings.TrimPrefix(fileURL+".metadata", base))
 	if err != nil {
 		// Try also against the explicit remote base (files.pythonhosted.org).
 		if m2, err := s.Registry.FetchAbsolute(r.Context(), fileURL+".metadata"); err == nil {
-			pkrkit.Text(w, http.StatusOK, string(m2.Data), "application/octet-stream")
+			artifactkit.Text(w, http.StatusOK, string(m2.Data), "application/octet-stream")
 			return
 		}
-		pkrkit.Error(w, http.StatusNotFound, "not found")
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
-	pkrkit.Text(w, http.StatusOK, string(meta), "application/octet-stream")
+	artifactkit.Text(w, http.StatusOK, string(meta), "application/octet-stream")
 }
 
 func extractWheelMetadata(data []byte) string {
@@ -510,16 +510,16 @@ func extractWheelMetadata(data []byte) string {
 }
 
 func (s *State) upload(w http.ResponseWriter, r *http.Request) {
-	if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
 	data, _ := io.ReadAll(r.Body)
 	ct := r.Header.Get("Content-Type")
 	var name, version, filename string
 	if strings.HasPrefix(ct, "multipart/form-data") {
-		name, _ = pkrkit.ExtractTextField(data, ct, "name")
-		version, _ = pkrkit.ExtractTextField(data, ct, "version")
-		filename, data, _ = pkrkit.ExtractFirstFile(data, ct)
+		name, _ = artifactkit.ExtractTextField(data, ct, "name")
+		version, _ = artifactkit.ExtractTextField(data, ct, "version")
+		filename, data, _ = artifactkit.ExtractFirstFile(data, ct)
 	}
 	if name == "" {
 		// JSON fallback.
@@ -530,28 +530,28 @@ func (s *State) upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if name == "" {
-		pkrkit.Error(w, http.StatusBadRequest, "missing name")
+		artifactkit.Error(w, http.StatusBadRequest, "missing name")
 		return
 	}
 	if filename == "" {
 		filename = "unknown.bin"
 	}
 	s.storeVersion(name, version, filename, data, "push", r.Context())
-	pkrkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
+	artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
 }
 
 func (s *State) projectAPI(w http.ResponseWriter, r *http.Request, path string) {
 	// /api/projects/{name}
 	name := NormalizeName(strings.Trim(strings.TrimPrefix(path, "/api/projects/"), "/"))
 	if r.Method == http.MethodDelete {
-		if !pkrkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
 		}
 		vs, _ := s.Registry.Meta.ListVersions(r.Context(), "pypi", name)
 		for _, v := range vs {
 			removeVersion(s.Registry, name, v, r.Context())
 		}
-		pkrkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
 	w.WriteHeader(http.StatusMethodNotAllowed)
@@ -562,19 +562,19 @@ func (s *State) storeVersion(name, version, filename string, data []byte, source
 	if version == "" {
 		version = "0.1.0"
 	}
-	art := pkrkit.Artifact{Format: "pypi", Repository: name, Version: version, Source: source}
+	art := artifactkit.Artifact{Format: "pypi", Repository: name, Version: version, Source: source}
 	if len(data) > 0 {
-		h, _ := pkrkit.ComputeHashesBytes(data)
+		h, _ := artifactkit.ComputeHashesBytes(data)
 		digest := "sha256:" + h.SHA256
 		if _, err := s.Registry.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, pkrkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
+			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
 		}
 	}
 	art.Proprietary = []byte(`{"upload_time":"2024-01-01T00:00:00.000000Z"}`)
 	_ = s.Registry.Meta.Put(ctx, art)
 }
 
-func removeVersion(reg *pkrkit.Registry, name, version string, ctx context.Context) {
+func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.Context) {
 	if art, err := reg.Meta.Get(ctx, "pypi", name, version); err == nil {
 		for _, b := range art.Blobs {
 			_ = reg.Blobs.Delete(ctx, b.Digest)
@@ -583,8 +583,8 @@ func removeVersion(reg *pkrkit.Registry, name, version string, ctx context.Conte
 	_ = reg.Meta.Delete(ctx, "pypi", name, version)
 }
 
-func sharedCache() *pkrkit.IndexCache {
-	return pkrkit.SharedIndexCache()
+func sharedCache() *artifactkit.IndexCache {
+	return artifactkit.SharedIndexCache()
 }
 
 func jsonField(data []byte, key string) string {

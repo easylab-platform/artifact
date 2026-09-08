@@ -1,4 +1,4 @@
-package pkrkit_test
+package artifactkit_test
 
 import (
 	"context"
@@ -19,8 +19,8 @@ func TestFileBlobStoreDedupAndVerify(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	data := []byte("hello pkr")
-		d := pkrkit.DigestOf(data)
+	data := []byte("hello artifact")
+	d := artifactkit.DigestOf(data)
 	ok, err := blobs.PutIfAbsent(ctx, d, strings.NewReader(string(data)))
 	if err != nil || !ok {
 		t.Fatalf("first put: %v ok=%v", err, ok)
@@ -47,9 +47,9 @@ func TestSQLiteStoreRoundtrip(t *testing.T) {
 	}
 	defer s.Close()
 	ctx := context.Background()
-	art := pkrkit.Artifact{
+	art := artifactkit.Artifact{
 		Format: "oci", Repository: "library/alpine", Version: "3",
-		MediaType: "application/vnd.oci.image.manifest.v1+json",
+		MediaType:   "application/vnd.oci.image.manifest.v1+json",
 		Proprietary: []byte(`{"x":1}`), Digest: "sha256:abc", Source: "push",
 	}
 	if err := s.Put(ctx, art); err != nil {
@@ -73,13 +73,13 @@ func TestSQLiteStoreRoundtrip(t *testing.T) {
 	if err := s.Delete(ctx, "oci", "library/alpine", "3"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Get(ctx, "oci", "library/alpine", "3"); !errors.Is(err, pkrkit.ErrArtifactUnknown) {
+	if _, err := s.Get(ctx, "oci", "library/alpine", "3"); !errors.Is(err, artifactkit.ErrArtifactUnknown) {
 		t.Fatalf("expected ErrArtifactUnknown, got %v", err)
 	}
 }
 
 func TestTokenAuth(t *testing.T) {
-	auth := pkrkit.NewTokenAuth("devtoken=write,readtoken=read")
+	auth := artifactkit.NewTokenAuth("devtoken=write,readtoken=read")
 	if _, ok := auth.CheckBearer(context.Background(), "devtoken", "repository:foo:pull"); !ok {
 		t.Fatal("write token should permit pull")
 	}
@@ -94,7 +94,7 @@ func TestTokenAuth(t *testing.T) {
 }
 
 func TestUpstreamsProxyWalk(t *testing.T) {
-	u := &pkrkit.Upstreams{Proxy: map[string]string{"nuget.search": "http://p:1", "nuget": "http://p2:2"}}
+	u := &artifactkit.Upstreams{Proxy: map[string]string{"nuget.search": "http://p:1", "nuget": "http://p2:2"}}
 	if v, ok := u.ProxyURL("nuget.search"); !ok || v != "http://p:1" {
 		t.Fatalf("exact: %v %v", v, ok)
 	}
@@ -107,7 +107,7 @@ func TestUpstreamsProxyWalk(t *testing.T) {
 }
 
 func TestMemCacheTTL(t *testing.T) {
-	c := pkrkit.NewMemCache(20 * time.Millisecond)
+	c := artifactkit.NewMemCache(20 * time.Millisecond)
 	c.Set("k", "v")
 	if v, ok := c.Get("k"); !ok || v != "v" {
 		t.Fatal("cache miss on fresh key")

@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	pkrkit "github.com/easylab-platform/artifact/core"
+	artifactkit "github.com/easylab-platform/artifact/core"
 )
-
 
 const (
 	BlobFilesystem = "filesystem"
@@ -17,7 +16,7 @@ const (
 // (default; a filesystem CAS rooted at dir) is fully implemented; "s3" is a
 // placeholder that falls back to the filesystem CAS so a misconfigured
 // deployment never fails to start. Metadata is never stored inline as blobs.
-func OpenBlobStore(backend, dir string) (pkrkit.BlobStore, error) {
+func OpenBlobStore(backend, dir string) (artifactkit.BlobStore, error) {
 	switch backend {
 	case BlobFilesystem, "":
 		return NewFileBlobStore(dir)
