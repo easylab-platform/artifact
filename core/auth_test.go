@@ -240,3 +240,74 @@ func TestIssueTokenTTLUnit(t *testing.T) {
 		t.Fatal("1h TTL mint should be valid")
 	}
 }
+
+// TestStoreAuthOverTokenStore drives the DB-backed Auth over an in-memory
+// TokenStore (the GORM implementation is covered in core/store).
+func TestStoreAuthOverTokenStore(t *testing.T) {
+	creds := map[string]Principal{
+		"writetok": {Username: "alice", Level: LevelWrite},
+		"readtok":  {Username: "bob", Level: LevelRead},
+	}
+	var open bool
+	a := NewStoreAuth(tokenStoreFuncs{
+		lookup: func(ctx context.Context, token string) (Principal, bool) {
+			p, ok := creds[token]
+			return p, ok
+		},
+		lookupUser: func(ctx context.Context, username string) (Principal, bool) {
+			for _, p := range creds {
+				if p.Username == username {
+					return p, true
+				}
+			}
+			return Principal{}, false
+		},
+		openFn: func(context.Context) bool { return open },
+	})
+	ctx := context.Background()
+
+	// Privilege matrix.
+	if _, ok := a.CheckBearer(ctx, "writetok", "repository:x:push"); !ok {
+		t.Fatal("write should push")
+	}
+	if _, ok := a.CheckBearer(ctx, "readtok", "repository:x:push"); ok {
+		t.Fatal("read must not push")
+	}
+	if _, ok := a.CheckBearer(ctx, "readtok", "repository:x:pull"); !ok {
+		t.Fatal("read should pull")
+	}
+
+	// Mint inherits the grantee's account level.
+	m := a.IssueToken(ctx, "alice", []string{"repository:x:pull,push"}, time.Hour)
+	if m == "" || m == "writetok" {
+		t.Fatalf("mint = %q", m)
+	}
+	if _, ok := a.CheckBearer(ctx, m, "repository:x:push"); !ok {
+		t.Fatal("alice's mint (write account) should push")
+	}
+	mr := a.IssueToken(ctx, "bob", []string{"repository:x:pull"}, time.Hour)
+	if _, ok := a.CheckBearer(ctx, mr, "repository:x:push"); ok {
+		t.Fatal("bob's mint (read account) must not push")
+	}
+
+	// Open instance: anonymous write permitted.
+	open = true
+	if _, ok := a.CheckBearer(ctx, "anything", "repository:x:push"); !ok {
+		t.Fatal("open instance should allow")
+	}
+}
+
+// tokenStoreFuncs adapts function fields to TokenStore (test helper).
+type tokenStoreFuncs struct {
+	lookup     func(ctx context.Context, token string) (Principal, bool)
+	lookupUser func(ctx context.Context, username string) (Principal, bool)
+	openFn     func(ctx context.Context) bool
+}
+
+func (f tokenStoreFuncs) LookupToken(ctx context.Context, token string) (Principal, bool) {
+	return f.lookup(ctx, token)
+}
+func (f tokenStoreFuncs) LookupUsername(ctx context.Context, username string) (Principal, bool) {
+	return f.lookupUser(ctx, username)
+}
+func (f tokenStoreFuncs) OpenInstance(ctx context.Context) bool { return f.openFn(ctx) }

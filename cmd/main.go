@@ -10,6 +10,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -29,16 +30,11 @@ func main() {
 		dataDir     = flag.String("data", "./data", "substrate root (sqlite + blobs + upstreams)")
 		protocols   = flag.String("protocols", "", "comma-separated protocols to mount (default: all registered)")
 		selfBase    = flag.String("self-base", "", "external base URL for auth realms / self URIs")
-		tokens      = flag.String("tokens", "", "static `token=level` pairs (read|write), comma separated")
+		tokens      = flag.String("tokens", "", "`token=level` pairs (read|write) to seed into the credential DB (hashed), comma separated; repeat on every start to keep them registered")
 		airGap      = flag.Bool("air-gap", false, "disable all upstream pull-through")
 		blobBackend = flag.String("blob-backend", "filesystem", "blob backend: filesystem | s3")
 	)
 	flag.Parse()
-
-	var auth artifactkit.Auth
-	if *tokens != "" {
-		auth = artifactkit.NewTokenAuth(*tokens)
-	}
 
 	upstreams := defaultUpstreams(*airGap)
 
@@ -49,6 +45,22 @@ func main() {
 		log.Fatalf("open metadata: %v", err)
 	}
 	defer func() { _ = meta.Close() }()
+
+	// Auth: credentials live in the metadata DB (SHA-256 hashed at rest).
+	// --tokens seeds them (idempotent); once any user exists the instance is
+	// closed and only registered credentials work. With no users at all the
+	// instance is open (anonymous read/write, dev mode).
+	var auth artifactkit.Auth
+	if *tokens != "" {
+		if err := seedTokens(meta, *tokens); err != nil {
+			log.Fatalf("seed tokens: %v", err)
+		}
+	}
+	if meta.OpenInstance(context.Background()) {
+		log.Printf("auth: no users registered — open instance (anonymous read/write)")
+	} else {
+		auth = artifactkit.NewStoreAuth(meta)
+	}
 
 	var blobs artifactkit.BlobStore
 	// Blob backend: filesystem (default) via the factory, or S3 placeholder. The
@@ -245,4 +257,40 @@ func mustJSON(v any) string {
 		return `{}`
 	}
 	return string(b)
+}
+
+// seedTokens registers `token=level` pairs into the credential DB. Idempotent:
+// a token already present (same hash) is not duplicated.
+func seedTokens(meta *store.Store, spec string) error {
+	ctx := context.Background()
+	for _, pair := range strings.FieldsFunc(spec, func(r rune) bool { return r == ',' || r == ' ' }) {
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) != 2 || parts[0] == "" {
+			return fmt.Errorf("malformed token pair %q (want token=level)", pair)
+		}
+		tok, level := parts[0], parts[1]
+		switch level {
+		case "read", "r", "rl":
+			level = "read"
+		case "write", "w", "rw":
+			level = "write"
+		default:
+			return fmt.Errorf("invalid level %q (read|write)", level)
+		}
+		if _, ok := meta.LookupToken(ctx, tok); ok {
+			continue // already seeded
+		}
+		uid, err := meta.CreateAuthUser(ctx, "token-user")
+		if err != nil {
+			return err
+		}
+		if err := meta.CreateAuthToken(ctx, tok, uid, level); err != nil {
+			return err
+		}
+		log.Printf("auth: seeded credential (level %s)", level)
+	}
+	return nil
 }

@@ -55,7 +55,7 @@ func OpenStore(cfg DriverConfig) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&artifactRow{}, &uploadRow{}, &metaRow{}); err != nil {
+	if err := db.AutoMigrate(&artifactRow{}, &uploadRow{}, &metaRow{}, &authUserRow{}, &authTokenRow{}); err != nil {
 		return nil, err
 	}
 	return &Store{db: db}, nil
