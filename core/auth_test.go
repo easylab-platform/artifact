@@ -2,6 +2,7 @@ package artifactkit
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -113,7 +114,9 @@ func TestIssueTokenExpiry(t *testing.T) {
 }
 
 // TestAuthorizeWriteRequiresWriteLevel verifies the generic adapter gate:
-// anonymous -> 401, read-level -> 403, write-level -> allowed.
+// anonymous -> 401, read-level -> 403, write-level -> allowed — for EVERY
+// credential scheme a protocol may present (Bearer, bare Authorization,
+// Basic password, X-NuGet-ApiKey).
 func TestAuthorizeWriteRequiresWriteLevel(t *testing.T) {
 	a := NewTokenAuth("reader=read writer=write")
 
@@ -152,6 +155,59 @@ func TestAuthorizeWriteRequiresWriteLevel(t *testing.T) {
 	rec4 := httptest.NewRecorder()
 	if !AuthorizeWrite(rec4, mkReq(""), nil) {
 		t.Fatal("nil auth must allow (dev mode)")
+	}
+}
+
+// TestAuthorizeWriteAllSchemes drives the write-token through every scheme a
+// protocol adapter may use. Each must authenticate AND pass the write-level
+// check (the v0.2.0 regression only recognized the Bearer scheme).
+func TestAuthorizeWriteAllSchemes(t *testing.T) {
+	a := NewTokenAuth("writer=write reader=read")
+
+	mk := func(headers map[string]string) *http.Request {
+		r := httptest.NewRequest(http.MethodPut, "/publish", nil)
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		return r
+	}
+
+	// Bearer.
+	rec := httptest.NewRecorder()
+	if !AuthorizeWrite(rec, mk(map[string]string{"Authorization": "Bearer writer"}), a) {
+		t.Fatalf("Bearer write: %d %s", rec.Code, rec.Body.String())
+	}
+	// Bare Authorization (cargo).
+	rec2 := httptest.NewRecorder()
+	if !AuthorizeWrite(rec2, mk(map[string]string{"Authorization": "writer"}), a) {
+		t.Fatalf("bare write: %d %s", rec2.Code, rec2.Body.String())
+	}
+	// Basic with the token as password (composer/hex style).
+	rec3 := httptest.NewRecorder()
+	if !AuthorizeWrite(rec3, mk(map[string]string{"Authorization": "Basic " + base64.StdEncoding.EncodeToString([]byte("user:writer"))}), a) {
+		t.Fatalf("Basic write: %d %s", rec3.Code, rec3.Body.String())
+	}
+	// NuGet API key.
+	rec4 := httptest.NewRecorder()
+	if !AuthorizeWrite(rec4, mk(map[string]string{"X-NuGet-ApiKey": "writer"}), a) {
+		t.Fatalf("NuGet-ApiKey write: %d %s", rec4.Code, rec4.Body.String())
+	}
+
+	// The read token must be denied in every scheme too (403, not 401: the
+	// credential is recognized, just not privileged).
+	for name, headers := range map[string]map[string]string{
+		"Bearer":       {"Authorization": "Bearer reader"},
+		"bare":         {"Authorization": "reader"},
+		"Basic":        {"Authorization": "Basic " + base64.StdEncoding.EncodeToString([]byte("user:reader"))},
+		"NuGet-ApiKey": {"X-NuGet-ApiKey": "reader"},
+	} {
+		rec := httptest.NewRecorder()
+		if AuthorizeWrite(rec, mk(headers), a) {
+			t.Fatalf("%s read-level should be denied", name)
+		}
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s read-level code = %d", name, rec.Code)
+		}
 	}
 }
 

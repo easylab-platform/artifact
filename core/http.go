@@ -1,6 +1,8 @@
 package artifactkit
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -107,23 +109,66 @@ func AuthorizeWrite(w http.ResponseWriter, r *http.Request, auth Auth) bool {
 		JSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "authentication required"})
 		return false
 	}
-	// A named principal must actually be write-capable. Check via the bearer
-	// path with a push scope; static read tokens resolve to a username but
-	// fail this check.
-	if _, ok := auth.CheckBearer(r.Context(), bearerOf(r), "repository:*:push"); !ok {
+	// A named principal must actually be write-capable. Protocols present the
+	// SAME static token through different schemes (Bearer, bare
+	// Authorization, Basic password, X-NuGet-ApiKey), so every candidate the
+	// request could be carrying is checked — not just the Bearer header.
+	if !WriteCapable(r.Context(), auth, r) {
 		JSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "write-level credential required"})
 		return false
 	}
 	return true
 }
 
-// bearerOf extracts the raw Bearer credential ("" when absent).
-func bearerOf(r *http.Request) string {
-	raw := r.Header.Get("Authorization")
-	if rest, ok := strings.CutPrefix(raw, "Bearer "); ok {
-		return rest
+// WriteCapable reports whether the request carries a write-level credential
+// in ANY of the protocol credential schemes. It is the scheme-agnostic
+// privilege check behind AuthorizeWrite (default implementation).
+func WriteCapable(ctx context.Context, a Auth, r *http.Request) bool {
+	for _, tok := range credentialCandidates(r) {
+		if _, ok := a.CheckBearer(ctx, tok, "repository:*:push"); ok {
+			return true
+		}
 	}
-	return raw
+	return false
+}
+
+// credentialCandidates extracts every raw token the request may be carrying:
+// the Bearer credential, a bare Authorization value, the Basic password, and
+// the NuGet API-key header. Duplicates are collapsed.
+func credentialCandidates(r *http.Request) []string {
+	raw := r.Header.Get("Authorization")
+	var out []string
+	seen := func(s string) bool {
+		for _, o := range out {
+			if o == s {
+				return true
+			}
+		}
+		return false
+	}
+	add := func(s string) {
+		if s != "" && !seen(s) {
+			out = append(out, s)
+		}
+	}
+	if rest, ok := strings.CutPrefix(raw, "Bearer "); ok {
+		add(rest)
+	} else if rest, ok := strings.CutPrefix(raw, "token "); ok {
+		add(rest)
+	} else if rest, ok := strings.CutPrefix(raw, "Token "); ok {
+		add(rest)
+	} else if rest, ok := strings.CutPrefix(raw, "Basic "); ok {
+		if decoded, err := base64.StdEncoding.DecodeString(rest); err == nil {
+			if _, pass, ok := strings.Cut(string(decoded), ":"); ok {
+				add(strings.TrimSpace(pass))
+			}
+		}
+	} else if raw != "" {
+		// Bare token (cargo style: Authorization: <token>).
+		add(raw)
+	}
+	add(r.Header.Get("X-NuGet-ApiKey"))
+	return out
 }
 
 // WriteReadErr maps a request-body read failure to a status. A body over the
