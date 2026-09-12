@@ -235,8 +235,16 @@ func (a *Adapter) challenge(w http.ResponseWriter, name string, act artifactkit.
 }
 
 func (a *Adapter) ping(w http.ResponseWriter, r *http.Request) {
-	// Pulls are public, so the API version check succeeds without a
-	// challenge; clients still authenticate when they push.
+	// A registry with auth enabled MUST challenge on /v2/ so clients perform
+	// the Distribution token flow (anonymous callers get a pull-only token).
+	// Returning 200 here makes clients assume anonymous access and then fail
+	// fatally on the first push (skopeo/crane never retry a write 401).
+	if a.state.Auth != nil {
+		realm := a.tokenRealm()
+		w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s",service="oci-registry"`, realm))
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 	w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
 	w.WriteHeader(http.StatusOK)
 }
