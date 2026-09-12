@@ -193,8 +193,27 @@ func configFor(name, selfBase string, auth artifactkit.Auth, dataDir string) map
 // privilege); push/delete scopes require an authenticated write-level
 // principal, and the minted token never exposes the static credential.
 func serveToken(w http.ResponseWriter, r *http.Request, auth artifactkit.Auth) {
-	scopes := collectScopes(r.URL.Query()["scope"])
+	// Support both the GET token flow (scope in the query, credentials in
+	// headers) and the OAuth2 password-grant POST (form body) used by
+	// buildkit/containerd push.
+	_ = r.ParseForm()
+	scopeVals := append([]string{}, r.URL.Query()["scope"]...)
+	scopeVals = append(scopeVals, r.PostForm["scope"]...)
+	scopes := collectScopes(scopeVals)
 	username := auth.Authenticate(r.Context(), r)
+	if username == "" {
+		// Password carries the credential (same as Basic); refresh_token may
+		// carry a raw token.
+		if pass := r.PostForm.Get("password"); pass != "" {
+			if u, ok := auth.CheckToken(r.Context(), pass); ok {
+				username = u
+			}
+		} else if ref := r.PostForm.Get("refresh_token"); ref != "" {
+			if u, ok := auth.CheckToken(r.Context(), ref); ok {
+				username = u
+			}
+		}
+	}
 	if username == "" && canPush(scopes) {
 		// Anonymous push scope: challenge rather than mint anything.
 		w.Header().Set("WWW-Authenticate", `Basic realm="/token"`)
