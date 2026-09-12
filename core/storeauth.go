@@ -163,22 +163,22 @@ func (a *StoreAuth) CheckBasic(ctx context.Context, _, pass string) bool {
 
 // IssueToken implements Auth. It mints a RANDOM bearer token bound to the
 // grantee's privilege: a write-level principal gets a push-capable token, a
-// read-level (or anonymous) principal gets a pull-only token. The database
+// read-level principal gets a pull-only token, and an anonymous caller gets a
+// pull-only token too (public reads need no credential). The database
 // credential is NEVER handed back to a client.
 func (a *StoreAuth) IssueToken(ctx context.Context, username string, scopes []string, ttl time.Duration) string {
 	if ttl <= 0 {
 		ttl = time.Hour
 	}
-	if username == "" {
-		return ""
-	}
 	level := LevelRead
 	if a.open(ctx) {
 		level = LevelWrite
-	} else if p, ok := a.store.LookupUsername(ctx, username); ok {
-		// The grantee's mint inherits the strongest credential level
-		// registered for their account.
-		level = p.Level
+	} else if username != "" {
+		if p, ok := a.store.LookupUsername(ctx, username); ok {
+			// The grantee's mint inherits the strongest credential level
+			// registered for their account.
+			level = p.Level
+		}
 	}
 	var b [24]byte
 	if _, err := rand.Read(b[:]); err != nil {

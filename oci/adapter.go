@@ -198,12 +198,16 @@ func (a *Adapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorize checks the request's credential against the exact action being
-// performed. A valid credential is NOT enough: the token's level must permit
-// the action (read cannot push/delete). Anonymous access is not granted here
-// (pull-through reads still work, but writes always require write level).
+// performed. Pull is public: any reader may fetch manifests/blobs without a
+// credential (the token dance is still supported and honored for clients that
+// perform it). Write actions (push/delete) always require a write-level
+// credential.
 func (a *Adapter) authorize(r *http.Request, name string, act artifactkit.Action) bool {
 	if a.state.Auth == nil {
 		return true // auth disabled: anonymous full access (dev/open mode)
+	}
+	if act == artifactkit.ActionPull {
+		return true
 	}
 	scope := "repository:" + name + ":" + string(act)
 	tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -224,12 +228,8 @@ func (a *Adapter) challenge(w http.ResponseWriter, name string, act artifactkit.
 }
 
 func (a *Adapter) ping(w http.ResponseWriter, r *http.Request) {
-	if a.state.Auth != nil {
-		realm := a.tokenRealm()
-		w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s",service="oci-registry"`, realm))
-		w.WriteHeader(http.StatusUnauthorized)
-		return
-	}
+	// Pulls are public, so the API version check succeeds without a
+	// challenge; clients still authenticate when they push.
 	w.Header().Set("Docker-Distribution-Api-Version", "registry/2.0")
 	w.WriteHeader(http.StatusOK)
 }
