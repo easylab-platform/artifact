@@ -210,6 +210,13 @@ func (a *Adapter) authorize(r *http.Request, name string, act artifactkit.Action
 		return true
 	}
 	scope := "repository:" + name + ":" + string(act)
+	// Accept every scheme a client may present for a write: a Bearer token
+	// (pushed through the /token realm), OR a static/Basic credential. This
+	// keeps the Distribution token dance working while also letting tools like
+	// skopeo/crane push directly with `-u user:token`.
+	if artifactkit.WriteCapable(r.Context(), a.state.Auth, r) {
+		return true
+	}
 	tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if tok != "" && tok != r.Header.Get("Authorization") {
 		if _, ok := a.state.Auth.CheckBearer(r.Context(), tok, scope); ok {
