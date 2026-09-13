@@ -14,10 +14,24 @@ import (
 // adds the database-backed variant: TokenStore (the credential DB seam) and
 // StoreAuth (an Auth over it with the same minted-token semantics).
 
-// Principal is the resolved identity behind a credential.
+// Principal is the resolved identity behind a credential. TenantID carries
+// the caller's tenancy boundary (0 = unset/default); the registry ownership
+// layer uses it to decide who may publish and who may read private packages.
 type Principal struct {
 	Username string
 	Level    TokenLevel
+	TenantID int64
+}
+
+// TenantTokenStore is the optional tenancy extension of TokenStore: it
+// resolves the tenant a credential belongs to. Implementations that don't
+// model tenants simply don't implement it (every caller falls back to the
+// default tenant).
+type TenantTokenStore interface {
+	// TenantOfToken resolves the tenant id of a credential (0 → default).
+	TenantOfToken(ctx context.Context, token string) int64
+	// TenantOfUsername resolves the tenant id of a user (0 → default).
+	TenantOfUsername(ctx context.Context, username string) int64
 }
 
 // TokenStore is the credential database an Auth consults. It is deliberately
@@ -197,4 +211,24 @@ func (a *StoreAuth) IssueToken(ctx context.Context, username string, scopes []st
 	a.minted[tok] = &mintedToken{username: username, scopes: scopes, level: level, expires: now.Add(ttl)}
 	a.mintedMu.Unlock()
 	return tok
+}
+
+// TenantID resolves the request's tenant through the store when it models
+// tenancy (TenantTokenStore); the default tenant otherwise.
+func (a *StoreAuth) TenantID(ctx context.Context, r *http.Request) int64 {
+	tts, ok := a.store.(TenantTokenStore)
+	if !ok {
+		return 1
+	}
+	for _, token := range credentialCandidates(r) {
+		if tid := tts.TenantOfToken(ctx, token); tid != 0 {
+			return tid
+		}
+	}
+	if uname := r.URL.Query().Get("account"); uname != "" {
+		if tid := tts.TenantOfUsername(ctx, uname); tid != 0 {
+			return tid
+		}
+	}
+	return 1
 }

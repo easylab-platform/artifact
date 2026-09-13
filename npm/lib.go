@@ -101,12 +101,12 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimSuffix(path, "/deprecate")
 		s.deprecate(w, r, name)
 	case method == http.MethodPut:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !s.authorizePublish(w, r, unescapeName(path)) {
 			return
 		}
 		s.publish(w, r, unescapeName(path))
 	case method == http.MethodDelete:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !s.authorizePublish(w, r, unescapeName(path)) {
 			return
 		}
 		s.deleteName(w, r, unescapeName(path))
@@ -226,7 +226,7 @@ func (s *State) distTags(w http.ResponseWriter, r *http.Request, rel, method str
 		}
 		artifactkit.JSON(w, http.StatusOK, dt)
 	case http.MethodPut:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !s.authorizePublish(w, r, pkg) {
 			return
 		}
 		artifactkit.LimitBody(w, r)
@@ -249,7 +249,7 @@ func (s *State) distTags(w http.ResponseWriter, r *http.Request, rel, method str
 		s.saveDistTags(r.Context(), pkg, dt)
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 	case http.MethodDelete:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !s.authorizePublish(w, r, pkg) {
 			return
 		}
 		dt := s.distTagsMap(r.Context(), pkg)
@@ -289,6 +289,9 @@ func (s *State) saveDistTags(ctx context.Context, pkg string, dt map[string]any)
 }
 
 func (s *State) deprecate(w http.ResponseWriter, r *http.Request, name string) {
+	if !s.authorizePublish(w, r, name) {
+		return
+	}
 	name = unescapeName(name)
 	artifactkit.LimitBody(w, r)
 	body, err := io.ReadAll(r.Body)
@@ -584,6 +587,22 @@ func parseTarballPackageJSON(data []byte) (string, map[string]any) {
 		}
 	}
 	return "", nil
+}
+
+// authorizePublish is the npm publish gate: write-level credential, npm
+// scope requirement, and registry ownership. npm names MUST carry a scope
+// (@org/name) — unscoped global names cannot be claimed by any single
+// tenant, so they are refused outright (prevents tenant squatting of
+// public-name look-alikes).
+func (s *State) authorizePublish(w http.ResponseWriter, r *http.Request, name string) bool {
+	if !strings.HasPrefix(name, "@") || !strings.Contains(name, "/") {
+		artifactkit.JSON(w, http.StatusForbidden, map[string]any{
+			"ok":    false,
+			"error": "scoped package names (@scope/name) are required on this registry",
+		})
+		return false
+	}
+	return artifactkit.AuthorizeWriteFor(w, r, s.Auth, s.Registry, "npm", name)
 }
 
 func (s *State) publish(w http.ResponseWriter, r *http.Request, name string) {

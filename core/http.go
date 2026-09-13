@@ -99,6 +99,48 @@ func URLencode(s string) string {
 // WRITE-level credential (a read-level token is not enough to publish).
 // On success it returns true; on failure it writes a 401/403 challenge and
 // returns false (the caller should stop).
+// AuthorizeWriteFor is the tenancy-aware publish gate used by protocol
+// adapters that know their native package name (npm name, OCI repository,
+// generic repo). It performs the write-credential check of AuthorizeWrite
+// and then, when the registry carries an Ownership layer, resolves the
+// caller's tenant and enforces publish rights for (format, repository):
+// unclaimed names are claimed by the caller's tenant, claimed names must
+// match it. The error text is protocol-neutral JSON, like AuthorizeWrite.
+func AuthorizeWriteFor(w http.ResponseWriter, r *http.Request, auth Auth, reg *Registry, format, repository string) bool {
+	if !AuthorizeWrite(w, r, auth) {
+		return false
+	}
+	if reg == nil || reg.Owners == nil {
+		return true
+	}
+	tid := TenantOfRequest(r.Context(), auth, r)
+	if err := reg.Owners.AuthorizePublish(r.Context(), format, repository, tid); err != nil {
+		JSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": err.Error()})
+		return false
+	}
+	return true
+}
+
+// TenantOfRequest resolves the caller's tenant through the Auth (StoreAuth
+// bridges TenantTokenStore); anonymous or unresolvable callers map to the
+// default tenant 1.
+func TenantOfRequest(ctx context.Context, auth Auth, r *http.Request) int64 {
+	tr, ok := auth.(TenantResolver)
+	if !ok || auth == nil {
+		return 1
+	}
+	if tid := tr.TenantID(ctx, r); tid != 0 {
+		return tid
+	}
+	return 1
+}
+
+// TenantResolver is implemented by Auth implementations that can resolve a
+// request's tenant (StoreAuth does, bridging TenantTokenStore).
+type TenantResolver interface {
+	TenantID(ctx context.Context, r *http.Request) int64
+}
+
 func AuthorizeWrite(w http.ResponseWriter, r *http.Request, auth Auth) bool {
 	if auth == nil {
 		return true // auth disabled: anonymous writes allowed (dev mode)

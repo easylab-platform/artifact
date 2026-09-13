@@ -17,6 +17,24 @@ type Registry struct {
 	Blobs     BlobStore
 	Meta      IndexStore
 	Upstreams *Upstreams
+	// Owners is the optional package-ownership layer: a GLOBAL namespace per
+	// format where every name belongs to exactly one tenant. Nil disables
+	// ownership enforcement (single-tenant / dev mode).
+	Owners Ownership
+}
+
+// Ownership is the npm-official-style ownership model over the registry's
+// global namespace: names are globally unique, publishing requires the
+// caller's tenant to own (or first-claim) the name, and private packages are
+// readable only by their owning tenant.
+type Ownership interface {
+	// AuthorizePublish returns nil when tenant may publish (format, name).
+	// An unclaimed name is claimed for the tenant on first publish; a claimed
+	// name requires the same tenant (admins excepted per implementation).
+	AuthorizePublish(ctx context.Context, format, repository string, tenantID int64) error
+	// CanRead reports whether tenant may read (format, name): true for
+	// public/unclaimed names, owning tenant only for private ones.
+	CanRead(ctx context.Context, format, repository string, tenantID int64) bool
 }
 
 // Upstream describes a remote base URL for a protocol (or a sub-endpoint).
