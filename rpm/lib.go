@@ -30,6 +30,8 @@ type State struct {
 	// RepoUpstreams maps repository keys to upstream bases. When nil, the
 	// single "rpm" upstream from the registry table is used for every repo.
 	RepoUpstreams map[string]string
+	// Hosted serves /pkgs/rpm/hosted/<repo>/... (self-published packages).
+	Hosted *artifactkit.HostedHandler
 }
 
 func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
@@ -40,6 +42,12 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	if m, ok := cfg["repo_upstreams"].(map[string]string); ok {
 		s.RepoUpstreams = m
 	}
+	s.Hosted = &artifactkit.HostedHandler{
+		Format:    "rpm",
+		Store:     artifactkit.HostedStore{Registry: reg},
+		Auth:      s.Auth,
+		Generator: GenerateRepodata(artifactkit.HostedStore{Registry: reg}),
+	}
 	return s, nil
 }
 
@@ -47,13 +55,17 @@ func init() { artifactkit.Register("rpm", NewHandler) }
 
 // ServeHTTP dispatches /pkgs/rpm/{repo}/{upstream path}.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	sub := strings.TrimPrefix(r.URL.Path, "/pkgs/rpm/")
+	sub = strings.TrimPrefix(sub, "rpm/")
+	if strings.HasPrefix(sub, "hosted/") {
+		s.Hosted.ServeHTTP(w, r, sub, "/pkgs/rpm/")
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/rpm/")
-	path = strings.TrimPrefix(path, "rpm/")
-	path = strings.Trim(path, "/")
+	path := strings.Trim(sub, "/")
 	if path == "" {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return

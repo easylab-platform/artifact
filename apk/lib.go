@@ -32,6 +32,8 @@ type State struct {
 	// client fetches package files relative to the index URL, so no rewrite
 	// is needed; SelfBase is reserved for future hosted-repo support).
 	SelfBase string
+	// Hosted serves /pkgs/apk/hosted/<repo>/... (self-published packages).
+	Hosted *artifactkit.HostedHandler
 }
 
 func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
@@ -42,6 +44,12 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	if v, ok := cfg["self_base"].(string); ok {
 		s.SelfBase = v
 	}
+	s.Hosted = &artifactkit.HostedHandler{
+		Format:    "apk",
+		Store:     artifactkit.HostedStore{Registry: reg},
+		Auth:      s.Auth,
+		Generator: GenerateAPKINDEX(artifactkit.HostedStore{Registry: reg}),
+	}
 	return s, nil
 }
 
@@ -49,9 +57,17 @@ func init() { artifactkit.Register("apk", NewHandler) }
 
 // ServeHTTP dispatches /pkgs/apk/{repo}/{suite}/{arch}/{file}.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/apk/")
-	path = strings.TrimPrefix(path, "apk/")
-	path = strings.Trim(path, "/")
+	sub := strings.TrimPrefix(r.URL.Path, "/pkgs/apk/")
+	sub = strings.TrimPrefix(sub, "apk/")
+	if strings.HasPrefix(sub, "hosted/") {
+		s.Hosted.ServeHTTP(w, r, sub, "/pkgs/apk/")
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	path := strings.Trim(sub, "/")
 	if path == "" {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return

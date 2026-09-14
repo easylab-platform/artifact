@@ -29,6 +29,8 @@ type State struct {
 	// ChannelUpstreams maps channel keys to upstream bases; nil uses the
 	// single "conda" upstream default.
 	ChannelUpstreams map[string]string
+	// Hosted serves /pkgs/conda/hosted/<channel>/... (self-published).
+	Hosted *artifactkit.HostedHandler
 }
 
 func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
@@ -39,6 +41,12 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	if m, ok := cfg["channel_upstreams"].(map[string]string); ok {
 		s.ChannelUpstreams = m
 	}
+	s.Hosted = &artifactkit.HostedHandler{
+		Format:    "conda",
+		Store:     artifactkit.HostedStore{Registry: reg},
+		Auth:      s.Auth,
+		Generator: GenerateRepodata(artifactkit.HostedStore{Registry: reg}),
+	}
 	return s, nil
 }
 
@@ -46,13 +54,17 @@ func init() { artifactkit.Register("conda", NewHandler) }
 
 // ServeHTTP dispatches /pkgs/conda/{channel}/{path}.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	sub := strings.TrimPrefix(r.URL.Path, "/pkgs/conda/")
+	sub = strings.TrimPrefix(sub, "conda/")
+	if strings.HasPrefix(sub, "hosted/") {
+		s.Hosted.ServeHTTP(w, r, sub, "/pkgs/conda/")
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/conda/")
-	path = strings.TrimPrefix(path, "conda/")
-	path = strings.Trim(path, "/")
+	path := strings.Trim(sub, "/")
 	channel, rest, ok := strings.Cut(path, "/")
 	if !ok || rest == "" {
 		artifactkit.Error(w, http.StatusNotFound, "channel required")

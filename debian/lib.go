@@ -28,6 +28,9 @@ import (
 type State struct {
 	Registry *artifactkit.Registry
 	Auth     artifactkit.Auth
+	// Hosted serves /pkgs/debian/hosted/... (self-published packages, no
+	// upstream, unsigned index for [trusted=yes] sources).
+	Hosted *artifactkit.HostedHandler
 }
 
 func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
@@ -35,23 +38,31 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
+	s.Hosted = &artifactkit.HostedHandler{
+		Format:    "debian",
+		Store:     artifactkit.HostedStore{Registry: reg},
+		Auth:      s.Auth,
+		Generator: GeneratePackages(artifactkit.HostedStore{Registry: reg}),
+	}
 	return s, nil
 }
 
 func init() { artifactkit.Register("debian", NewHandler) }
 
-// ServeHTTP dispatches /pkgs/debian/{distro}/<upstream path>.
-// The upstream host is selected by distro: debian → deb.debian.org +
-// security.debian.org, ubuntu → archive.ubuntu.com + security.ubuntu.com
-// (archive vs security chosen by path prefix, mirroring sources.list).
+// ServeHTTP dispatches /pkgs/debian/{distro}/<upstream path> and
+// /pkgs/debian/hosted/<repo>/<pkg> (self-published).
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	sub := strings.TrimPrefix(r.URL.Path, "/pkgs/debian/")
+	sub = strings.TrimPrefix(sub, "debian/")
+	if strings.HasPrefix(sub, "hosted/") {
+		s.Hosted.ServeHTTP(w, r, sub, "/pkgs/debian/")
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/debian/")
-	path = strings.TrimPrefix(path, "debian/")
-	path = strings.Trim(path, "/")
+	path := strings.Trim(sub, "/")
 	if path == "" {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
