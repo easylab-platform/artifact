@@ -89,8 +89,8 @@ func TestPullThroughReleaseAndDeb(t *testing.T) {
 	if err := reg.Meta.Put(context.Background(), artifactkit.Artifact{
 		Format: "debian", Repository: "ubuntu/noble", Version: "dists/noble/Release",
 		MediaType: "text/plain", Digest: stored.Digest,
-		Blobs:     []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: "Release"}},
-		Source:    "pull",
+		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: "Release"}},
+		Source: "pull",
 	}); err != nil {
 		t.Fatal(err)
 	}

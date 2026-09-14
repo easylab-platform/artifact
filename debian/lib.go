@@ -127,7 +127,7 @@ func storeCache(s *State, ctx context.Context, repo, name string, data []byte) {
 	artifactkit.LogMetaErr("debian cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
 		Format: "debian", Repository: repo, Version: name,
 		MediaType: mediaTypeOf(name), Digest: stored.Digest,
-		Blobs: []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
+		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
 		Source: "pull",
 	}))
 }

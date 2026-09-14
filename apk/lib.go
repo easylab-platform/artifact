@@ -118,7 +118,7 @@ func storeCache(s *State, ctx context.Context, repo, name string, data []byte) {
 	artifactkit.LogMetaErr("apk cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
 		Format: "apk", Repository: repo, Version: name,
 		MediaType: mediaTypeOf(name), Digest: stored.Digest,
-		Blobs: []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
+		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
 		Source: "pull",
 	}))
 }
@@ -143,7 +143,7 @@ func indexContains(indexGz []byte, needle string) bool {
 	if err != nil {
 		return false
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	raw, err := io.ReadAll(gz)
 	if err != nil {
 		return false

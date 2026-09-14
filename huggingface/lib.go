@@ -1,0 +1,147 @@
+// Package huggingface implements the HuggingFace Hub protocol with
+// pull-through: model/dataset metadata, file trees, and (LFS) blobs are
+// fetched from huggingface.co, cached in the CAS, and served verbatim.
+//
+// Wire format (the Hub's REST face used by transformers/diffusers):
+//
+//	/{repo-type}/{namespace}/{name}/resolve/{revision}/{path}   file content
+//	/{repo-type}/{namespace}/{name}/raw/{revision}/{path}       raw text
+//	/api/models/{ns}/{name}                                      metadata JSON
+//
+// repo-type ∈ models | datasets | spaces. The client authenticates with a
+// bearer token for gated repos; a per-deployment HF token (from the
+// config) is forwarded upstream when set.
+//
+// Repository layout served here:
+//
+//	/pkgs/huggingface/{repo-type}/{namespace}/{name}/...
+package huggingface
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/easylab-platform/artifact/core"
+)
+
+type State struct {
+	Registry *artifactkit.Registry
+	Auth     artifactkit.Auth
+	// HFToken is forwarded upstream as a Bearer credential (gated repos).
+	HFToken string
+}
+
+func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
+	s := &State{Registry: reg}
+	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
+		s.Auth = a
+	}
+	if v, ok := cfg["hf_token"].(string); ok {
+		s.HFToken = v
+	}
+	return s, nil
+}
+
+func init() { artifactkit.Register("huggingface", NewHandler) }
+
+// upstreamBase is the HF Hub root (overridable for tests via the upstream
+// table entry "huggingface").
+func (s *State) upstreamBase() string {
+	if b := s.Registry.Upstreams.Get("huggingface"); b != "" {
+		return b
+	}
+	return "https://huggingface.co"
+}
+
+// repoTypes recognized on the path.
+var repoTypes = map[string]bool{"models": true, "datasets": true, "spaces": true}
+
+// ServeHTTP dispatches /pkgs/huggingface/{repo-type}/{ns}/{name}/{rest}.
+func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/pkgs/huggingface/")
+	path = strings.TrimPrefix(path, "huggingface/")
+	path = strings.Trim(path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 || !repoTypes[parts[0]] {
+		artifactkit.Error(w, http.StatusNotFound, "not found")
+		return
+	}
+	repoType, ns, name := parts[0], parts[1], parts[2]
+	repoKey := repoType + "/" + ns + "/" + name
+
+	// Local cache first (by full upstream path as version key).
+	if art, err := s.Registry.Meta.Get(r.Context(), "huggingface", repoKey, path); err == nil && len(art.Blobs) > 0 {
+		rd, err := s.Registry.Blobs.Open(r.Context(), art.Blobs[0].Digest)
+		if err == nil && rd != nil {
+			data, _ := io.ReadAll(rd)
+			_ = rd.Close()
+			artifactkit.OctetResponse(w, data)
+			return
+		}
+	}
+
+	up := s.Registry.RemoteAt(strings.TrimSuffix(s.upstreamBase(), "/") + "/" + path)
+	if s.HFToken != "" {
+		up = up.WithHeader("Authorization", "Bearer "+s.HFToken)
+	}
+	resp, err := up.Get(r.Context(), "")
+	if err != nil {
+		artifactkit.Error(w, http.StatusBadGateway, "upstream fetch: "+err.Error())
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		artifactkit.Error(w, resp.StatusCode, "huggingface upstream: "+http.StatusText(resp.StatusCode))
+		return
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		artifactkit.Error(w, http.StatusBadGateway, "upstream read: "+err.Error())
+		return
+	}
+	ct := contentType(resp.Header.Get("Content-Type"))
+	storeCache(s, r.Context(), repoKey, path, data, ct)
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Length", itoa(len(data)))
+	_, _ = w.Write(data)
+}
+
+// itoa is strconv.Itoa without the extra import at call sites.
+func itoa(n int) string {
+	return fmt.Sprintf("%d", n)
+}
+
+// storeCache persists a fetched path (best-effort).
+func storeCache(s *State, ctx context.Context, repo, name string, data []byte, mediaType string) {
+	stored, err := s.Registry.StoreAndHash(ctx, data)
+	if err != nil {
+		return
+	}
+	artifactkit.LogMetaErr("huggingface cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
+		Format: "huggingface", Repository: repo, Version: name,
+		MediaType: mediaType, Digest: stored.Digest,
+		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: lastSeg(name)}},
+		Source: "pull",
+	}))
+}
+
+func contentType(ct string) string {
+	if ct == "" {
+		return "application/octet-stream"
+	}
+	return ct
+}
+
+func lastSeg(p string) string {
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}

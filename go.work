@@ -6,13 +6,17 @@ use (
 	./debian
 	./cmd
 	./composer
+	./conda
 	./conan
 	./core
 	./generic
+	./gitlfs
 	./go
 	./helm
+	./huggingface
 	./hex
 	./maven
+	./nix
 	./npm
 	./nuget
 	./oci
