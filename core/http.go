@@ -60,15 +60,6 @@ func Error(w http.ResponseWriter, status int, msg string) {
 	JSON(w, status, map[string]any{"ok": false, "error": msg})
 }
 
-// BlobResponse writes an application/octet-stream body with a content-disposition.
-func BlobResponse(w http.ResponseWriter, data []byte, filename string) {
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", fmt.Sprint(len(data)))
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
-}
-
 // OctetResponse writes a small known-in-memory body as
 // application/octet-stream. It honors HEAD (no body) and sets
 // Content-Length. For large/streamed content use ServeBlob.
