@@ -95,7 +95,7 @@ func (s *State) names(w http.ResponseWriter, r *http.Request) {
 		pkg = pbBytes(pkg, 2, ts)
 		payload = pbBytes(payload, 2, pkg)
 	}
-	s.signedGzip(w, payload)
+	s.signedGzip(w, r, payload)
 }
 
 func (s *State) versions(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +109,7 @@ func (s *State) versions(w http.ResponseWriter, r *http.Request) {
 		}
 		payload = pbBytes(payload, 2, pkg)
 	}
-	s.signedGzip(w, payload)
+	s.signedGzip(w, r, payload)
 }
 
 func (s *State) pkg(w http.ResponseWriter, r *http.Request, name string) {
@@ -118,7 +118,7 @@ func (s *State) pkg(w http.ResponseWriter, r *http.Request, name string) {
 		if base := s.Registry.Upstreams.Get("hex"); base != "" {
 			remote := s.Registry.RemoteAt(base)
 			if body, err := remote.GetBytes(r.Context(), "/packages/"+artifactkit.URLencode(name)); err == nil {
-				artifactkit.OctetResponse(w, body)
+				artifactkit.OctetResponse(w, r, body)
 				return
 			}
 		}
@@ -168,7 +168,7 @@ func (s *State) pkg(w http.ResponseWriter, r *http.Request, name string) {
 	}
 	payload = pbStr(payload, 2, name)
 	payload = pbStr(payload, 3, "pkglab")
-	s.signedGzip(w, payload)
+	s.signedGzip(w, r, payload)
 }
 
 func (s *State) tarball(w http.ResponseWriter, r *http.Request, rest string) {
@@ -289,14 +289,14 @@ func (s *State) proxyAll(w http.ResponseWriter, r *http.Request, path string) {
 	if base := s.Registry.Upstreams.Get("hex"); base != "" {
 		remote := s.Registry.RemoteAt(base)
 		if body, err := remote.GetBytes(r.Context(), "/"+strings.Trim(upPath, "/")); err == nil {
-			artifactkit.OctetResponse(w, body)
+			artifactkit.OctetResponse(w, r, body)
 			return
 		}
 	}
 	artifactkit.Error(w, http.StatusBadGateway, "upstream")
 }
 
-func (s *State) signedGzip(w http.ResponseWriter, payload []byte) {
+func (s *State) signedGzip(w http.ResponseWriter, r *http.Request, payload []byte) {
 	// Sign the payload bytes themselves, then wrap as the Hex registry
 	// envelope: field1 payload, field2 signature. Without a signing key the
 	// signature is empty (matches the reference: sign(payload) of a missing
@@ -308,7 +308,7 @@ func (s *State) signedGzip(w http.ResponseWriter, payload []byte) {
 	zw := gzip.NewWriter(&buf)
 	_, _ = zw.Write(env)
 	_ = zw.Close()
-	artifactkit.OctetResponse(w, buf.Bytes())
+	artifactkit.OctetResponse(w, r, buf.Bytes())
 }
 
 func nameVersionFromStem(stem string) (string, string) {

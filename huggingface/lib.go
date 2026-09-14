@@ -59,7 +59,8 @@ func (s *State) upstreamBase() string {
 // repoTypes recognized on the path.
 var repoTypes = map[string]bool{"models": true, "datasets": true, "spaces": true}
 
-// ServeHTTP dispatches /pkgs/huggingface/{repo-type}/{ns}/{name}/{rest}.
+// ServeHTTP dispatches /pkgs/huggingface/{repo-type}/{ns}/{name}/{rest} and
+// /pkgs/huggingface/api/{...} metadata calls.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -68,6 +69,17 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/pkgs/huggingface/")
 	path = strings.TrimPrefix(path, "huggingface/")
 	path = strings.Trim(path, "/")
+	if path == "" {
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	// /api/... is the Hub metadata API (list/search/resolve): a repo key is
+	// not derivable from arbitrary API paths, so these are proxied without
+	// path-keyed caching (the response is still streamed).
+	if strings.HasPrefix(path, "api/") {
+		s.proxyUncached(w, r, path)
+		return
+	}
 	parts := strings.Split(path, "/")
 	if len(parts) < 3 || !repoTypes[parts[0]] {
 		artifactkit.Error(w, http.StatusNotFound, "not found")
@@ -76,27 +88,28 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	repoType, ns, name := parts[0], parts[1], parts[2]
 	repoKey := repoType + "/" + ns + "/" + name
 
-	// Local cache first (by full upstream path as version key).
+	// Local cache first (by full upstream path as version key), streamed.
 	if art, err := s.Registry.Meta.Get(r.Context(), "huggingface", repoKey, path); err == nil && len(art.Blobs) > 0 {
-		rd, err := s.Registry.Blobs.Open(r.Context(), art.Blobs[0].Digest)
-		if err == nil && rd != nil {
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.OctetResponse(w, data)
+		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, art.MediaType) {
 			return
 		}
 	}
 
-	up := s.Registry.RemoteAt(strings.TrimSuffix(s.upstreamBase(), "/") + "/" + path)
-	if s.HFToken != "" {
-		up = up.WithHeader("Authorization", "Bearer "+s.HFToken)
-	}
-	resp, err := up.Get(r.Context(), "")
+	resp, err := s.upstreamGet(r, path)
 	if err != nil {
 		artifactkit.Error(w, http.StatusBadGateway, "upstream fetch: "+err.Error())
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
+	// A 302 to the CDN (LFS-backed files) is passed through so the client
+	// fetches directly — easylab's egress rules keep the CDN host inside the
+	// controlled path (no server-side full download).
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusMovedPermanently {
+		if loc := resp.Header.Get("Location"); loc != "" {
+			http.Redirect(w, r, loc, resp.StatusCode)
+			return
+		}
+	}
 	if resp.StatusCode != http.StatusOK {
 		artifactkit.Error(w, resp.StatusCode, "huggingface upstream: "+http.StatusText(resp.StatusCode))
 		return
@@ -107,10 +120,47 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ct := contentType(resp.Header.Get("Content-Type"))
-	storeCache(s, r.Context(), repoKey, path, data, ct)
+	if digest := storeCache(s, r.Context(), repoKey, path, data, ct); digest != "" &&
+		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, ct) {
+		return
+	}
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Content-Length", itoa(len(data)))
-	_, _ = w.Write(data)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(data)
+	}
+}
+
+// proxyUncached forwards an /api/... call (metadata/search) and streams the
+// response body; 3xx Location is passed through.
+func (s *State) proxyUncached(w http.ResponseWriter, r *http.Request, path string) {
+	resp, err := s.upstreamGet(r, path)
+	if err != nil {
+		artifactkit.Error(w, http.StatusBadGateway, "upstream fetch: "+err.Error())
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		if loc := resp.Header.Get("Location"); loc != "" {
+			http.Redirect(w, r, loc, resp.StatusCode)
+			return
+		}
+	}
+	ct := contentType(resp.Header.Get("Content-Type"))
+	w.Header().Set("Content-Type", ct)
+	w.WriteHeader(resp.StatusCode)
+	if r.Method != http.MethodHead {
+		_, _ = io.Copy(w, resp.Body)
+	}
+}
+
+// upstreamGet issues the Hub request with the optional bearer token.
+func (s *State) upstreamGet(r *http.Request, path string) (*http.Response, error) {
+	up := s.Registry.RemoteAt(strings.TrimSuffix(s.upstreamBase(), "/") + "/" + path)
+	if s.HFToken != "" {
+		up = up.WithHeader("Authorization", "Bearer "+s.HFToken)
+	}
+	return up.Get(r.Context(), "")
 }
 
 // itoa is strconv.Itoa without the extra import at call sites.
@@ -119,10 +169,10 @@ func itoa(n int) string {
 }
 
 // storeCache persists a fetched path (best-effort).
-func storeCache(s *State, ctx context.Context, repo, name string, data []byte, mediaType string) {
+func storeCache(s *State, ctx context.Context, repo, name string, data []byte, mediaType string) string {
 	stored, err := s.Registry.StoreAndHash(ctx, data)
 	if err != nil {
-		return
+		return ""
 	}
 	artifactkit.LogMetaErr("huggingface cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
 		Format: "huggingface", Repository: repo, Version: name,
@@ -130,6 +180,7 @@ func storeCache(s *State, ctx context.Context, repo, name string, data []byte, m
 		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: lastSeg(name)}},
 		Source: "pull",
 	}))
+	return stored.Digest
 }
 
 func contentType(ct string) string {

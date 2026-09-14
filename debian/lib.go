@@ -19,7 +19,6 @@ package debian
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"strings"
 
@@ -69,13 +68,9 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	repo := distro + "/" + suiteOf(rest)
-	// Local cache first.
+	// Local cache first (streamed with Range/HEAD semantics).
 	if art, err := s.Registry.Meta.Get(r.Context(), "debian", repo, rest); err == nil && len(art.Blobs) > 0 {
-		rd, err := s.Registry.Blobs.Open(r.Context(), art.Blobs[0].Digest)
-		if err == nil && rd != nil {
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.OctetResponse(w, data)
+		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(rest)) {
 			return
 		}
 	}
@@ -84,25 +79,43 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	storeCache(s, r.Context(), repo, rest, fetched.Data)
-	artifactkit.OctetResponse(w, fetched.Data)
+	if digest := storeCache(s, r.Context(), repo, rest, fetched.Data); digest != "" &&
+		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(rest)) {
+		return
+	}
+	artifactkit.OctetResponse(w, r, fetched.Data)
 }
 
-// upstreamFor picks the mirror host for a distro + path. "dists/" paths come
-// from the main archive; "pool/" paths likewise; security updates live on
-// the security host for both distros.
+// upstreamFor picks the mirror host for a distro + path. The suite (or the
+// archive prefix) determines which host serves it: Debian security lives at
+// security.debian.org under debian-security/ + pool/updates/; Ubuntu security
+// is the -security/-updates suites at security.ubuntu.com.
 func upstreamFor(distro, path string) string {
+	parts := strings.Split(path, "/")
+	// Debian security archive prefix (security.debian.org/debian-security/...).
+	if len(parts) > 0 && parts[0] == "debian-security" {
+		return "https://security.debian.org"
+	}
+	// dists/<suite>/...: the suite suffix names the archive line.
+	if len(parts) >= 2 && parts[0] == "dists" {
+		suite := parts[1]
+		if strings.HasSuffix(suite, "-security") || strings.HasSuffix(suite, "-updates") {
+			switch distro {
+			case "debian":
+				return "https://security.debian.org"
+			case "ubuntu":
+				return "https://security.ubuntu.com"
+			}
+		}
+	}
+	// pool/updates/... is the Debian security package pool.
+	if len(parts) >= 2 && parts[0] == "pool" && parts[1] == "updates" {
+		return "https://security.debian.org"
+	}
 	switch distro {
 	case "debian":
-		if strings.HasPrefix(path, "dists/") && strings.Contains(path, "/updates/") ||
-			strings.Contains(path, "security.debian.org") {
-			return "https://security.debian.org"
-		}
 		return "https://deb.debian.org"
 	case "ubuntu":
-		if strings.Contains(path, "-security") || strings.Contains(path, "-updates") {
-			return "https://security.ubuntu.com"
-		}
 		return "https://archive.ubuntu.com"
 	}
 	return ""
@@ -119,10 +132,10 @@ func suiteOf(rest string) string {
 }
 
 // storeCache persists a fetched path into the CAS + index (best-effort).
-func storeCache(s *State, ctx context.Context, repo, name string, data []byte) {
+func storeCache(s *State, ctx context.Context, repo, name string, data []byte) string {
 	stored, err := s.Registry.StoreAndHash(ctx, data)
 	if err != nil {
-		return
+		return ""
 	}
 	artifactkit.LogMetaErr("debian cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
 		Format: "debian", Repository: repo, Version: name,
@@ -130,6 +143,7 @@ func storeCache(s *State, ctx context.Context, repo, name string, data []byte) {
 		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
 		Source: "pull",
 	}))
+	return stored.Digest
 }
 
 // mediaTypeOf maps well-known apt repository files to media types.

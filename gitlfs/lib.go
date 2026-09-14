@@ -15,7 +15,6 @@ package gitlfs
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 
@@ -25,12 +24,20 @@ import (
 type State struct {
 	Registry *artifactkit.Registry
 	Auth     artifactkit.Auth
+	// SelfBase is the external base URL prepended to action hrefs. It must be
+	// the address the CLIENT uses to reach easylab (not the request Host,
+	// which is the upstream name when the request arrived through the egress
+	// proxy's rewrite relay). Empty falls back to deriving from the request.
+	SelfBase string
 }
 
 func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
 	s := &State{Registry: reg}
 	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
+	}
+	if v, ok := cfg["self_base"].(string); ok {
+		s.SelfBase = strings.TrimSuffix(v, "/")
 	}
 	return s, nil
 }
@@ -95,7 +102,7 @@ func (s *State) batch(w http.ResponseWriter, r *http.Request, repo string) {
 		artifactkit.Error(w, http.StatusBadRequest, "bad batch body")
 		return
 	}
-	base := selfBase(r)
+	base := s.baseFor(r)
 	out := batchResponse{Objects: make([]batchObjOut, 0, len(req.Objects))}
 	for _, o := range req.Objects {
 		entry := batchObjOut{Oid: o.Oid, Size: o.Size, Authenticated: true}
@@ -119,13 +126,9 @@ func (s *State) serveObject(w http.ResponseWriter, r *http.Request, repo, oid st
 	digest := "sha256:" + oid
 	switch r.Method {
 	case http.MethodGet:
-		rd, err := s.Registry.Blobs.Open(r.Context(), digest)
-		if err != nil || rd == nil {
+		if !artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, "application/octet-stream") {
 			artifactkit.Error(w, http.StatusNotFound, "object not found")
-			return
 		}
-		defer func() { _ = rd.Close() }()
-		artifactkit.OctetResponse(w, streamAll(rd))
 	case http.MethodPut:
 		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 			return
@@ -158,20 +161,17 @@ func validOID(oid string) bool {
 	return true
 }
 
-// selfBase derives the external base for action hrefs from the request.
-func selfBase(r *http.Request) string {
+// baseFor returns the external base for action hrefs: the configured
+// SelfBase when set (the client-reachable address), else derived from the
+// request. Requests that arrived through the egress proxy carry the upstream
+// Host, so SelfBase is required in that deployment.
+func (s *State) baseFor(r *http.Request) string {
+	if s.SelfBase != "" {
+		return s.SelfBase
+	}
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host
-}
-
-// streamAll reads a reader into memory (LFS objects are individually capped
-// by the CAS; streaming straight through would need http.ServeContent which
-// needs a Seeker — rd IS a ReadSeekCloser so we could, but plain read keeps
-// the code simple and sizes bounded by the caller's limits).
-func streamAll(rd io.Reader) []byte {
-	data, _ := io.ReadAll(rd)
-	return data
 }

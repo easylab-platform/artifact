@@ -82,7 +82,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err == nil && rd != nil {
 			data, _ := io.ReadAll(rd)
 			_ = rd.Close()
-			artifactkit.OctetResponse(w, data)
+			artifactkit.OctetResponse(w, r, data)
 			return
 		}
 	}
@@ -116,10 +116,10 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // storeCache persists a fetched path (best-effort).
-func storeCache(s *State, ctx context.Context, module, name string, data []byte, mediaType string) {
+func storeCache(s *State, ctx context.Context, module, name string, data []byte, mediaType string) string {
 	stored, err := s.Registry.StoreAndHash(ctx, data)
 	if err != nil {
-		return
+		return ""
 	}
 	artifactkit.LogMetaErr("protobuf cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
 		Format: "protobuf", Repository: module, Version: name,
@@ -127,6 +127,7 @@ func storeCache(s *State, ctx context.Context, module, name string, data []byte,
 		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
 		Source: "pull",
 	}))
+	return stored.Digest
 }
 
 func contentType(ct string) string {

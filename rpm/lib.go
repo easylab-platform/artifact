@@ -18,7 +18,6 @@ package rpm
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"strings"
 
@@ -70,13 +69,9 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Local cache first.
+	// Local cache first (streamed with Range/HEAD semantics).
 	if art, err := s.Registry.Meta.Get(r.Context(), "rpm", repo, rest); err == nil && len(art.Blobs) > 0 {
-		rd, err := s.Registry.Blobs.Open(r.Context(), art.Blobs[0].Digest)
-		if err == nil && rd != nil {
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.OctetResponse(w, data)
+		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(rest)) {
 			return
 		}
 	}
@@ -85,8 +80,11 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	storeCache(s, r.Context(), repo, rest, fetched.Data)
-	artifactkit.OctetResponse(w, fetched.Data)
+	if digest := storeCache(s, r.Context(), repo, rest, fetched.Data); digest != "" &&
+		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(rest)) {
+		return
+	}
+	artifactkit.OctetResponse(w, r, fetched.Data)
 }
 
 // upstreamFor resolves the upstream base for a repository key.
@@ -101,10 +99,10 @@ func (s *State) upstreamFor(repo string) string {
 }
 
 // storeCache persists a fetched path into the CAS + index (best-effort).
-func storeCache(s *State, ctx context.Context, repo, name string, data []byte) {
+func storeCache(s *State, ctx context.Context, repo, name string, data []byte) string {
 	stored, err := s.Registry.StoreAndHash(ctx, data)
 	if err != nil {
-		return
+		return ""
 	}
 	artifactkit.LogMetaErr("rpm cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
 		Format: "rpm", Repository: repo, Version: name,
@@ -112,6 +110,7 @@ func storeCache(s *State, ctx context.Context, repo, name string, data []byte) {
 		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
 		Source: "pull",
 	}))
+	return stored.Digest
 }
 
 // mediaTypeOf maps well-known yum repository files to media types.

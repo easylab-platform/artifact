@@ -243,7 +243,7 @@ func (s *State) specs(w http.ResponseWriter, r *http.Request) {
 	zw := gzip.NewWriter(&gz)
 	_, _ = zw.Write(data)
 	_ = zw.Close()
-	artifactkit.OctetResponse(w, gz.Bytes())
+	artifactkit.OctetResponse(w, r, gz.Bytes())
 }
 
 func validGemVersion(v string) bool {
@@ -264,13 +264,13 @@ func (s *State) quickMarshal(w http.ResponseWriter, r *http.Request, rel string)
 		zw := zlib.NewWriter(&z)
 		_, _ = zw.Write(spec)
 		_ = zw.Close()
-		artifactkit.OctetResponse(w, z.Bytes())
+		artifactkit.OctetResponse(w, r, z.Bytes())
 		return
 	}
 	remote, _ := s.Registry.Remote("rubygems", "")
 	if remote != nil {
 		if data, err := remote.GetBytes(r.Context(), "/quick/Marshal.4.8/"+rel); err == nil {
-			artifactkit.OctetResponse(w, data)
+			artifactkit.OctetResponse(w, r, data)
 			return
 		}
 	}
@@ -296,7 +296,7 @@ func (s *State) dependencies(w http.ResponseWriter, r *http.Request) {
 	b := []byte{0x04, 0x08}
 	if q == "" {
 		b = marshalArrayLen(b, 0)
-		artifactkit.OctetResponse(w, b)
+		artifactkit.OctetResponse(w, r, b)
 		return
 	}
 	gems := strings.Split(q, ",")
@@ -320,7 +320,7 @@ func (s *State) dependencies(w http.ResponseWriter, r *http.Request) {
 		b = marshalIstring(b, "ruby")
 		b = marshalArrayLen(b, 0)
 	}
-	artifactkit.OctetResponse(w, b)
+	artifactkit.OctetResponse(w, r, b)
 }
 
 func (s *State) upload(w http.ResponseWriter, r *http.Request) {
@@ -404,7 +404,7 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, filename string
 			}
 			data, _ := io.ReadAll(rd)
 			_ = rd.Close()
-			artifactkit.OctetResponse(w, data)
+			artifactkit.OctetResponse(w, r, data)
 			return
 		}
 	}
@@ -420,7 +420,7 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, filename string
 		remote := s.Registry.RemoteAt(base)
 		if data, err := remote.GetBytes(r.Context(), "/"+filename); err == nil {
 			storeVersionSource(s.Registry, name, version, filename, data, "pull", r.Context())
-			artifactkit.OctetResponse(w, data)
+			artifactkit.OctetResponse(w, r, data)
 			return
 		}
 	}

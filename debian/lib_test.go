@@ -112,3 +112,26 @@ func TestPullThroughReleaseAndDeb(t *testing.T) {
 		t.Fatal("InRelease media type")
 	}
 }
+
+// TestSecurityRouting verifies suite/archive-based security host selection
+// for both distros, including the pool/updates and debian-security prefixes.
+func TestSecurityRouting(t *testing.T) {
+	cases := []struct {
+		distro, path, want string
+	}{
+		{"debian", "dists/bookworm/Release", "https://deb.debian.org"},
+		{"debian", "dists/bookworm-security/Release", "https://security.debian.org"},
+		{"debian", "pool/main/g/gcc/gcc.deb", "https://deb.debian.org"},
+		{"debian", "pool/updates/main/g/gcc/gcc.deb", "https://security.debian.org"},
+		{"debian", "debian-security/dists/bookworm-security/Release", "https://security.debian.org"},
+		{"ubuntu", "dists/noble/Release", "https://archive.ubuntu.com"},
+		{"ubuntu", "dists/noble-security/Release", "https://security.ubuntu.com"},
+		{"ubuntu", "dists/noble-updates/Release", "https://security.ubuntu.com"},
+		{"ubuntu", "pool/universe/x/x.deb", "https://archive.ubuntu.com"},
+	}
+	for _, c := range cases {
+		if got := upstreamFor(c.distro, c.path); got != c.want {
+			t.Errorf("upstreamFor(%q,%q) = %q want %q", c.distro, c.path, got, c.want)
+		}
+	}
+}

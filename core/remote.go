@@ -50,6 +50,16 @@ func (f *ClientFactory) Client(proxy *string) *http.Client {
 	c := &http.Client{
 		Transport: tr,
 		// No overall Timeout: large blobs stream for minutes.
+		//
+		// Do NOT follow redirects: a 302 from a pull-through upstream (e.g.
+		// HuggingFace resolve → CDN, or a Debian mirror redirect) must be
+		// surfaced to the caller so it can decide (transparent pass-through
+		// to the client, or an explicit re-fetch). Silently following it
+		// would download the whole object server-side and defeat the range
+		// / caching policy.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 	f.clients[key] = c
 	return c
@@ -136,7 +146,10 @@ func (e *UpstreamStatusError) Error() string {
 
 // Registry implementation ----------------------------------------------------
 
-// Fetch pulls `path` from an upstream and caches it in the blob store.
+// Fetch pulls `path` from an upstream and caches it in the blob store. A
+// redirect from the upstream (3xx with Location) is surfaced as an error so
+// callers can decide how to handle it instead of silently downloading the
+// whole target server-side.
 func (r *Registry) Fetch(ctx context.Context, format, upstreamBase, path string) (Fetched, error) {
 	remote, err := r.remote(ctx, format, upstreamBase)
 	if err != nil {
@@ -147,6 +160,9 @@ func (r *Registry) Fetch(ctx context.Context, format, upstreamBase, path string)
 		return Fetched{}, fmt.Errorf("http: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return Fetched{}, &UpstreamRedirectError{Path: path, Status: resp.StatusCode, Location: resp.Header.Get("Location")}
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return Fetched{}, &UpstreamStatusError{Path: path, Status: resp.StatusCode}
 	}
@@ -155,6 +171,24 @@ func (r *Registry) Fetch(ctx context.Context, format, upstreamBase, path string)
 		return Fetched{}, err
 	}
 	return r.finishFetch(ctx, data)
+}
+
+// UpstreamRedirectError reports a 3xx from an upstream.
+type UpstreamRedirectError struct {
+	Path     string
+	Status   int
+	Location string
+}
+
+func (e *UpstreamRedirectError) Error() string {
+	return fmt.Sprintf("upstream %s: redirected (%d) to %s", e.Path, e.Status, e.Location)
+}
+
+// FetchViaRedirect follows an upstream redirect explicitly and fetches the
+// target. It is used by adapters whose upstream legitimately redirects to a
+// content host that easylab still wants to cache (e.g. HF LFS blobs).
+func (r *Registry) FetchViaRedirect(ctx context.Context, url string) (Fetched, error) {
+	return r.FetchAbsolute(ctx, url)
 }
 
 // FetchAbsolute pulls a full URL verbatim.

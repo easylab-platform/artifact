@@ -92,3 +92,45 @@ func TestRepoTypeValidation(t *testing.T) {
 		t.Fatalf("POST = %d", rec2.Code)
 	}
 }
+
+// TestAPIPassthrough verifies /api/... calls are proxied (metadata), while
+// resolve paths stay cached.
+func TestAPIPassthrough(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/models/org/repo" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"org/repo"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(upstream.Close)
+
+	s := newFixture(t, upstream.URL, "")
+	req := httptest.NewRequest(http.MethodGet, "/pkgs/huggingface/api/models/org/repo", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "org/repo") {
+		t.Fatalf("api passthrough: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestRedirectPassthrough verifies a 302 Location is relayed to the client
+// (LFS/CDN files) rather than followed server-side.
+func TestRedirectPassthrough(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://cdn-lfs.huggingface.co/blob", http.StatusFound)
+	}))
+	t.Cleanup(upstream.Close)
+
+	s := newFixture(t, upstream.URL, "")
+	req := httptest.NewRequest(http.MethodGet, "/pkgs/huggingface/models/org/repo/resolve/main/weights.bin", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("redirect: %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "https://cdn-lfs.huggingface.co/blob" {
+		t.Fatalf("location = %q", loc)
+	}
+}

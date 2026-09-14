@@ -70,14 +70,11 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // hit the cache and the APKINDEX signature survives verbatim.
 func (s *State) fetch(w http.ResponseWriter, r *http.Request, repoPath string) {
 	// Local cache first: the (repo, path) pair is stored as an artifact
-	// version whose blobs[0] holds the bytes.
+	// version whose blobs[0] holds the bytes. ServeBlobAt streams with
+	// Range/HEAD semantics instead of buffering.
 	repo, name := splitRepoPath(repoPath)
 	if art, err := s.Registry.Meta.Get(r.Context(), "apk", repo, name); err == nil && len(art.Blobs) > 0 {
-		rd, err := s.Registry.Blobs.Open(r.Context(), art.Blobs[0].Digest)
-		if err == nil && rd != nil {
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.OctetResponse(w, data)
+		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(name)) {
 			return
 		}
 	}
@@ -91,8 +88,11 @@ func (s *State) fetch(w http.ResponseWriter, r *http.Request, repoPath string) {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	storeCache(s, r.Context(), repo, name, fetched.Data)
-	artifactkit.OctetResponse(w, fetched.Data)
+	digest := storeCache(s, r.Context(), repo, name, fetched.Data)
+	if digest != "" && artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(name)) {
+		return
+	}
+	artifactkit.OctetResponse(w, r, fetched.Data)
 }
 
 // splitRepoPath splits "v3.21/main/x86_64/APKINDEX.tar.gz" into
@@ -110,10 +110,10 @@ func splitRepoPath(repoPath string) (repo, name string) {
 // storeCache persists a fetched path into the CAS + index. Index files get
 // a per-path version key; packages likewise. Best-effort: cache failures do
 // not break the response.
-func storeCache(s *State, ctx context.Context, repo, name string, data []byte) {
+func storeCache(s *State, ctx context.Context, repo, name string, data []byte) string {
 	stored, err := s.Registry.StoreAndHash(ctx, data)
 	if err != nil {
-		return
+		return ""
 	}
 	artifactkit.LogMetaErr("apk cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
 		Format: "apk", Repository: repo, Version: name,
@@ -121,6 +121,7 @@ func storeCache(s *State, ctx context.Context, repo, name string, data []byte) {
 		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
 		Source: "pull",
 	}))
+	return stored.Digest
 }
 
 // mediaTypeOf maps well-known apk repository files to media types.

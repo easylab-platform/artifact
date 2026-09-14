@@ -5,10 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DefaultMaxBody is the default request body limit (8 GiB: large OCI layers
@@ -67,12 +69,52 @@ func BlobResponse(w http.ResponseWriter, data []byte, filename string) {
 	_, _ = w.Write(data)
 }
 
-// OctetResponse writes an application/octet-stream body without a filename.
-func OctetResponse(w http.ResponseWriter, data []byte) {
+// OctetResponse writes a small known-in-memory body as
+// application/octet-stream. It honors HEAD (no body) and sets
+// Content-Length. For large/streamed content use ServeBlob.
+func OctetResponse(w http.ResponseWriter, r *http.Request, data []byte) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 	w.WriteHeader(http.StatusOK)
+	if r != nil && r.Method == http.MethodHead {
+		return
+	}
 	_, _ = w.Write(data)
+}
+
+// ServeBlob streams a seekable blob to the client with full HTTP semantics:
+// Range/206, If-Range, HEAD (no body), Content-Length, and the given
+// content type. It never buffers the whole blob in memory. When ct is empty
+// it resolves by filename via mime by extension, falling back to
+// application/octet-stream.
+//
+// ServeBlob is the single response path for artifact bytes: OCI layers, apt
+// pool files, apk archives, conda packages, nix NARs, and LFS objects.
+func ServeBlob(w http.ResponseWriter, r *http.Request, rd io.ReadSeeker, ct string, modTime time.Time) {
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Accept-Ranges", "bytes")
+	// http.ServeContent handles Range, If-Range, If-Modified-Since, HEAD,
+	// and Content-Length. A zero modTime disables conditional requests.
+	http.ServeContent(w, r, "", modTime, rd)
+}
+
+// ServeBlobAt serves a blob opened from a BlobStore by digest:
+// (nil, nil) from Open means the blob is absent -> 404.
+func ServeBlobAt(w http.ResponseWriter, r *http.Request, store BlobStore, ctx context.Context, digest, ct string) bool {
+	size, err := store.Stat(ctx, digest)
+	if err != nil || size == nil {
+		return false
+	}
+	rd, err := store.Open(ctx, digest)
+	if err != nil || rd == nil {
+		return false
+	}
+	defer func() { _ = rd.Close() }()
+	ServeBlob(w, r, rd, ct, time.Time{})
+	return true
 }
 
 // URLencode percent-encodes a path segment (RFC 3986 unreserved set plus ~

@@ -112,3 +112,25 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 	}
 	_ = rand.Reader
 }
+
+// TestSelfBaseOverridesHost verifies action hrefs use the configured
+// SelfBase rather than the request Host (critical behind the egress proxy,
+// where Host is the upstream name).
+func TestSelfBaseOverridesHost(t *testing.T) {
+	s := newFixture(t)
+	s.SelfBase = "https://easylab.internal:8443"
+	oid := strings.Repeat("cd", 32)
+	body, _ := json.Marshal(batchRequest{Operation: "upload", Objects: []batchObjIn{{Oid: oid, Size: 1}}})
+	req := httptest.NewRequest(http.MethodPost, "/pkgs/gitlfs/team/repo/info/lfs/objects/batch", bytes.NewReader(body))
+	req.Host = "github.com" // simulating the rewritten upstream Host
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	var out batchResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	href := out.Objects[0].Actions["upload"].Href
+	if !strings.HasPrefix(href, "https://easylab.internal:8443/pkgs/gitlfs/team/repo/objects/") {
+		t.Fatalf("href = %q", href)
+	}
+}

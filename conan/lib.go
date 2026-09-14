@@ -171,11 +171,11 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 					return
 				}
 				if data, ok := s.loadFile(r.Context(), name, ver, verSlot); ok {
-					artifactkit.OctetResponse(w, data)
+					artifactkit.OctetResponse(w, r, data)
 					return
 				}
 				if data, ok := s.loadFile(r.Context(), name, ver, filename); ok {
-					artifactkit.OctetResponse(w, data)
+					artifactkit.OctetResponse(w, r, data)
 					return
 				}
 				artifactkit.Error(w, http.StatusNotFound, "not found")
@@ -225,7 +225,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 				return
 			}
 			if data, ok := s.loadFile(r.Context(), name, ver, filename); ok {
-				artifactkit.OctetResponse(w, data)
+				artifactkit.OctetResponse(w, r, data)
 				return
 			}
 			artifactkit.Error(w, http.StatusNotFound, "not found")
@@ -329,7 +329,7 @@ func (s *State) fileGet(w http.ResponseWriter, r *http.Request, name, ver, sub s
 		return
 	}
 	if data, ok := s.loadFile(r.Context(), name, ver, filename); ok {
-		artifactkit.OctetResponse(w, data)
+		artifactkit.OctetResponse(w, r, data)
 		return
 	}
 	s.replyOrProxy(w, r, nil, "/v2/conans/"+artifactkit.URLencode(name)+"/"+artifactkit.URLencode(ver)+"/"+sub)
@@ -446,7 +446,7 @@ func (s *State) proxyRecipe(w http.ResponseWriter, r *http.Request, path string)
 	}
 	remote := s.Registry.RemoteAt(base)
 	if body, err := remote.GetBytes(r.Context(), "/v2/"+strings.TrimLeft(path, "/")); err == nil {
-		artifactkit.OctetResponse(w, body)
+		artifactkit.OctetResponse(w, r, body)
 		return
 	}
 	artifactkit.Error(w, http.StatusNotFound, "not found")

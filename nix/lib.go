@@ -16,7 +16,6 @@ package nix
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"strings"
 
@@ -48,7 +47,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path = strings.TrimPrefix(path, "nix/")
 	path = strings.Trim(path, "/")
 	if path == "" || path == "nix-cache-info" {
-		artifactkit.OctetResponse(w, []byte(defaultNixCacheInfo))
+		artifactkit.OctetResponse(w, r, []byte(defaultNixCacheInfo))
 		return
 	}
 	if !isCachePath(path) {
@@ -56,13 +55,9 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Local cache first (single global repo "cache").
+	// Local cache first (single global repo "cache"), streamed.
 	if art, err := s.Registry.Meta.Get(r.Context(), "nix", "cache", path); err == nil && len(art.Blobs) > 0 {
-		rd, err := s.Registry.Blobs.Open(r.Context(), art.Blobs[0].Digest)
-		if err == nil && rd != nil {
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.OctetResponse(w, data)
+		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(path)) {
 			return
 		}
 	}
@@ -76,8 +71,11 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	storeCache(s, r.Context(), path, fetched.Data, mediaTypeOf(path))
-	artifactkit.OctetResponse(w, fetched.Data)
+	if digest := storeCache(s, r.Context(), path, fetched.Data, mediaTypeOf(path)); digest != "" &&
+		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(path)) {
+		return
+	}
+	artifactkit.OctetResponse(w, r, fetched.Data)
 }
 
 // defaultNixCacheInfo is served at the cache root (mirrors cache.nixos.org).
@@ -120,10 +118,10 @@ func isHex32(s string) bool {
 }
 
 // storeCache persists a fetched path (best-effort).
-func storeCache(s *State, ctx context.Context, name string, data []byte, mediaType string) {
+func storeCache(s *State, ctx context.Context, name string, data []byte, mediaType string) string {
 	stored, err := s.Registry.StoreAndHash(ctx, data)
 	if err != nil {
-		return
+		return ""
 	}
 	artifactkit.LogMetaErr("nix cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
 		Format: "nix", Repository: "cache", Version: name,
@@ -131,6 +129,7 @@ func storeCache(s *State, ctx context.Context, name string, data []byte, mediaTy
 		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
 		Source: "pull",
 	}))
+	return stored.Digest
 }
 
 func mediaTypeOf(path string) string {
