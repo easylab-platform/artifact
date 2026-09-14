@@ -21,6 +21,7 @@ use (
 	./nuget
 	./oci
 	./pub
+	./protobuf
 	./pypi
 	./rpm
 	./rubygems
