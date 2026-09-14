@@ -460,37 +460,8 @@ func (a *Adapter) getBlob(w http.ResponseWriter, r *http.Request, name, digest s
 	if !artifactkit.AuthorizeReadFor(w, r, a.state.Auth, a.state.Registry, "oci", name) {
 		return
 	}
-	size, _ := a.state.Registry.Blobs.Stat(r.Context(), digest)
-	if size != nil {
-		rd, err := a.state.Registry.Blobs.Open(r.Context(), digest)
-		if err != nil || rd == nil {
-			writeJSON(w, http.StatusNotFound, ociError("BLOB_UNKNOWN", "blob unknown to registry"))
-			return
-		}
-		defer func() { _ = rd.Close() }()
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Docker-Content-Digest", digest)
-		w.Header().Set("Accept-Ranges", "bytes")
-		if rng := r.Header.Get("Range"); rng != "" {
-			start, end, ok := parseRange(rng, *size)
-			if !ok {
-				w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", *size))
-				w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
-				return
-			}
-			if _, err := rd.Seek(start, io.SeekStart); err != nil {
-				w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
-				return
-			}
-			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, *size))
-			w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
-			w.WriteHeader(http.StatusPartialContent)
-			_, _ = io.CopyN(w, rd, end-start+1)
-			return
-		}
-		w.Header().Set("Content-Length", strconv.FormatInt(*size, 10))
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.Copy(w, rd)
+	w.Header().Set("Docker-Content-Digest", digest)
+	if artifactkit.ServeBlobAt(w, r, a.state.Registry.Blobs, r.Context(), digest, "application/octet-stream") {
 		return
 	}
 	// Pull-through: stream from upstream, caching locally while verifying.
@@ -534,18 +505,11 @@ func (a *Adapter) getBlob(w http.ResponseWriter, r *http.Request, name, digest s
 		writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
 		return
 	}
-	rd, err := a.state.Registry.Blobs.Open(r.Context(), digest)
-	if err != nil || rd == nil {
-		writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", "verified blob vanished"))
+	w.Header().Set("Docker-Content-Digest", digest)
+	if artifactkit.ServeBlobAt(w, r, a.state.Registry.Blobs, r.Context(), digest, "application/octet-stream") {
 		return
 	}
-	defer func() { _ = rd.Close() }()
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Docker-Content-Digest", digest)
-	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Content-Length", strconv.FormatInt(int64(h.Size()), 10))
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, rd)
+	writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", "verified blob vanished"))
 }
 
 // mustOpen opens a file, closing it on the caller's behalf through the
@@ -789,44 +753,6 @@ func ociError(code, msg string) map[string]any {
 func hexDigest(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
-}
-
-func parseRange(hdr string, size int64) (int64, int64, bool) {
-	if !strings.HasPrefix(hdr, "bytes=") {
-		return 0, 0, false
-	}
-	spec := strings.TrimPrefix(hdr, "bytes=")
-	parts := strings.SplitN(spec, "-", 2)
-	if len(parts) != 2 {
-		return 0, 0, false
-	}
-	if parts[0] == "" {
-		// suffix: last N bytes
-		n, err := strconv.Atoi(parts[1])
-		if err != nil {
-			return 0, 0, false
-		}
-		start := size - int64(n)
-		if start < 0 {
-			start = 0
-		}
-		return start, size - 1, true
-	}
-	start, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return 0, 0, false
-	}
-	end := size - 1
-	if parts[1] != "" {
-		end, err = strconv.ParseInt(parts[1], 10, 64)
-		if err != nil {
-			return 0, 0, false
-		}
-	}
-	if start >= size || start > end {
-		return 0, 0, false
-	}
-	return start, end, true
 }
 
 func max64(a, b int64) int64 {
