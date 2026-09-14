@@ -141,6 +141,24 @@ type TenantResolver interface {
 	TenantID(ctx context.Context, r *http.Request) int64
 }
 
+// AuthorizeReadFor gates a READ of one registry name on the ownership layer:
+// public/unclaimed names are readable by everyone; a private name requires a
+// role on its scope (mapped repo members, else the owning user). When the
+// registry carries no Ownership layer the read is allowed. It writes a 404 on
+// denial (not 403: a hidden name must not reveal its existence) and returns
+// false so the caller stops.
+func AuthorizeReadFor(w http.ResponseWriter, r *http.Request, auth Auth, reg *Registry, format, repository string) bool {
+	if reg == nil || reg.Owners == nil {
+		return true
+	}
+	uid := TenantOfRequest(r.Context(), auth, r)
+	if reg.Owners.CanRead(r.Context(), format, repository, uid) {
+		return true
+	}
+	JSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "not found"})
+	return false
+}
+
 func AuthorizeWrite(w http.ResponseWriter, r *http.Request, auth Auth) bool {
 	if auth == nil {
 		return true // auth disabled: anonymous writes allowed (dev mode)

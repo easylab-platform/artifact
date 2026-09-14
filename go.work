@@ -1,7 +1,9 @@
 go 1.26.5
 
 use (
+	./apk
 	./cargo
+	./debian
 	./cmd
 	./composer
 	./conan
@@ -16,6 +18,7 @@ use (
 	./oci
 	./pub
 	./pypi
+	./rpm
 	./rubygems
 	./swiftpm
 	./system

@@ -400,6 +400,9 @@ func (s *State) removeVersion(ctx context.Context, pkg, version string) {
 }
 
 func (s *State) metadata(w http.ResponseWriter, r *http.Request, name string) {
+	if !artifactkit.AuthorizeReadFor(w, r, s.Auth, s.Registry, "npm", name) {
+		return
+	}
 	if body := s.aggregateMetadata(r.Context(), name); body != "" {
 		artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
 		return
@@ -515,6 +518,9 @@ func (s *State) rewriteTarballURLs(packument, name string) string {
 }
 
 func (s *State) tarball(w http.ResponseWriter, r *http.Request, name, file string) {
+	if !artifactkit.AuthorizeReadFor(w, r, s.Auth, s.Registry, "npm", name) {
+		return
+	}
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "npm", name)
 	for _, v := range versions {
 		if tarballFilename(name, v) == file {

@@ -291,14 +291,12 @@ func (a *Adapter) manifest(w http.ResponseWriter, r *http.Request, name, ref str
 
 	switch r.Method {
 	case http.MethodHead:
-		if !a.authorize(r, name, artifactkit.ActionPull) {
-			a.challenge(w, name, artifactkit.ActionPull)
+		if !artifactkit.AuthorizeReadFor(w, r, a.state.Auth, a.state.Registry, "oci", name) {
 			return
 		}
 		a.getManifest(w, r, name, ref, false)
 	case http.MethodGet:
-		if !a.authorize(r, name, artifactkit.ActionPull) {
-			a.challenge(w, name, artifactkit.ActionPull)
+		if !artifactkit.AuthorizeReadFor(w, r, a.state.Auth, a.state.Registry, "oci", name) {
 			return
 		}
 		a.getManifest(w, r, name, ref, true)
@@ -459,6 +457,9 @@ func (a *Adapter) checkBlob(w http.ResponseWriter, r *http.Request, digest strin
 }
 
 func (a *Adapter) getBlob(w http.ResponseWriter, r *http.Request, name, digest string) {
+	if !artifactkit.AuthorizeReadFor(w, r, a.state.Auth, a.state.Registry, "oci", name) {
+		return
+	}
 	size, _ := a.state.Registry.Blobs.Stat(r.Context(), digest)
 	if size != nil {
 		rd, err := a.state.Registry.Blobs.Open(r.Context(), digest)
