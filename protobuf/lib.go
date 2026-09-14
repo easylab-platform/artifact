@@ -78,11 +78,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Local cache first.
 	if art, err := s.Registry.Meta.Get(r.Context(), "protobuf", module, path); err == nil && len(art.Blobs) > 0 {
-		rd, err := s.Registry.Blobs.Open(r.Context(), art.Blobs[0].Digest)
-		if err == nil && rd != nil {
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.OctetResponse(w, r, data)
+		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, "application/octet-stream") {
 			return
 		}
 	}

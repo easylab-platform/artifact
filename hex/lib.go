@@ -178,20 +178,15 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, rest string) {
 	name, version := nameVersionFromStem(stem)
 	if art, err := s.Registry.Meta.Get(r.Context(), "hex", name, version); err == nil {
 		for _, b := range art.Blobs {
-			rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-			if err != nil || rd == nil {
-				continue
+			if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
+				return
 			}
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.BlobResponse(w, data, filename)
-			return
 		}
 	}
 	if base := s.Registry.Upstreams.Get("hex"); base != "" {
 		remote := s.Registry.RemoteAt(base)
 		if data, err := remote.GetBytes(r.Context(), "/tarballs/"+filename); err == nil {
-			artifactkit.BlobResponse(w, data, filename)
+			artifactkit.ServeData(w, r, s.Registry, r.Context(), data, "application/octet-stream", filename)
 			return
 		}
 	}

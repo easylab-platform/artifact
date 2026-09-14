@@ -243,14 +243,9 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, name, version s
 	filename := name + "-" + version + ".crate"
 	if art, err := s.Registry.Meta.Get(r.Context(), "cargo", name, version); err == nil {
 		for _, b := range art.Blobs {
-			rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-			if err != nil || rd == nil {
-				continue
+			if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
+				return
 			}
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.BlobResponse(w, data, filename)
-			return
 		}
 	}
 	remote, err := s.registrySubRemote("cargo", "static")
@@ -264,7 +259,7 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, name, version s
 		}
 		if err == nil {
 			storeVersionSource(s.Registry, name, version, data, "pull", r.Context())
-			artifactkit.BlobResponse(w, data, filename)
+			artifactkit.ServeData(w, r, s.Registry, r.Context(), data, "application/octet-stream", filename)
 			return
 		}
 	}

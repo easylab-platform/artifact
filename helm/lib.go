@@ -119,14 +119,9 @@ func (s *State) chart(w http.ResponseWriter, r *http.Request, filename string) {
 			}
 			for _, b := range art.Blobs {
 				if b.Name == filename {
-					rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-					if err != nil || rd == nil {
-						continue
+					if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
+						return
 					}
-					data, _ := io.ReadAll(rd)
-					_ = rd.Close()
-					artifactkit.BlobResponse(w, data, filename)
-					return
 				}
 			}
 		}
@@ -135,7 +130,7 @@ func (s *State) chart(w http.ResponseWriter, r *http.Request, filename string) {
 	remote, _ := s.Registry.Remote("helm", "")
 	if remote != nil {
 		if body, err := remote.GetBytes(r.Context(), "/packages/"+filename); err == nil {
-			artifactkit.BlobResponse(w, body, filename)
+			artifactkit.ServeData(w, r, s.Registry, r.Context(), body, "application/octet-stream", filename)
 			return
 		}
 	}

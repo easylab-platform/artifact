@@ -187,14 +187,9 @@ func (s *State) versionArchive(w http.ResponseWriter, r *http.Request, path stri
 		filename := name + "-" + v + ".tar.gz"
 		if art, err := s.Registry.Meta.Get(r.Context(), "pub", name, v); err == nil {
 			for _, b := range art.Blobs {
-				rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-				if err != nil || rd == nil {
-					continue
+				if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
+					return
 				}
-				data, _ := io.ReadAll(rd)
-				_ = rd.Close()
-				artifactkit.BlobResponse(w, data, filename)
-				return
 			}
 		}
 		artifactkit.Error(w, http.StatusNotFound, "not found")
@@ -218,14 +213,9 @@ func (s *State) archive(w http.ResponseWriter, r *http.Request, rest string) {
 	if art, err := s.Registry.Meta.Get(r.Context(), "pub", name, version); err == nil {
 		for _, b := range art.Blobs {
 			if b.Name == filename || b.Name == fullName || strings.HasSuffix(b.Name, filename) {
-				rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-				if err != nil || rd == nil {
-					continue
+				if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
+					return
 				}
-				data, _ := io.ReadAll(rd)
-				_ = rd.Close()
-				artifactkit.BlobResponse(w, data, filename)
-				return
 			}
 		}
 	}
@@ -235,7 +225,7 @@ func (s *State) archive(w http.ResponseWriter, r *http.Request, rest string) {
 		return
 	}
 	storeVersionSource(s.Registry, name, version, filename, fetched.Data, "pull", r.Context())
-	artifactkit.BlobResponse(w, fetched.Data, filename)
+	artifactkit.ServeData(w, r, s.Registry, r.Context(), fetched.Data, "application/octet-stream", filename)
 }
 
 func (s *State) retract(w http.ResponseWriter, r *http.Request, name string) {

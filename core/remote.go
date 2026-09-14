@@ -261,5 +261,5 @@ func (r *Registry) finishFetch(ctx context.Context, data []byte) (Fetched, error
 	if err != nil {
 		return Fetched{}, err
 	}
-	return Fetched{Data: data, Hashes: stored.Hashes, Size: stored.Size}, nil
+	return Fetched{Data: data, Hashes: stored.Hashes, Size: stored.Size, Digest: stored.Digest}, nil
 }

@@ -219,14 +219,9 @@ func (s *State) dist(w http.ResponseWriter, r *http.Request, rest string) {
 	filename := short + "-" + version + ".zip"
 	if art, err := s.Registry.Meta.Get(r.Context(), "composer", full, version); err == nil {
 		for _, b := range art.Blobs {
-			rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-			if err != nil || rd == nil {
-				continue
+			if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
+				return
 			}
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.BlobResponse(w, data, filename)
-			return
 		}
 	}
 	fetched, err := s.Registry.Fetch(r.Context(), "composer", "", "/dist/"+full+"/"+version+"/"+ref)
@@ -235,7 +230,7 @@ func (s *State) dist(w http.ResponseWriter, r *http.Request, rest string) {
 		return
 	}
 	storeVersionSource(s.Registry, full, version, fetched.Data, "pull", r.Context())
-	artifactkit.BlobResponse(w, fetched.Data, filename)
+	artifactkit.ServeData(w, r, s.Registry, r.Context(), fetched.Data, "application/octet-stream", filename)
 }
 
 func (s *State) upload(w http.ResponseWriter, r *http.Request) {

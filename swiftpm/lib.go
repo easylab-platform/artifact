@@ -281,17 +281,9 @@ func (s *State) sourceZip(w http.ResponseWriter, r *http.Request, id, version, n
 	filename := name + "-" + version + ".zip"
 	if art, err := s.Registry.Meta.Get(r.Context(), "swift", id, version); err == nil {
 		for _, b := range art.Blobs {
-			rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-			if err != nil || rd == nil {
-				continue
+			if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/zip", filename) {
+				return
 			}
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			w.Header().Set("Content-Type", "application/zip")
-			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(data)
-			return
 		}
 	}
 	fetched, err := s.Registry.Fetch(r.Context(), "swift", "", "/"+artifactkit.URLencode(id)+"/"+version+".zip")

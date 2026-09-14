@@ -146,14 +146,9 @@ func (s *State) moduleZip(w http.ResponseWriter, r *http.Request, module, versio
 	filename := module + "-" + version + ".zip"
 	if art, err := s.Registry.Meta.Get(r.Context(), "go", module, version); err == nil {
 		for _, b := range art.Blobs {
-			rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-			if err != nil || rd == nil {
-				continue
+			if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
+				return
 			}
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.BlobResponse(w, data, filename)
-			return
 		}
 	}
 	ep := EncodeModulePath(module)
@@ -163,7 +158,7 @@ func (s *State) moduleZip(w http.ResponseWriter, r *http.Request, module, versio
 		return
 	}
 	storeVersionSource(s.Registry, module, version, body, "pull", r.Context())
-	artifactkit.BlobResponse(w, body, filename)
+	artifactkit.ServeData(w, r, s.Registry, r.Context(), body, "application/octet-stream", filename)
 }
 
 func (s *State) proxyOne(w http.ResponseWriter, r *http.Request, module, suffix, ct string) {

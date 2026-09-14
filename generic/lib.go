@@ -6,7 +6,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/easylab-platform/artifact/core"
@@ -67,19 +66,9 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if b.Name != filename {
 				continue
 			}
-			rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-			if err != nil || rd == nil {
-				continue
-			}
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			if r.Method == http.MethodHead {
-				w.Header().Set("Content-Length", itoa(len(data)))
-				w.WriteHeader(http.StatusOK)
+			if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
 				return
 			}
-			artifactkit.BlobResponse(w, data, filename)
-			return
 		}
 		artifactkit.Error(w, http.StatusNotFound, "not found")
 	case http.MethodPut:
@@ -128,5 +117,3 @@ func store(reg *artifactkit.Registry, name, version, filename string, data []byt
 	}
 	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
-
-func itoa(n int) string { return strconv.Itoa(n) }

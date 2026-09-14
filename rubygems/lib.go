@@ -398,14 +398,9 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, filename string
 	name, version := nameVersionFromStem(stem)
 	if art, err := s.Registry.Meta.Get(r.Context(), "rubygems", name, version); err == nil {
 		for _, b := range art.Blobs {
-			rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-			if err != nil || rd == nil {
-				continue
+			if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream") {
+				return
 			}
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.OctetResponse(w, r, data)
-			return
 		}
 	}
 	// Pull-through only for gems NOT previously yanked locally. A yank

@@ -104,6 +104,14 @@ func ServeBlob(w http.ResponseWriter, r *http.Request, rd io.ReadSeeker, ct stri
 // ServeBlobAt serves a blob opened from a BlobStore by digest:
 // (nil, nil) from Open means the blob is absent -> 404.
 func ServeBlobAt(w http.ResponseWriter, r *http.Request, store BlobStore, ctx context.Context, digest, ct string) bool {
+	return ServeBlobAtNamed(w, r, store, ctx, digest, ct, "")
+}
+
+// ServeBlobAtNamed is ServeBlobAt with an optional download filename: when
+// non-empty the response carries Content-Disposition: attachment (package
+// managers that save the file rely on it). It streams with full
+// Range/206/HEAD semantics and never buffers the blob.
+func ServeBlobAtNamed(w http.ResponseWriter, r *http.Request, store BlobStore, ctx context.Context, digest, ct, filename string) bool {
 	size, err := store.Stat(ctx, digest)
 	if err != nil || size == nil {
 		return false
@@ -113,6 +121,9 @@ func ServeBlobAt(w http.ResponseWriter, r *http.Request, store BlobStore, ctx co
 		return false
 	}
 	defer func() { _ = rd.Close() }()
+	if filename != "" {
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	}
 	ServeBlob(w, r, rd, ct, time.Time{})
 	return true
 }
@@ -281,4 +292,32 @@ func WriteReadErr(w http.ResponseWriter, err error) {
 		return
 	}
 	Error(w, http.StatusBadRequest, "error reading request body")
+}
+
+// ServeData stores data into the CAS (idempotent) and streams it to the
+// client with Range/HEAD semantics and an attachment filename. It is the
+// streaming replacement for BlobResponse on pull-through paths where the
+// bytes were just fetched into memory: storing first means the response is
+// served from the blob store rather than re-buffered.
+func ServeData(w http.ResponseWriter, r *http.Request, reg *Registry, ctx context.Context, data []byte, ct, filename string) {
+	stored, err := reg.StoreAndHash(ctx, data)
+	if err == nil && stored.Digest != "" {
+		if ServeBlobAtNamed(w, r, reg.Blobs, ctx, stored.Digest, ct, filename) {
+			return
+		}
+	}
+	// Fallback: direct write (HEAD-aware).
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+	if filename != "" {
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	}
+	w.WriteHeader(http.StatusOK)
+	if r != nil && r.Method == http.MethodHead {
+		return
+	}
+	_, _ = w.Write(data)
 }

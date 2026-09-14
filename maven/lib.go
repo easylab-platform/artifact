@@ -103,14 +103,10 @@ func (s *State) getPath(w http.ResponseWriter, r *http.Request, p string, c coor
 	if art, err := s.Registry.Meta.Get(r.Context(), "maven", c.artifactID, c.version); err == nil {
 		for _, b := range art.Blobs {
 			if b.Name == filename {
-				rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-				if err != nil || rd == nil {
-					continue
+				if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
+					return
 				}
-				data, _ := io.ReadAll(rd)
-				_ = rd.Close()
-				artifactkit.BlobResponse(w, data, filename)
-				return
+				continue
 			}
 		}
 	}
@@ -120,7 +116,10 @@ func (s *State) getPath(w http.ResponseWriter, r *http.Request, p string, c coor
 		return
 	}
 	storeVersionSource(s.Registry, c.artifactID, c.version, filename, fetched.Data, "pull", r.Context())
-	artifactkit.BlobResponse(w, fetched.Data, filename)
+	if fetched.Digest != "" && artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), fetched.Digest, "application/octet-stream", filename) {
+		return
+	}
+	artifactkit.ServeData(w, r, s.Registry, r.Context(), fetched.Data, "application/octet-stream", filename)
 }
 
 func (s *State) headPath(w http.ResponseWriter, r *http.Request, p string, c coords) {

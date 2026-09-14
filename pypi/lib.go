@@ -306,14 +306,9 @@ func (s *State) simpleFile(w http.ResponseWriter, r *http.Request, project, file
 		}
 		for _, b := range art.Blobs {
 			if b.Name == filename {
-				rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-				if err != nil || rd == nil {
-					continue
+				if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
+					return
 				}
-				data, _ := io.ReadAll(rd)
-				_ = rd.Close()
-				artifactkit.BlobResponse(w, data, filename)
-				return
 			}
 		}
 	}
@@ -343,7 +338,7 @@ func (s *State) simpleFile(w http.ResponseWriter, r *http.Request, project, file
 	}
 	version := versionFromFilename(filename, project)
 	s.storeVersion(project, version, filename, fetched.Data, "pull", r.Context())
-	artifactkit.BlobResponse(w, fetched.Data, filename)
+	artifactkit.ServeData(w, r, s.Registry, r.Context(), fetched.Data, "application/octet-stream", filename)
 }
 
 func resolveFileHref(html, filename, baseURL string) string {

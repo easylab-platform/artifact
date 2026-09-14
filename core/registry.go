@@ -199,6 +199,9 @@ type Fetched struct {
 	Data   []byte
 	Hashes Hashes
 	Size   int64
+	// Digest is the CAS digest of the fetched bytes ("" on a legacy path that
+	// did not store them).
+	Digest string
 }
 
 // Stored is the summary of bytes written into the CAS.

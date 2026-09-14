@@ -261,14 +261,9 @@ func (s *State) flatIndex(w http.ResponseWriter, r *http.Request, id string) {
 func (s *State) flatFile(w http.ResponseWriter, r *http.Request, id, ver, filename string) {
 	if art, err := s.Registry.Meta.Get(r.Context(), "nuget", id, ver); err == nil {
 		for _, b := range art.Blobs {
-			rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-			if err != nil || rd == nil {
-				continue
+			if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
+				return
 			}
-			data, _ := io.ReadAll(rd)
-			_ = rd.Close()
-			artifactkit.BlobResponse(w, data, filename)
-			return
 		}
 	}
 	if base := s.Registry.Upstreams.Sub("nuget", "registration"); base != "" {
@@ -276,7 +271,7 @@ func (s *State) flatFile(w http.ResponseWriter, r *http.Request, id, ver, filena
 		lid := lower(id)
 		if data, err := remote.GetBytes(r.Context(), "/v3-flatcontainer/"+lid+"/"+ver+"/"+filename); err == nil {
 			storeVersionSource(s.Registry, id, ver, filename, data, "pull", r.Context())
-			artifactkit.BlobResponse(w, data, filename)
+			artifactkit.ServeData(w, r, s.Registry, r.Context(), data, "application/octet-stream", filename)
 			return
 		}
 	}

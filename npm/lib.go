@@ -526,14 +526,9 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, name, file strin
 		if tarballFilename(name, v) == file {
 			if art, err := s.Registry.Meta.Get(r.Context(), "npm", name, v); err == nil {
 				for _, b := range art.Blobs {
-					rd, err := s.Registry.Blobs.Open(r.Context(), b.Digest)
-					if err != nil || rd == nil {
-						continue
+					if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", file) {
+						return
 					}
-					data, _ := io.ReadAll(rd)
-					_ = rd.Close()
-					artifactkit.BlobResponse(w, data, file)
-					return
 				}
 			}
 		}
@@ -553,7 +548,7 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, name, file strin
 		ver = versionFromTarballName(file, name)
 	}
 	s.storeVersion(r.Context(), name, ver, data, pkgJSON, "pull")
-	artifactkit.BlobResponse(w, data, file)
+	artifactkit.ServeData(w, r, s.Registry, r.Context(), data, "application/octet-stream", file)
 }
 
 func versionFromTarballName(file, name string) string {
