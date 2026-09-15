@@ -1,7 +1,9 @@
 #!/bin/sh
 set -e
-# nix-portable runs Nix 2.20 (the `nix` CLI; nix-store is a subcommand now).
-# Exercise the CLI + the binary-cache client path.
-export NP_GIT=/usr/bin/git
+# Native Nix image: exercise the CLI and the binary-cache client path through
+# the spoofed proxy. Nix has its own CA handling, so trust the egress CA via
+# NIX_SSL_CERT_FILE.
+export NIX_CONFIG="experimental-features = nix-command flakes"
+export NIX_SSL_CERT_FILE=/etc/easyproxy/ca.crt
 nix --version
-nix store info --store https://cache.nixos.org 2>&1 | head -2 || true
+nix store info --store https://cache.nixos.org

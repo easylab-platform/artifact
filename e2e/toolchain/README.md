@@ -10,14 +10,13 @@ client toolchain, rather than one giant all-in-one image.
   the build, then the sources are restored to `deb.debian.org` so the `debian`
   protocol test can assert the spoofed proxy path.
 - `Dockerfile.<proto>` → `easylab/tool-<proto>:latest`
-  Every protocol image is `FROM easylab/toolchain-base` (Debian 12) and adds
-  exactly one toolchain under /opt, fetched from easylab's generic store so
-  the build needs no egress proxy. No upstream vendor image is used:
-  - `rpm`/`apk`: the client (`rpm`+`dnf` via apt / `apk-tools-static`) runs on
-    the Debian base; `apk` manages an Alpine root under `/apkroot`.
-  - `nix`: `nix-portable` (bundles Nix + bubblewrap) on the Debian base.
-  - `composer`: PHP 8.5.10 is compiled from source on the Debian base, then
-    composer.phar is added.
+  The Debian-based protocols are `FROM easylab/toolchain-base` (Debian 12) and
+  add exactly one toolchain under /opt, fetched from easylab's generic store so
+  the build needs no egress proxy. Three protocols use their **native distro
+  base** instead (the client package manager must be the real one):
+  - `rpm` → `root/fedora:44` (native dnf/rpm)
+  - `apk` → `root/alpine:3.24` (native apk)
+  - `nix` → `root/nix:2.35.2` (native Nix + /nix store)
 - `manifest.txt` — every toolchain artifact (name|version|file|url-or-LOCAL).
 - `mirror.sh` — fetch each artifact (once, via the dev-box proxy) and PUT it
   into easylab `/pkgs/generic/<name>/<ver>/<file>`; idempotent.
@@ -47,5 +46,7 @@ apk-tools-static 3.0.8 · ruby via ruby-builder · swift 6.4.0
 - `composer`: PHP is compiled from source (php-src 8.5.10) on the Debian base;
   its build-only toolchain is purged and the runtime shared libs (libzip4,
   libonig5, ...) are kept. composer.phar is then added.
+- `nix`: the nixos/nix image trusts its own CA set; the test sets
+  `NIX_SSL_CERT_FILE` to the egress CA so the binary-cache fetch is MITM'd.
 - `swift` has no public registry upstream (api.spm.swift.org is NXDOMAIN); its
   test drives the adapter's SCM-to-registry bridge.
