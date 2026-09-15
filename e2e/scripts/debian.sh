@@ -7,3 +7,6 @@ set -e
 APT_PROXY="Acquire::http::Proxy=http://127.0.0.1:80"
 apt-get update -o "$APT_PROXY" -o Acquire::Retries=0
 apt-get install -y --no-install-recommends -o "$APT_PROXY" ca-certificates jq
+# Run assertion: execute the installed binary and use its JSON parser.
+echo '{"ok":true}' | jq -e '.ok' >/dev/null
+echo "apt install ran: $(jq --version)"

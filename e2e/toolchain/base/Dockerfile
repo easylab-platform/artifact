@@ -32,6 +32,7 @@ RUN set -eux; \
       apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
         ca-certificates curl wget xz-utils unzip zip bzip2 \
         binutils file git openssh-client procps jq less python3 \
+        gcc g++ make libc6-dev pkg-config \
         "$ICU" "$SSL" "$RL" libyaml-0-2 libffi8 libgmp10 \
         libncurses6 zlib1g liblzma5 libzstd1 gnupg bind9-dnsutils \
         libatomic1 \

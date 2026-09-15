@@ -18,3 +18,10 @@ dotnet new console -o w >/dev/null
 cd w
 dotnet add package Newtonsoft.Json --version 13.0.3 >/dev/null
 dotnet restore
+# Compile/run assertion: use the restored package for real.
+cat > Program.cs <<'X'
+using Newtonsoft.Json;
+var o = JsonConvert.DeserializeObject<Dictionary<string,int>>("{\"a\":1}");
+System.Console.WriteLine("dotnet + json: " + o["a"]);
+X
+dotnet run --verbosity quiet

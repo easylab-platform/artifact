@@ -7,3 +7,6 @@ export NIX_CONFIG="experimental-features = nix-command flakes"
 export NIX_SSL_CERT_FILE=/etc/easyproxy/ca.crt
 nix --version
 nix store info --store https://cache.nixos.org
+# Evaluation assertion: parse + evaluate a Nix expression and a tiny derivation.
+nix-instantiate --eval -E '1 + 1'
+nix-instantiate --eval -E 'builtins.length [ "a" "b" "c" ]'

@@ -8,3 +8,6 @@ apk update
 # --allow-untrusted: the artifact mirror serves the upstream index byte-for-byte
 # but this test trusts the egress CA rather than the Alpine signing keys.
 apk add --no-cache --allow-untrusted jq
+# Run assertion: execute the installed binary.
+echo '{"ok":true}' | jq -e '.ok' >/dev/null
+echo "apk installed: $(jq --version)"

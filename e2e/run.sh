@@ -147,6 +147,9 @@ spec:
   containers:
   - name: tool
     image: ${R_IMG}
+    # Always pull: the tool images are re-pushed under the same tag as the
+    # matrix evolves, and IfNotPresent would silently run a stale cached layer.
+    imagePullPolicy: Always
     command: ["sleep", "1800"]
     resources:
       requests: { cpu: 100m, memory: 256Mi }

@@ -1,9 +1,9 @@
 #!/bin/sh
 set -e
 # SwiftPM has NO public registry upstream (api.spm.swift.org is NXDOMAIN), so
-# exercise the adapter's SCM-to-registry bridge through the spoofed proxy:
-# register a git URL, enumerate its tags, and (server-side) build a source
-# archive.
+# exercise the adapter's SCM-to-registry bridge through the spoofed proxy
+# (register a git URL, enumerate tags, fetch a source archive), then make the
+# compiler build and run a real program.
 python3 - <<'PY'
 import ssl, http.client, urllib.parse
 ctx = ssl.create_default_context(cafile="/etc/easyproxy/ca.crt")
@@ -19,3 +19,14 @@ st, body = req("GET", "/apple/swift-numerics")
 assert st == 200 and b"releases" in body, (st, body)
 print("releases:", body[:140])
 PY
+
+# Compile/run assertion: build a Swift binary against the Foundation module.
+mkdir -p /w && cd /w
+cat > main.swift <<'X'
+import Foundation
+let d = ["ok": true]
+let j = try! JSONSerialization.data(withJSONObject: d)
+print("swift + foundation: " + String(data: j, encoding: .utf8)!)
+X
+swiftc main.swift -o /w/app
+/w/app
