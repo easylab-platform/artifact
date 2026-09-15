@@ -4,11 +4,12 @@ Each protocol in the e2e matrix gets its **own** small image with a single
 client toolchain, rather than one giant all-in-one image.
 
 ## Pieces
-- `base/Dockerfile` → `easylab/toolchain-base:latest`
-  Debian 12 bookworm-slim + base utilities / shared libs (apt). The only step
-  that needs public internet; apt is pointed at a fast in-region mirror during
-  the build, then the sources are restored to `deb.debian.org` so the `debian`
-  protocol test can assert the spoofed proxy path.
+- `base/Dockerfile` → `easylab/toolchain-base:{latest,trixie}`
+  Debian slim + base utilities / shared libs (apt), suite auto-detected from
+  the base image (bookworm or trixie; the package set differs: t64 ABI,
+  libicu76, ...). The only step that needs public internet; apt is pointed at
+  a fast in-region mirror during the build, then the sources are restored to
+  `deb.debian.org` so the `debian` protocol test can assert the proxy path.
 - `Dockerfile.<proto>` → `easylab/tool-<proto>:latest`
   The Debian-based protocols are `FROM easylab/toolchain-base` (Debian 12) and
   add exactly one toolchain under /opt, fetched from easylab's generic store so
@@ -22,6 +23,17 @@ client toolchain, rather than one giant all-in-one image.
   into easylab `/pkgs/generic/<name>/<ver>/<file>`; idempotent.
 - `build-one.sh <proto|base> [tag]` — buildkit → skopeo → forgejo for one image.
 - `build-all.sh` — builds every protocol image in sequence (base must exist).
+
+## Variants: bookworm (default) and trixie
+`build-one.sh`/`build-all.sh` take `VARIANT=bookworm|trixie` (bookworm tags
+`:latest`, trixie tags `:trixie`):
+```sh
+EASYLAB=http://<easylab-ip> ARTIFACT_TOKEN=devtoken ./mirror.sh
+VARIANT=bookworm ./build-one.sh base && VARIANT=bookworm ./build-all.sh
+VARIANT=trixie   ./build-one.sh base && VARIANT=trixie   ./build-all.sh
+```
+rpm/apk (native Fedora/Alpine bases) are the same either way and are built
+only in the bookworm variant. Run the matrix with `TOOL_TAG=trixie ./run.sh`.
 
 ## Rebuild from scratch
 ```sh
@@ -48,5 +60,8 @@ apk-tools-static 3.0.8 · ruby via ruby-builder · swift 6.4.0
   libonig5, ...) are kept. composer.phar is then added.
 - `nix`: the nixos/nix image trusts its own CA set; the test sets
   `NIX_SSL_CERT_FILE` to the egress CA so the binary-cache fetch is MITM'd.
+- `debian`: apt on trixie (apt 3.0) resolves via its own method and bypasses
+  the spoofed resolver, so the test pins `Acquire::http::Proxy=http://127.0.0.1:80`
+  (the sidecar) explicitly; bookworm steers by spoofed DNS alone.
 - `swift` has no public registry upstream (api.spm.swift.org is NXDOMAIN); its
   test drives the adapter's SCM-to-registry bridge.

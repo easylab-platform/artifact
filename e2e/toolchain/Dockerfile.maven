@@ -1,4 +1,5 @@
-FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG BASE_IMAGE=forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+FROM ${BASE_IMAGE}
 ARG EASYLAB=http://easylab.temp.svc.cluster.local
 RUN curl -fsSL -o /tmp/jdk.tar.gz "${EASYLAB}/pkgs/generic/jdk/25.0.4.1_1/OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz" \
  && mkdir -p /opt/jdk && tar -xzf /tmp/jdk.tar.gz -C /opt/jdk --strip-components=1 && rm /tmp/jdk.tar.gz \

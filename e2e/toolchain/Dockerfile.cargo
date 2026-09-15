@@ -1,4 +1,5 @@
-FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG BASE_IMAGE=forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+FROM ${BASE_IMAGE}
 ARG EASYLAB=http://easylab.temp.svc.cluster.local
 RUN curl -fsSL -o /tmp/rust.tar.gz "${EASYLAB}/pkgs/generic/rust/1.98.1/rust-1.98.1-x86_64-unknown-linux-gnu.tar.gz" \
  && mkdir -p /tmp/rustdist && tar -xzf /tmp/rust.tar.gz -C /tmp/rustdist --strip-components=1 && rm /tmp/rust.tar.gz \

@@ -1,4 +1,5 @@
-FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG BASE_IMAGE=forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+FROM ${BASE_IMAGE}
 ARG EASYLAB=http://easylab.temp.svc.cluster.local
 # OTP prebuilt is relocatable but ships no bin/: Install creates the wrappers.
 RUN curl -fsSL -o /tmp/otp.tar.gz "${EASYLAB}/pkgs/generic/otp/29.0.6/OTP-29.0.6.tar.gz" \

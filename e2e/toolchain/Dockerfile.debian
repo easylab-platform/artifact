@@ -1,1 +1,2 @@
-FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG BASE_IMAGE=forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+FROM ${BASE_IMAGE}

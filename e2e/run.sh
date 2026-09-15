@@ -21,7 +21,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NS="${NS:-temp}"
 TOOL_IMAGE_PREFIX="${TOOL_IMAGE_PREFIX:-forgejo.develop.10.199.64.20.nip.io/easylab/tool}"
 TOOL_TAG="${TOOL_TAG:-latest}"
-EASYPX_IMAGE="${EASYPX_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easyproxy:v0.5.0}"
+EASYPX_IMAGE="${EASYPX_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easyproxy:v0.5.1}"
 CA_SECRET="${CA_SECRET:-artifact-e2e-ca}"
 UPSTREAM_DNS="${UPSTREAM_DNS:-172.18.0.10}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
@@ -66,11 +66,37 @@ proto_row() {
 
 parse_row() { # sets R_IMG R_MATCH R_STRIP R_ADD
   IFS='|' read -r R_MATCH R_STRIP R_ADD <<<"$(proto_row "$1")"
-  R_IMG="${TOOL_IMAGE_PREFIX}-$1:${TOOL_TAG}"
+  # rpm/apk (native Fedora/Alpine bases) are version-independent of the debian
+  # variant, so they always use the default tag.
+  case "$1" in
+    rpm|apk) R_IMG="${TOOL_IMAGE_PREFIX}-$1:latest" ;;
+    *)       R_IMG="${TOOL_IMAGE_PREFIX}-$1:${TOOL_TAG}" ;;
+  esac
 }
 
 cas_count() {
   kubectl exec -n "$NS" "deploy/artifact-$1" -- sh -c 'ls /data/blobs/sha256/*/* 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]'
+}
+
+# rewrite_count prints how many rewrite connections the sidecar has logged for
+# the pod so far.
+rewrite_count() {
+  kubectl logs -n "$NS" "$1" -c easyproxy 2>/dev/null | grep -c '"action":"rewrite"'
+}
+
+# await_rewrites polls until the sidecar has logged >=1 rewrite result for the
+# pod (or the timeout elapses). The sidecar writes its log line when a relayed
+# connection closes, and clients that keep sockets alive (apt, cargo, maven, …)
+# may close them slightly after the client command returns — so a single read
+# races. max_wait/interval are seconds.
+await_rewrites() {
+  local name="$1" max_wait="${2:-20}" interval="${3:-1}" waited=0 n=0
+  while [ "$waited" -lt "$max_wait" ]; do
+    n="$(rewrite_count "$name")"
+    [ "${n:-0}" -gt 0 ] && { echo "$n"; return 0; }
+    sleep "$interval"; waited=$((waited + interval))
+  done
+  echo "${n:-0}"; return 1
 }
 
 write_script_cm() {
@@ -178,8 +204,9 @@ run_one() {
     return
   fi
   out="$(kubectl exec -n "$NS" "$name" -c tool -- timeout 600 sh "/scripts/${p}.sh" 2>&1)"; rc=$?
-  rewrites="$(kubectl logs -n "$NS" "$name" -c easyproxy 2>/dev/null | grep -c '"action":"rewrite"')"
-  sleep 2
+  # The sidecar logs a rewrite entry when the relayed connection closes; wait
+  # for it (bounded) rather than racing a single read.
+  rewrites="$(await_rewrites "$name" 20 1 || true)"
   after="$(cas_count "$p")"; growth=$(( ${after:-0} - ${before:-0} ))
   if [ "$rc" -eq 0 ] && [ "${rewrites:-0}" -gt 0 ]; then
     echo "PASS $p  ($rewrites rewrite conns, CAS +$growth)"; pass=$((pass+1)); RESULTS+=("PASS $p ($rewrites conns, CAS +$growth)")

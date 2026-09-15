@@ -1,4 +1,5 @@
-FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG BASE_IMAGE=forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+FROM ${BASE_IMAGE}
 ARG EASYLAB=http://easylab.temp.svc.cluster.local
 RUN mkdir -p /opt/buf && curl -fsSL -o /opt/buf/buf "${EASYLAB}/pkgs/generic/buf/1.73.0/buf-Linux-x86_64" && chmod +x /opt/buf/buf
 ENV PATH=/opt/buf:$PATH

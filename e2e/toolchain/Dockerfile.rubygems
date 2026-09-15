@@ -1,4 +1,5 @@
-FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG BASE_IMAGE=forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+FROM ${BASE_IMAGE}
 ARG EASYLAB=http://easylab.temp.svc.cluster.local
 # The ruby-builder prebuilt bakes /opt/hostedtoolcache/Ruby/<ver>/x64 into its
 # shebangs, $LOAD_PATH and gem prefix, so it is unpacked at exactly that path.
