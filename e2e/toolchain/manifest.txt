@@ -24,3 +24,4 @@ hf-wheels|latest|hf-wheels.tar.gz|LOCAL:/tmp/hf-wheels.tar.gz
 swift|6.4.0|swift-6.4.0-RELEASE-debian12.tar.gz|LOCAL:/tmp/swift-6.4.0-RELEASE-debian12.tar.gz
 php|8.4.23|php-8.4.23-cli-linux-x86_64.tar.gz|https://dl.static-php.dev/static-php-cli/bulk/php-8.4.23-cli-linux-x86_64.tar.gz
 hex-archive|2.5.1|hex-2.5.1-otp-29.ez|LOCAL:/tmp/hex-2.5.1-otp-29.ez
+php-src|8.5.10|php-8.5.10.tar.gz|LOCAL:/tmp/php-8.5.10.tar.gz

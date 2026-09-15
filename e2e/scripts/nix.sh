@@ -1,4 +1,7 @@
 #!/bin/sh
-echo "nix: exercising the binary-cache proxy"
-nix-store --version
-nix-store --realise /nix/store/00000000000000000000000000000000-hello.drv 2>&1 || true
+set -e
+# nix-portable runs Nix 2.20 (the `nix` CLI; nix-store is a subcommand now).
+# Exercise the CLI + the binary-cache client path.
+export NP_GIT=/usr/bin/git
+nix --version
+nix store info --store https://cache.nixos.org 2>&1 | head -2 || true

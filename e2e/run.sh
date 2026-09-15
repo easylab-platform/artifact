@@ -66,12 +66,7 @@ proto_row() {
 
 parse_row() { # sets R_IMG R_MATCH R_STRIP R_ADD
   IFS='|' read -r R_MATCH R_STRIP R_ADD <<<"$(proto_row "$1")"
-  case "$1" in
-    rpm) R_IMG="forgejo.develop.10.199.64.20.nip.io/root/fedora:44" ;;
-    apk) R_IMG="forgejo.develop.10.199.64.20.nip.io/root/alpine:3.24" ;;
-    nix) R_IMG="forgejo.develop.10.199.64.20.nip.io/root/nix:2.35.2" ;;
-    *)   R_IMG="${TOOL_IMAGE_PREFIX}-$1:${TOOL_TAG}" ;;
-  esac
+  R_IMG="${TOOL_IMAGE_PREFIX}-$1:${TOOL_TAG}"
 }
 
 cas_count() {

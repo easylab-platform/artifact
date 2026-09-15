@@ -10,13 +10,14 @@ client toolchain, rather than one giant all-in-one image.
   the build, then the sources are restored to `deb.debian.org` so the `debian`
   protocol test can assert the spoofed proxy path.
 - `Dockerfile.<proto>` → `easylab/tool-<proto>:latest`
-  Each downloads exactly one toolchain (to `/opt`) from easylab's **generic
-  store**, so the build needs no egress proxy. Exceptions use dedicated bases:
-  - `rpm`  → `root/fedora:44` (dnf/rpm native)
-  - `apk`  → `root/alpine:3.24` (apk native)
-  - `nix`  → `root/nix:2.35.2` (nix native)
-  - `composer` builds on the official `php:8.5.10-cli-bookworm` image (a
-    Debian base; the official composer image is Alpine).
+  Every protocol image is `FROM easylab/toolchain-base` (Debian 12) and adds
+  exactly one toolchain under /opt, fetched from easylab's generic store so
+  the build needs no egress proxy. No upstream vendor image is used:
+  - `rpm`/`apk`: the client (`rpm`+`dnf` via apt / `apk-tools-static`) runs on
+    the Debian base; `apk` manages an Alpine root under `/apkroot`.
+  - `nix`: `nix-portable` (bundles Nix + bubblewrap) on the Debian base.
+  - `composer`: PHP 8.5.10 is compiled from source on the Debian base, then
+    composer.phar is added.
 - `manifest.txt` — every toolchain artifact (name|version|file|url-or-LOCAL).
 - `mirror.sh` — fetch each artifact (once, via the dev-box proxy) and PUT it
   into easylab `/pkgs/generic/<name>/<ver>/<file>`; idempotent.
@@ -43,8 +44,8 @@ apk-tools-static 3.0.8 · ruby via ruby-builder · swift 6.4.0
   its shebangs; it is unpacked at exactly that path.
 - `hex`: the OTP tarball has no `bin/`; its `Install -minimal` creates it. A
   copy of the hex archive is baked in (`/opt/hex-archive`) for offline use.
-- `composer` runs on the official php:8.5.10-cli-bookworm image + unzip/git
-  (composer extracts dist zips); it no longer uses static-php-cli, whose phar
-  handling segfaulted in this container runtime.
+- `composer`: PHP is compiled from source (php-src 8.5.10) on the Debian base;
+  its build-only toolchain is purged and the runtime shared libs (libzip4,
+  libonig5, ...) are kept. composer.phar is then added.
 - `swift` has no public registry upstream (api.spm.swift.org is NXDOMAIN); its
   test drives the adapter's SCM-to-registry bridge.

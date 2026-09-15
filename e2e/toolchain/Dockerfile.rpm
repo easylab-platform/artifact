@@ -1,1 +1,10 @@
-FROM forgejo.develop.10.199.64.20.nip.io/root/fedora:44
+FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG APT_MIRROR=mirrors.ustc.edu.cn
+# rpm/dnf are Debian packages; the build points apt at a fast mirror then
+# restores the official sources for runtime (the spoofed proxy handles those).
+RUN set -eux; \
+    printf 'Types: deb\nURIs: http://%s/debian\nSuites: bookworm bookworm-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://%s/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' "$APT_MIRROR" "$APT_MIRROR" > /etc/apt/sources.list.d/debian.sources; \
+    apt-get -o Acquire::Retries=10 update; \
+    for i in 1 2 3 4 5 6; do apt-get -o Acquire::Retries=10 install -y --no-install-recommends rpm dnf && break || { echo "retry $i"; sleep 3; }; done; \
+    rm -rf /var/lib/apt/lists/*; \
+    printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: bookworm bookworm-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://deb.debian.org/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/debian.sources

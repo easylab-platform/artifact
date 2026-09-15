@@ -1,15 +1,38 @@
-FROM forgejo.develop.10.199.64.20.nip.io/root/php:8.5.10-cli-bookworm
+FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
 ARG EASYLAB=http://easylab.temp.svc.cluster.local
-# composer extracts dist zips: needs the unzip binary (the php image omits it)
-# plus git for source fallbacks.
+ARG APT_MIRROR=mirrors.ustc.edu.cn
+# Build PHP 8.5.10 from source on the Debian base (no external php image), then
+# drop in composer.phar. Build-only toolchain is purged afterwards.
 RUN set -eux; \
-    printf 'Types: deb\nURIs: http://mirrors.ustc.edu.cn/debian\nSuites: bookworm bookworm-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://mirrors.ustc.edu.cn/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' \
-        > /etc/apt/sources.list.d/debian.sources; \
+    printf 'Types: deb\nURIs: http://%s/debian\nSuites: bookworm bookworm-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://%s/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' "$APT_MIRROR" "$APT_MIRROR" > /etc/apt/sources.list.d/debian.sources; \
     apt-get -o Acquire::Retries=10 update; \
-    apt-get -o Acquire::Retries=10 install -y --no-install-recommends unzip git ca-certificates; \
+    for i in 1 2 3 4 5 6; do \
+      apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
+        build-essential autoconf bison re2c pkg-config \
+        libxml2-dev libsqlite3-dev libssl-dev zlib1g-dev libcurl4-openssl-dev \
+        libzip-dev libonig-dev libreadline-dev libffi-dev \
+      && break || { echo "retry $i"; sleep 3; }; \
+    done; \
+    curl -fsSL -o /tmp/php.tar.gz "${EASYLAB}/pkgs/generic/php-src/8.5.10/php-8.5.10.tar.gz"; \
+    mkdir -p /tmp/php && tar -xzf /tmp/php.tar.gz -C /tmp/php --strip-components=1; \
+    cd /tmp/php; \
+    ./configure --prefix=/opt/php \
+        --with-openssl --with-zlib --with-curl --with-libxml \
+        --enable-mbstring --with-zip --with-sqlite3 --with-readline \
+        --enable-phar --enable-tokenizer --enable-filter --enable-session \
+        --enable-ctype --without-pear >/tmp/php-config.log 2>&1; \
+    make -j"$(nproc)" >/tmp/php-make.log 2>&1; \
+    make install >/tmp/php-install.log 2>&1; \
+    cd /; rm -rf /tmp/php /tmp/php.tar.gz /tmp/php-*.log; \
+    apt-get purge -y build-essential autoconf bison re2c pkg-config \
+        libxml2-dev libsqlite3-dev libssl-dev zlib1g-dev libcurl4-openssl-dev \
+        libzip-dev libonig-dev libreadline-dev libffi-dev; \
+    apt-get autoremove -y; \
+    apt-get -o Acquire::Retries=10 install -y --no-install-recommends \
+        libzip4 libonig5 libreadline8 libcurl4; \
     rm -rf /var/lib/apt/lists/*; \
-    printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: bookworm bookworm-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://deb.debian.org/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' \
-        > /etc/apt/sources.list.d/debian.sources
+    printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: bookworm bookworm-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://deb.debian.org/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' > /etc/apt/sources.list.d/debian.sources
 RUN curl -fsSL -o /opt/composer.phar "${EASYLAB}/pkgs/generic/composer/2.10.3/composer.phar" \
- && printf '#!/bin/sh\nexec php /opt/composer.phar "$@"\n' > /usr/local/bin/composer \
+ && printf '#!/bin/sh\nexec /opt/php/bin/php /opt/composer.phar "$@"\n' > /usr/local/bin/composer \
  && chmod +x /usr/local/bin/composer
+ENV PATH=/opt/php/bin:$PATH

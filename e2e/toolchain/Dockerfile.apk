@@ -1,1 +1,12 @@
-FROM forgejo.develop.10.199.64.20.nip.io/root/alpine:3.24
+FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+# apk-tools-static provides the apk client on any Linux; it manages an Alpine
+# root under /apkroot (created by the test with --root/--initdb).
+RUN mkdir -p /tmp/apkx /opt/apk \
+ && curl -fsSL -o /tmp/apk-tools.apk "${EASYLAB}/pkgs/generic/apk-tools-static/3.0.8-r0/apk-tools-static-3.0.8-r0.apk" \
+ && tar -xzf /tmp/apk-tools.apk -C /tmp/apkx \
+ && mv /tmp/apkx/sbin/apk.static /opt/apk/apk.static \
+ && rm -rf /tmp/apk-tools.apk /tmp/apkx \
+ && printf '#!/bin/sh\nexec /opt/apk/apk.static "$@"\n' > /usr/local/bin/apk \
+ && chmod +x /usr/local/bin/apk \
+ && mkdir -p /etc/apk && printf 'x86_64\n' > /etc/apk/arch
