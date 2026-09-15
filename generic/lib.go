@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/easylab-platform/artifact/core"
@@ -76,43 +77,57 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		artifactkit.LimitBody(w, r)
-		data, err := io.ReadAll(r.Body)
+		// Stream through a temp file: large artifacts (multi-hundred-MB
+		// toolchains) must not be buffered in memory before hashing.
+		tmp, err := os.CreateTemp("", "artifact-generic-*")
+		if err != nil {
+			artifactkit.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer func() { _ = os.Remove(tmp.Name()) }()
+		defer func() { _ = tmp.Close() }()
+		h, err := artifactkit.ComputeHashes(io.TeeReader(r.Body, tmp))
 		if err != nil {
 			artifactkit.WriteReadErr(w, err)
 			return
 		}
-		store(s.Registry, name, version, filename, data, r.Context())
+		digest := "sha256:" + h.SHA256
+		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+			artifactkit.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		store(s.Registry, name, version, filename, tmp, digest, r.Context())
 		artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
-func store(reg *artifactkit.Registry, name, version, filename string, data []byte, ctx context.Context) {
+func store(reg *artifactkit.Registry, name, version, filename string, r io.Reader, digest string, ctx context.Context) {
 	art, _ := reg.Meta.Get(ctx, "generic", name, version)
 	if art.Repository == "" {
 		art.Format, art.Repository, art.Version = "generic", name, version
 	}
-	if len(data) > 0 {
-		h, _ := artifactkit.ComputeHashesBytes(data)
-		digest := "sha256:" + h.SHA256
-		var removed []artifactkit.Descriptor
-		var kept []artifactkit.Descriptor
-		for _, b := range art.Blobs {
-			if b.Name == filename {
-				removed = append(removed, b)
-			} else {
-				kept = append(kept, b)
-			}
+	var removed []artifactkit.Descriptor
+	var kept []artifactkit.Descriptor
+	for _, b := range art.Blobs {
+		if b.Name == filename {
+			removed = append(removed, b)
+		} else {
+			kept = append(kept, b)
 		}
-		art.Blobs = kept
-		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, strings.NewReader(string(data))); err == nil {
-			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
+	}
+	art.Blobs = kept
+	if _, err := reg.Blobs.PutIfAbsent(ctx, digest, r); err == nil {
+		var n int64
+		if size, _ := reg.Blobs.Stat(ctx, digest); size != nil {
+			n = *size
 		}
-		for _, b := range removed {
-			if b.Digest != digest {
-				artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
-			}
+		art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: n, Name: filename})
+	}
+	for _, b := range removed {
+		if b.Digest != digest {
+			artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
 		}
 	}
 	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
