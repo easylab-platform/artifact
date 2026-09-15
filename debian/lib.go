@@ -49,11 +49,14 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 
 func init() { artifactkit.Register("debian", NewHandler) }
 
-// ServeHTTP dispatches /pkgs/debian/{distro}/<upstream path> and
+// ServeHTTP dispatches /pkgs/debian/{distro}/<archive path> and
 // /pkgs/debian/hosted/<repo>/<pkg> (self-published).
+//
+// The egress proxy preserves the original host path, so an apt source of
+// "http://deb.debian.org/debian" arrives as /pkgs/debian/debian/dists/... —
+// the first segment is the archive key (debian | debian-security | ubuntu).
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/pkgs/debian/")
-	sub = strings.TrimPrefix(sub, "debian/")
 	if strings.HasPrefix(sub, "hosted/") {
 		s.Hosted.ServeHTTP(w, r, sub, "/pkgs/debian/")
 		return
@@ -67,51 +70,53 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
-	distro, rest, ok := strings.Cut(path, "/")
+	archive, rest, ok := strings.Cut(path, "/")
 	if !ok || rest == "" {
-		artifactkit.Error(w, http.StatusNotFound, "distro required")
+		artifactkit.Error(w, http.StatusNotFound, "archive required")
 		return
 	}
-	base := upstreamFor(distro, rest)
+	base := upstreamFor(archive, rest)
 	if base == "" {
-		artifactkit.Error(w, http.StatusNotFound, "unknown distro: "+distro)
+		artifactkit.Error(w, http.StatusNotFound, "unknown archive: "+archive)
 		return
 	}
-
-	repo := distro + "/" + suiteOf(rest)
+	// The client's source keeps the archive prefix in the URL
+	// (deb.debian.org/debian/dists/...), so fetch and cache the full path.
+	repo := archive + "/" + suiteOf(rest)
 	// Local cache first (streamed with Range/HEAD semantics).
-	if art, err := s.Registry.Meta.Get(r.Context(), "debian", repo, rest); err == nil && len(art.Blobs) > 0 {
+	if art, err := s.Registry.Meta.Get(r.Context(), "debian", repo, path); err == nil && len(art.Blobs) > 0 {
 		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(rest)) {
 			return
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "debian", base, "/"+rest)
+	fetched, err := s.Registry.Fetch(r.Context(), "debian", base, "/"+path)
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if digest := storeCache(s, r.Context(), repo, rest, fetched.Data); digest != "" &&
+	if digest := storeCache(s, r.Context(), repo, path, fetched.Data); digest != "" &&
 		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(rest)) {
 		return
 	}
 	artifactkit.OctetResponse(w, r, fetched.Data)
 }
 
-// upstreamFor picks the mirror host for a distro + path. The suite (or the
-// archive prefix) determines which host serves it: Debian security lives at
-// security.debian.org under debian-security/ + pool/updates/; Ubuntu security
-// is the -security/-updates suites at security.ubuntu.com.
-func upstreamFor(distro, path string) string {
+// upstreamFor picks the mirror host for an archive key + path. The archive
+// key is the first path segment of the client's source URL (debian,
+// debian-security, ubuntu); the suite selects the security line.
+func upstreamFor(archive, path string) string {
 	parts := strings.Split(path, "/")
-	// Debian security archive prefix (security.debian.org/debian-security/...).
-	if len(parts) > 0 && parts[0] == "debian-security" {
+	// Debian security archive (security.debian.org/debian-security/...).
+	if archive == "debian-security" {
 		return "https://security.debian.org"
 	}
-	// dists/<suite>/...: the suite suffix names the archive line.
+	// dists/<suite>/...: only the -security suite lives on the security
+	// mirror, while -updates (and -backports/-proposed-updates) stay on the
+	// main archive for both distros.
 	if len(parts) >= 2 && parts[0] == "dists" {
 		suite := parts[1]
-		if strings.HasSuffix(suite, "-security") || strings.HasSuffix(suite, "-updates") {
-			switch distro {
+		if strings.HasSuffix(suite, "-security") {
+			switch archive {
 			case "debian":
 				return "https://security.debian.org"
 			case "ubuntu":
@@ -123,7 +128,7 @@ func upstreamFor(distro, path string) string {
 	if len(parts) >= 2 && parts[0] == "pool" && parts[1] == "updates" {
 		return "https://security.debian.org"
 	}
-	switch distro {
+	switch archive {
 	case "debian":
 		return "https://deb.debian.org"
 	case "ubuntu":

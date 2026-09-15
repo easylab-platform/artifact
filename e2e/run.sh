@@ -50,7 +50,7 @@ proto_match() {
     oci)    echo '["registry-1.docker.io", "docker.io", "production.cloudflare.docker.com"]' ;;
   esac
 }
-proto_strip() { case "$1" in maven) echo "/maven2" ;; oci) echo "/v2" ;; *) echo "" ;; esac; }
+proto_strip() { case "$1" in maven) echo "/maven2" ;; *) echo "" ;; esac; }
 proto_add()   { case "$1" in oci) echo "" ;; *) echo "/pkgs/$1" ;; esac; }
 
 # The command each tool runs; success = exit 0 and new CAS blobs.
@@ -67,10 +67,10 @@ proto_cmd() {
 X
 keytool -importcert -noprompt -alias easylab -file /etc/easyproxy/ca.crt -keystore /tmp/ts.p12 -storetype PKCS12 -storepass changeit >/dev/null 2>&1
 JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/tmp/ts.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12" mvn -q -B -Dmaven.repo.local=/tmp/m2 org.apache.maven.plugins:maven-dependency-plugin:3.6.1:resolve' ;;
-    debian) echo 'apt-get update -o Acquire::Retries=0 && apt-get install -y --no-install-recommends jq' ;;
+    debian) echo 'apt-get update -o Acquire::Retries=0 && apt-get install -y --no-install-recommends ca-certificates jq' ;;
     apk)    echo 'apk update && apk add --no-cache jq' ;;
-    rpm)    echo 'rm -f /etc/yum.repos.d/*.repo && printf "[fedora]\nname=fedora\nbaseurl=https://dl.fedoraproject.org/pub/fedora/linux/releases/40/Everything/x86_64/os/\nenabled=1\ngpgcheck=0\n" > /etc/yum.repos.d/f.repo && dnf -y --refresh install jq' ;;
-    oci)    echo 'apk add --no-cache skopeo >/dev/null 2>&1; skopeo copy --src-tls-verify=true docker://docker.io/library/alpine:3.24 dir:/tmp/img' ;;
+    rpm)    echo 'cp /etc/easyproxy/ca.crt /etc/pki/ca-trust/source/anchors/easylab.crt && update-ca-trust && rm -f /etc/yum.repos.d/*.repo && printf "[fedora]\nname=fedora\nbaseurl=https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/\nenabled=1\ngpgcheck=0\n" > /etc/yum.repos.d/f.repo && dnf -y --refresh install jq' ;;
+    oci)    echo 'cat /etc/easyproxy/ca.crt >> /etc/ssl/certs/ca-certificates.crt; wget -qO- --header="Accept: application/vnd.docker.distribution.manifest.list.v2+json" https://registry-1.docker.io/v2/library/alpine/manifests/3.24 >/dev/null' ;;
   esac
 }
 

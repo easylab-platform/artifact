@@ -20,7 +20,7 @@ func TestUpstreamForRouting(t *testing.T) {
 		{"debian", "dists/bookworm/Release", "https://deb.debian.org"},
 		{"debian", "pool/main/g/gcc/gcc.deb", "https://deb.debian.org"},
 		{"ubuntu", "dists/noble/Release", "https://archive.ubuntu.com"},
-		{"ubuntu", "dists/noble-updates/Release", "https://security.ubuntu.com"},
+		{"ubuntu", "dists/noble-updates/Release", "https://archive.ubuntu.com"},
 		{"unknown", "dists/x/Release", ""},
 	}
 	for _, c := range cases {
@@ -87,7 +87,7 @@ func TestPullThroughReleaseAndDeb(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := reg.Meta.Put(context.Background(), artifactkit.Artifact{
-		Format: "debian", Repository: "ubuntu/noble", Version: "dists/noble/Release",
+		Format: "debian", Repository: "ubuntu/noble", Version: "ubuntu/dists/noble/Release",
 		MediaType: "text/plain", Digest: stored.Digest,
 		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: "Release"}},
 		Source: "pull",
@@ -117,21 +117,22 @@ func TestPullThroughReleaseAndDeb(t *testing.T) {
 // for both distros, including the pool/updates and debian-security prefixes.
 func TestSecurityRouting(t *testing.T) {
 	cases := []struct {
-		distro, path, want string
+		archive, path, want string
 	}{
 		{"debian", "dists/bookworm/Release", "https://deb.debian.org"},
 		{"debian", "dists/bookworm-security/Release", "https://security.debian.org"},
 		{"debian", "pool/main/g/gcc/gcc.deb", "https://deb.debian.org"},
 		{"debian", "pool/updates/main/g/gcc/gcc.deb", "https://security.debian.org"},
-		{"debian", "debian-security/dists/bookworm-security/Release", "https://security.debian.org"},
+		{"debian-security", "dists/bookworm-security/Release", "https://security.debian.org"},
 		{"ubuntu", "dists/noble/Release", "https://archive.ubuntu.com"},
 		{"ubuntu", "dists/noble-security/Release", "https://security.ubuntu.com"},
-		{"ubuntu", "dists/noble-updates/Release", "https://security.ubuntu.com"},
+		{"ubuntu", "dists/noble-updates/Release", "https://archive.ubuntu.com"},
+		{"debian", "dists/bookworm-updates/Release", "https://deb.debian.org"},
 		{"ubuntu", "pool/universe/x/x.deb", "https://archive.ubuntu.com"},
 	}
 	for _, c := range cases {
-		if got := upstreamFor(c.distro, c.path); got != c.want {
-			t.Errorf("upstreamFor(%q,%q) = %q want %q", c.distro, c.path, got, c.want)
+		if got := upstreamFor(c.archive, c.path); got != c.want {
+			t.Errorf("upstreamFor(%q,%q) = %q want %q", c.archive, c.path, got, c.want)
 		}
 	}
 }
