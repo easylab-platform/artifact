@@ -27,15 +27,56 @@ func NewClientFactory() *ClientFactory {
 	return &ClientFactory{clients: map[string]*http.Client{}}
 }
 
-// Client returns a cached client for the proxy policy.
+// Client returns a cached client for the proxy policy that does NOT follow
+// redirects. Adapters use it when a 3xx must be surfaced to the caller (e.g.
+// HuggingFace resolve → CDN, or a Debian mirror redirect) so the client
+// decides: transparent pass-through, or an explicit re-fetch. Silently
+// following such a redirect would download the whole object server-side and
+// defeat the range/caching policy.
 func (f *ClientFactory) Client(proxy *string) *http.Client {
-	key := "__env__"
-	if proxy != nil {
-		key = *proxy
-	}
+	key := proxyKey(proxy)
 	if c, ok := f.clients[key]; ok {
 		return c
 	}
+	c := &http.Client{
+		Transport: newTransport(proxy),
+		// No overall Timeout: large blobs stream for minutes.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	f.clients[key] = c
+	return c
+}
+
+// Redirecting returns a cached client for the proxy policy that FOLLOWS
+// redirects (Go's default policy: up to 10 hops). It is used by registries
+// whose blob endpoint 307-redirects to a CDN (Docker Hub → CloudFront, MCR →
+// Azure Blob, GHCR/Quay): the adapter must read the object through the
+// redirect to verify and cache it server-side.
+//
+// Cross-host redirects drop the Authorization header automatically (Go's
+// shouldCopyHeaderOnRedirect), which is exactly what a presigned CDN URL
+// needs; same-host redirects keep it.
+func (f *ClientFactory) Redirecting(proxy *string) *http.Client {
+	key := "__follow__" + proxyKey(proxy)
+	if c, ok := f.clients[key]; ok {
+		return c
+	}
+	c := &http.Client{Transport: newTransport(proxy)}
+	f.clients[key] = c
+	return c
+}
+
+func proxyKey(proxy *string) string {
+	if proxy == nil {
+		return "__env__"
+	}
+	return *proxy
+}
+
+// newTransport builds the shared HTTP transport for a proxy policy.
+func newTransport(proxy *string) *http.Transport {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.MaxIdleConnsPerHost = 20
 	tr.IdleConnTimeout = 90 * time.Second
@@ -47,22 +88,7 @@ func (f *ClientFactory) Client(proxy *string) *http.Client {
 			tr.Proxy = http.ProxyURL(mustParseURL(*proxy))
 		}
 	}
-	c := &http.Client{
-		Transport: tr,
-		// No overall Timeout: large blobs stream for minutes.
-		//
-		// Do NOT follow redirects: a 302 from a pull-through upstream (e.g.
-		// HuggingFace resolve → CDN, or a Debian mirror redirect) must be
-		// surfaced to the caller so it can decide (transparent pass-through
-		// to the client, or an explicit re-fetch). Silently following it
-		// would download the whole object server-side and defeat the range
-		// / caching policy.
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	f.clients[key] = c
-	return c
+	return tr
 }
 
 // Remote is a proxy-aware upstream root URL. Adapters map their URL layout

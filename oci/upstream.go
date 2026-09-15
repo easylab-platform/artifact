@@ -80,6 +80,11 @@ func (u *Upstream) base() string { return fmt.Sprintf("%s://%s/v2", u.scheme, u.
 
 func (u *Upstream) client() *http.Client { return u.factory.Client(u.proxy) }
 
+// followClient follows redirects: blob endpoints of Docker Hub / MCR / GHCR /
+// Quay 307-redirect to a CDN (CloudFront / Azure Blob), so the adapter must
+// read the object through the redirect to verify + cache it.
+func (u *Upstream) followClient() *http.Client { return u.factory.Redirecting(u.proxy) }
+
 func (u *Upstream) tokenFor(scope string) string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -93,8 +98,17 @@ func (u *Upstream) setToken(scope, tok string) {
 }
 
 // doGet GETs a path under /v2 with a scope, retrying once with a fresh token
-// on 401/403.
+// on 401/403. Redirects are NOT followed (manifest/tag/index endpoints).
 func (u *Upstream) doGet(scope, path string, accept string) (*http.Response, error) {
+	return u.doGetWith(u.client(), scope, path, accept)
+}
+
+// doGetFollow is doGet but follows 3xx (blob CDN redirects).
+func (u *Upstream) doGetFollow(scope, path string, accept string) (*http.Response, error) {
+	return u.doGetWith(u.followClient(), scope, path, accept)
+}
+
+func (u *Upstream) doGetWith(client *http.Client, scope, path string, accept string) (*http.Response, error) {
 	urlp := u.base() + path
 	req, err := http.NewRequest(http.MethodGet, urlp, nil)
 	if err != nil {
@@ -105,7 +119,7 @@ func (u *Upstream) doGet(scope, path string, accept string) (*http.Response, err
 	if tok := u.tokenFor(scope); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
-	resp, err := u.client().Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +142,7 @@ func (u *Upstream) doGet(scope, path string, accept string) (*http.Response, err
 	req2.Header.Set("User-Agent", artifactkit.UserAgent)
 	req2.Header.Set("Accept", accept)
 	req2.Header.Set("Authorization", "Bearer "+tok)
-	return u.client().Do(req2)
+	return client.Do(req2)
 }
 
 // tokenResponse is the parsed token grant.
@@ -236,10 +250,12 @@ func (u *Upstream) GetManifest(name, reference string) ([]byte, string, error) {
 }
 
 // GetBlob streams a blob by digest. Returns (response, content-length).
+// Blob endpoints commonly 307-redirect to a CDN, so this follows redirects
+// (unlike GetManifest/ListTags, which never do).
 func (u *Upstream) GetBlob(name, digest string) (*http.Response, *int64, error) {
 	scope := "repository:" + name + ":pull"
 	path := "/" + name + "/blobs/" + digest
-	resp, err := u.doGet(scope, path, "application/octet-stream")
+	resp, err := u.doGetFollow(scope, path, "application/octet-stream")
 	if err != nil {
 		return nil, nil, err
 	}
