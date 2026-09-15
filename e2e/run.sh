@@ -66,11 +66,11 @@ proto_row() {
 
 parse_row() { # sets R_IMG R_MATCH R_STRIP R_ADD
   IFS='|' read -r R_MATCH R_STRIP R_ADD <<<"$(proto_row "$1")"
-  # rpm/apk (native Fedora/Alpine bases) are version-independent of the debian
+  # rpm/apk/nix use native Fedora/Alpine/Nix bases, independent of the debian
   # variant, so they always use the default tag.
   case "$1" in
-    rpm|apk) R_IMG="${TOOL_IMAGE_PREFIX}-$1:latest" ;;
-    *)       R_IMG="${TOOL_IMAGE_PREFIX}-$1:${TOOL_TAG}" ;;
+    rpm|apk|nix) R_IMG="${TOOL_IMAGE_PREFIX}-$1:latest" ;;
+    *)           R_IMG="${TOOL_IMAGE_PREFIX}-$1:${TOOL_TAG}" ;;
   esac
 }
 
