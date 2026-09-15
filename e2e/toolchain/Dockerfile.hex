@@ -1,0 +1,11 @@
+FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+# OTP prebuilt is relocatable but ships no bin/: Install creates the wrappers.
+RUN curl -fsSL -o /tmp/otp.tar.gz "${EASYLAB}/pkgs/generic/otp/29.0.6/OTP-29.0.6.tar.gz" \
+ && mkdir -p /opt/erlang && tar -xzf /tmp/otp.tar.gz -C /opt/erlang --strip-components=1 && rm /tmp/otp.tar.gz \
+ && (cd /opt/erlang && ./Install -minimal /opt/erlang) \
+ && curl -fsSL -o /tmp/elixir.zip "${EASYLAB}/pkgs/generic/elixir/1.20.4/elixir-v1.20.4-otp-29.zip" \
+ && mkdir -p /opt/elixir && unzip -q /tmp/elixir.zip -d /opt/elixir && rm /tmp/elixir.zip \
+ && mkdir -p /opt/hex-archive \
+ && curl -fsSL -o /opt/hex-archive/hex.ez "${EASYLAB}/pkgs/generic/hex-archive/2.5.1/hex-2.5.1-otp-29.ez"
+ENV PATH=/opt/erlang/bin:/opt/elixir/bin:$PATH

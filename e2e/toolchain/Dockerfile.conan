@@ -1,0 +1,8 @@
+FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+RUN curl -fsSL -o /tmp/py.tar.gz "${EASYLAB}/pkgs/generic/python/3.14.7/cpython-3.14.7+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz" \
+ && mkdir -p /opt && tar -xzf /tmp/py.tar.gz -C /opt && mv /opt/python /opt/python-3.14.7 && ln -s /opt/python-3.14.7 /opt/python && rm /tmp/py.tar.gz \
+ && curl -fsSL -o /tmp/conan.tar.gz "${EASYLAB}/pkgs/generic/conan-wheels/2.32.0/conan-wheels-2.32.0.tar.gz" \
+ && mkdir -p /tmp/conan && tar -xzf /tmp/conan.tar.gz -C /tmp/conan \
+ && /opt/python/bin/pip install --no-cache-dir --no-index --find-links /tmp/conan "conan==2.32.0" && rm -rf /tmp/conan /tmp/conan.tar.gz
+ENV PATH=/opt/python/bin:$PATH

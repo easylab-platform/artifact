@@ -1,8 +1,6 @@
 #!/bin/sh
 set -e
-# Dart's pub verifies TLS against its own root set and ignores SSL_CERT_FILE;
-# it honors the VM's --root-certs-file flag, so pass the egress CA bundle.
-BUNDLE=/tmp/easylab-ca.pem
-cat /etc/ssl/certs/ca-certificates.crt > "$BUNDLE" 2>/dev/null || true
-cat /etc/easyproxy/ca.crt >> "$BUNDLE"
-dart --root-certs-file="$BUNDLE" pub cache add http --version 1.2.2
+# Use the official dart image; its pub honors the system trust store, so add
+# the egress CA and let the spoofed proxy intercept pub.dev.
+cat /etc/easyproxy/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+dart pub cache add http --version 1.2.2

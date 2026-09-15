@@ -1,0 +1,7 @@
+FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+RUN curl -fsSL -o /tmp/jdk.tar.gz "${EASYLAB}/pkgs/generic/jdk/25.0.4.1_1/OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz" \
+ && mkdir -p /opt/jdk && tar -xzf /tmp/jdk.tar.gz -C /opt/jdk --strip-components=1 && rm /tmp/jdk.tar.gz \
+ && curl -fsSL -o /tmp/maven.tar.gz "${EASYLAB}/pkgs/generic/maven/3.9.16/apache-maven-3.9.16-bin.tar.gz" \
+ && mkdir -p /opt/maven && tar -xzf /tmp/maven.tar.gz -C /opt/maven --strip-components=1 && rm /tmp/maven.tar.gz
+ENV JAVA_HOME=/opt/jdk PATH=/opt/jdk/bin:/opt/maven/bin:$PATH

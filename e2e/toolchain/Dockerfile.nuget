@@ -1,0 +1,6 @@
+FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+ENV DOTNET_ROOT=/opt/dotnet DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+RUN curl -fsSL -o /tmp/dotnet.tar.gz "${EASYLAB}/pkgs/generic/dotnet/10.0.401/dotnet-sdk-10.0.401-linux-x64.tar.gz" \
+ && mkdir -p /opt/dotnet && tar -xzf /tmp/dotnet.tar.gz -C /opt/dotnet && rm /tmp/dotnet.tar.gz
+ENV PATH=/opt/dotnet:$PATH

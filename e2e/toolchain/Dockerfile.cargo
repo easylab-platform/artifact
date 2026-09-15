@@ -1,0 +1,6 @@
+FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+RUN curl -fsSL -o /tmp/rust.tar.gz "${EASYLAB}/pkgs/generic/rust/1.98.1/rust-1.98.1-x86_64-unknown-linux-gnu.tar.gz" \
+ && mkdir -p /tmp/rustdist && tar -xzf /tmp/rust.tar.gz -C /tmp/rustdist --strip-components=1 && rm /tmp/rust.tar.gz \
+ && /tmp/rustdist/install.sh --prefix=/opt/rust --without=rust-docs --disable-ldconfig && rm -rf /tmp/rustdist
+ENV PATH=/opt/rust/bin:$PATH

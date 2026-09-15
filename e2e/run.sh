@@ -19,52 +19,59 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NS="${NS:-temp}"
-IMAGE_PREFIX="${IMAGE_PREFIX:-easylab.${NS}.svc.cluster.local:80}"
+TOOL_IMAGE_PREFIX="${TOOL_IMAGE_PREFIX:-forgejo.develop.10.199.64.20.nip.io/easylab/tool}"
+TOOL_TAG="${TOOL_TAG:-latest}"
 EASYPX_IMAGE="${EASYPX_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easyproxy:v0.5.0}"
 CA_SECRET="${CA_SECRET:-artifact-e2e-ca}"
 UPSTREAM_DNS="${UPSTREAM_DNS:-172.18.0.10}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
-# nuget is excluded by default: its SDK image (mcr.microsoft.com/dotnet/sdk)
-# has ~18MB layers that the dev cluster's egress path to the SEA CDN serves at
-# ~80KB/s, so the pull is impractically slow here. It is exercised separately.
-PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci})
+# Each protocol uses its dedicated client image (toolchain/e2e: one image per
+# protocol, built from official/prebuilt tarballs under /opt).
+PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci})
 KEEP="${KEEP:-0}"
 
 pass=0; fail=0
 declare -a RESULTS
 
-# Per-protocol columns (pipe separated, no pipes in values):
-#   image ref suffix | match json | strip | add | (command is scripts/<p>.sh)
+# Per-protocol columns (pipe separated, values must not contain "|"):
+#   match json | strip_prefix | add_prefix
+# The tool image is always ${TOOL_IMAGE_PREFIX}-<proto>:${TOOL_TAG}; the client
+# command is ./scripts/<proto>.sh.
 proto_row() {
   case "$1" in
-    npm)         echo "docker.io/library/node:22-alpine|[\"registry.npmjs.org\", \"*.npmjs.org\"]||/pkgs/npm" ;;
-    pypi)        echo "docker.io/library/python:3.12-alpine|[\"pypi.org\", \"files.pythonhosted.org\"]||/pkgs/pypi" ;;
-    go)          echo "docker.io/library/golang:1.26-alpine|[\"proxy.golang.org\", \"sum.golang.org\"]||/pkgs/go" ;;
-    cargo)       echo "docker.io/library/rust:1-alpine|[\"index.crates.io\", \"crates.io\", \"static.crates.io\"]||/pkgs/cargo" ;;
-    maven)       echo "docker.io/library/maven:3-eclipse-temurin-21|[\"repo.maven.apache.org\"]|/maven2|/pkgs/maven" ;;
-    nuget)       echo "mcr.microsoft.com/dotnet/sdk:8.0-alpine|[\"api.nuget.org\", \"azuresearch-usnc.nuget.org\"]||/pkgs/nuget" ;;
-    rubygems)    echo "docker.io/library/ruby:3-alpine|[\"rubygems.org\", \"index.rubygems.org\"]||/pkgs/rubygems" ;;
-    composer)    echo "docker.io/library/composer:latest|[\"repo.packagist.org\"]||/pkgs/composer" ;;
-    hex)         echo "docker.io/library/elixir:1.16-alpine|[\"repo.hex.pm\"]||/pkgs/hex" ;;
-    pub)         echo "docker.io/library/dart:3.5|[\"pub.dev\"]||/pkgs/pub" ;;
-    helm)        echo "docker.io/alpine/helm:3.16.3|[\"charts.helm.sh\"]|/stable|/pkgs/helm" ;;
-    conan)       echo "docker.io/conanio/conan:latest|[\"center.conan.io\", \"center2.conan.io\"]||/pkgs/conan" ;;
-    swift)       echo "docker.io/library/swift:5.10|[\"api.spm.swift.org\"]||/pkgs/swift" ;;
-    conda)       echo "docker.io/continuumio/miniconda3:latest|[\"repo.anaconda.com\", \"conda.anaconda.org\"]||/pkgs/conda" ;;
-    nix)         echo "docker.io/nixos/nix:latest|[\"cache.nixos.org\"]||/pkgs/nix" ;;
-    huggingface) echo "docker.io/library/python:3.12-alpine|[\"huggingface.co\", \"*.huggingface.co\", \"cdn-lfs.huggingface.co\"]||/pkgs/huggingface" ;;
-    protobuf)    echo "docker.io/library/alpine:3.24|[\"buf.build\"]||/pkgs/protobuf" ;;
-    debian)      echo "docker.io/library/debian:12-slim|[\"deb.debian.org\", \"security.debian.org\", \"archive.ubuntu.com\", \"security.ubuntu.com\"]||/pkgs/debian" ;;
-    apk)         echo "docker.io/library/alpine:3.24|[\"dl-cdn.alpinelinux.org\"]||/pkgs/apk" ;;
-    rpm)         echo "docker.io/library/fedora:40|[\"dl.fedoraproject.org\"]||/pkgs/rpm" ;;
-    oci)         echo "docker.io/library/alpine:3.24|[\"registry-1.docker.io\", \"docker.io\", \"production.cloudflare.docker.com\"]||" ;;
+    npm)         echo '["registry.npmjs.org", "*.npmjs.org"]||/pkgs/npm' ;;
+    pypi)        echo '["pypi.org", "files.pythonhosted.org"]||/pkgs/pypi' ;;
+    go)          echo '["proxy.golang.org", "sum.golang.org"]||/pkgs/go' ;;
+    cargo)       echo '["index.crates.io", "crates.io", "static.crates.io"]||/pkgs/cargo' ;;
+    maven)       echo '["repo.maven.apache.org"]|/maven2|/pkgs/maven' ;;
+    nuget)       echo '["api.nuget.org", "azuresearch-usnc.nuget.org"]||/pkgs/nuget' ;;
+    rubygems)    echo '["rubygems.org", "index.rubygems.org"]||/pkgs/rubygems' ;;
+    composer)    echo '["repo.packagist.org"]||/pkgs/composer' ;;
+    hex)         echo '["repo.hex.pm"]||/pkgs/hex' ;;
+    pub)         echo '["pub.dev"]||/pkgs/pub' ;;
+    helm)        echo '["charts.helm.sh"]|/stable|/pkgs/helm' ;;
+    conan)       echo '["center.conan.io", "center2.conan.io"]||/pkgs/conan' ;;
+    swift)       echo '["api.spm.swift.org"]||/pkgs/swift' ;;
+    conda)       echo '["repo.anaconda.com", "conda.anaconda.org"]||/pkgs/conda' ;;
+    nix)         echo '["cache.nixos.org"]||/pkgs/nix' ;;
+    huggingface) echo '["huggingface.co", "*.huggingface.co", "cdn-lfs.huggingface.co"]||/pkgs/huggingface' ;;
+    protobuf)    echo '["buf.build"]||/pkgs/protobuf' ;;
+    debian)      echo '["deb.debian.org", "security.debian.org", "archive.ubuntu.com", "security.ubuntu.com"]||/pkgs/debian' ;;
+    apk)         echo '["dl-cdn.alpinelinux.org"]||/pkgs/apk' ;;
+    rpm)         echo '["dl.fedoraproject.org"]||/pkgs/rpm' ;;
+    oci)         echo '["registry-1.docker.io", "docker.io", "production.cloudflare.docker.com"]||' ;;
     *)           echo "" ;;
   esac
 }
 
 parse_row() { # sets R_IMG R_MATCH R_STRIP R_ADD
-  IFS='|' read -r R_SUFFIX R_MATCH R_STRIP R_ADD <<<"$(proto_row "$1")"
-  R_IMG="${IMAGE_PREFIX}/${R_SUFFIX}"
+  IFS='|' read -r R_MATCH R_STRIP R_ADD <<<"$(proto_row "$1")"
+  case "$1" in
+    rpm) R_IMG="forgejo.develop.10.199.64.20.nip.io/root/fedora:44" ;;
+    apk) R_IMG="forgejo.develop.10.199.64.20.nip.io/root/alpine:3.24" ;;
+    nix) R_IMG="forgejo.develop.10.199.64.20.nip.io/root/nix:2.35.2" ;;
+    *)   R_IMG="${TOOL_IMAGE_PREFIX}-$1:${TOOL_TAG}" ;;
+  esac
 }
 
 cas_count() {

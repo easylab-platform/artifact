@@ -1,0 +1,11 @@
+FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+# The ruby-builder prebuilt bakes /opt/hostedtoolcache/Ruby/<ver>/x64 into its
+# shebangs, $LOAD_PATH and gem prefix, so it is unpacked at exactly that path.
+RUN mkdir -p /opt/hostedtoolcache/Ruby/4.0.7 \
+ && curl -fsSL -o /tmp/ruby.tar.gz "${EASYLAB}/pkgs/generic/ruby/4.0.7/ruby-4.0.7-ubuntu-22.04-x64.tar.gz" \
+ && tar -xzf /tmp/ruby.tar.gz -C /opt/hostedtoolcache/Ruby/4.0.7 && rm /tmp/ruby.tar.gz \
+ && ln -s /opt/hostedtoolcache/Ruby/4.0.7/x64 /opt/ruby
+ENV GEM_HOME=/opt/hostedtoolcache/Ruby/4.0.7/x64/lib/ruby/gems/4.0.0 \
+    PATH=/opt/hostedtoolcache/Ruby/4.0.7/x64/bin:$PATH \
+    LD_LIBRARY_PATH=/opt/hostedtoolcache/Ruby/4.0.7/x64/lib

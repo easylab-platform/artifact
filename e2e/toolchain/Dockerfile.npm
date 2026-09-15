@@ -1,0 +1,5 @@
+FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+RUN curl -fsSL -o /tmp/node.tar.xz "${EASYLAB}/pkgs/generic/node/26.8.2/node-v26.8.2-linux-x64.tar.xz" \
+ && mkdir -p /opt && tar -xJf /tmp/node.tar.xz -C /opt && ln -s /opt/node-v26.8.2-linux-x64 /opt/node && rm /tmp/node.tar.xz
+ENV PATH=/opt/node/bin:$PATH
