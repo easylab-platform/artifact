@@ -37,4 +37,4 @@ COPY --from=build /out/artifact /usr/local/bin/artifact
 ENV EASYVCS_HOME=/data
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/artifact"]
-CMD ["server", "--listen=:8080", "--data=/data"]
+CMD ["--listen=:8080", "--data=/data"]

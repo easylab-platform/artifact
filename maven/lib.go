@@ -226,6 +226,13 @@ func (s *State) metadataXML(w http.ResponseWriter, r *http.Request, p string) {
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "maven", artifactID)
 	artifactkit.SortSemver(versions)
 	if len(versions) == 0 {
+		// No local versions: pull the upstream metadata through so Maven can
+		// resolve plugins/dependencies against this mirror (Maven reads
+		// maven-metadata.xml to enumerate versions before downloading).
+		if body, err := s.fetchUpstreamMetadata(r, clean); err == nil {
+			artifactkit.Text(w, http.StatusOK, body, "application/xml")
+			return
+		}
 		artifactkit.Text(w, http.StatusOK, `<?xml version="1.0" encoding="UTF-8"?><metadata><groupId>`+groupID+`</groupId><artifactId>`+artifactID+`</artifactId><versioning><versions></versions></versioning></metadata>`, "application/xml")
 		return
 	}
@@ -248,6 +255,29 @@ func (s *State) metadataXML(w http.ResponseWriter, r *http.Request, p string) {
 	sb.WriteString(`</versions><lastUpdated>20240101120000</lastUpdated></versioning></metadata>`)
 	artifactkit.Text(w, http.StatusOK, sb.String(), "application/xml")
 }
+
+// fetchUpstreamMetadata pulls a maven-metadata.xml through from the upstream
+// (used when this mirror has no local versions for the GA, so Maven can still
+// enumerate versions — e.g. that of a plugin it needs to resolve).
+func (s *State) fetchUpstreamMetadata(r *http.Request, rel string) (string, error) {
+	base := s.Registry.Upstreams.Get("maven")
+	if base == "" {
+		return "", errNoUpstream
+	}
+	remote := s.Registry.RemoteAt(base)
+	body, err := remote.GetBytes(r.Context(), "/"+strings.Trim(rel, "/")+"/maven-metadata.xml")
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// errNoUpstream signals an air-gapped (no upstream) mirror.
+var errNoUpstream = errNoUpstreamType("no upstream")
+
+type errNoUpstreamType string
+
+func (e errNoUpstreamType) Error() string { return string(e) }
 
 func (s *State) versionMetadataXML(w http.ResponseWriter, r *http.Request, parts []string) {
 	version := parts[len(parts)-1]

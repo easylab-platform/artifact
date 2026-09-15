@@ -45,8 +45,10 @@ func EncodeModulePath(m string) string {
 }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Module paths are case-sensitive and may legitimately begin with "go"
+	// (golang.org/...), so only the mount prefix is stripped — never a second
+	// "/go" segment.
 	path := strings.TrimPrefix(r.URL.Path, "/pkgs/go")
-	path = strings.TrimPrefix(path, "/go")
 	path = strings.Trim(path, "/")
 
 	if path == "upload" && r.Method == http.MethodPut {
