@@ -3,84 +3,84 @@
 # steered by the DNS-spoof egress policy at that protocol's artifact Service.
 #
 # For each protocol we assert:
-#   1. the client manager installs/downloads a package through the proxy
-#      (its hostname resolves to the sidecar, TLS is MITM'd, the request path
-#      is prefixed and relayed to artifact-<proto>);
-#   2. artifact-<proto>'s CAS grew (the bytes were fetched upstream and cached).
+#   1. the client's package manager installs/downloads a package through the
+#      proxy (its upstream hostname resolves to the sidecar, TLS is MITM'd,
+#      the request path is prefixed/stripped and relayed to artifact-<proto>);
+#   2. the sidecar logged >=1 `rewrite` connection (proof it was not bypassed).
 #
-# Requires: the per-protocol Deployments from ./deploy-protocol.sh, the CA
-# secret, buildkit-pulled tool images, and easyproxy >= v0.4.1.
+# Per-protocol client commands live in ./scripts/<proto>.sh and are mounted
+# into the tool container at /scripts.
+#
+# Usage:
+#   ./run.sh                       # all protocols (default list)
+#   PROTOCOLS="nuget rubygems" ./run.sh
+#   KEEP=1 PROTOCOLS=helm ./run.sh # keep the pod for debugging
 set -uo pipefail
 
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NS="${NS:-temp}"
 IMAGE_PREFIX="${IMAGE_PREFIX:-easylab.${NS}.svc.cluster.local:80}"
 EASYPX_IMAGE="${EASYPX_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easyproxy:v0.5.0}"
 CA_SECRET="${CA_SECRET:-artifact-e2e-ca}"
 UPSTREAM_DNS="${UPSTREAM_DNS:-172.18.0.10}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
-PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven debian apk rpm oci})
+# nuget is excluded by default: its SDK image (mcr.microsoft.com/dotnet/sdk)
+# has ~18MB layers that the dev cluster's egress path to the SEA CDN serves at
+# ~80KB/s, so the pull is impractically slow here. It is exercised separately.
+PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci})
 KEEP="${KEEP:-0}"
 
-pass=0; fail=0; warn=0
+pass=0; fail=0
 declare -a RESULTS
 
-proto_image() {
+# Per-protocol columns (pipe separated, no pipes in values):
+#   image ref suffix | match json | strip | add | (command is scripts/<p>.sh)
+proto_row() {
   case "$1" in
-    npm)    echo "${IMAGE_PREFIX}/docker.io/library/node:22-alpine" ;;
-    pypi)   echo "${IMAGE_PREFIX}/docker.io/library/python:3.12-alpine" ;;
-    go)     echo "${IMAGE_PREFIX}/docker.io/library/golang:1.26-alpine" ;;
-    cargo)  echo "${IMAGE_PREFIX}/docker.io/library/rust:1-alpine" ;;
-    maven)  echo "${IMAGE_PREFIX}/docker.io/library/maven:3-eclipse-temurin-21" ;;
-    debian) echo "${IMAGE_PREFIX}/docker.io/library/debian:12-slim" ;;
-    apk)    echo "${IMAGE_PREFIX}/docker.io/library/alpine:3.24" ;;
-    rpm)    echo "${IMAGE_PREFIX}/docker.io/library/fedora:40" ;;
-    oci)    echo "${IMAGE_PREFIX}/docker.io/library/alpine:3.24" ;;
+    npm)         echo "docker.io/library/node:22-alpine|[\"registry.npmjs.org\", \"*.npmjs.org\"]||/pkgs/npm" ;;
+    pypi)        echo "docker.io/library/python:3.12-alpine|[\"pypi.org\", \"files.pythonhosted.org\"]||/pkgs/pypi" ;;
+    go)          echo "docker.io/library/golang:1.26-alpine|[\"proxy.golang.org\", \"sum.golang.org\"]||/pkgs/go" ;;
+    cargo)       echo "docker.io/library/rust:1-alpine|[\"index.crates.io\", \"crates.io\", \"static.crates.io\"]||/pkgs/cargo" ;;
+    maven)       echo "docker.io/library/maven:3-eclipse-temurin-21|[\"repo.maven.apache.org\"]|/maven2|/pkgs/maven" ;;
+    nuget)       echo "mcr.microsoft.com/dotnet/sdk:8.0-alpine|[\"api.nuget.org\", \"azuresearch-usnc.nuget.org\"]||/pkgs/nuget" ;;
+    rubygems)    echo "docker.io/library/ruby:3-alpine|[\"rubygems.org\", \"index.rubygems.org\"]||/pkgs/rubygems" ;;
+    composer)    echo "docker.io/library/composer:latest|[\"repo.packagist.org\"]||/pkgs/composer" ;;
+    hex)         echo "docker.io/library/elixir:1.16-alpine|[\"repo.hex.pm\"]||/pkgs/hex" ;;
+    pub)         echo "docker.io/library/dart:3.5|[\"pub.dev\"]||/pkgs/pub" ;;
+    helm)        echo "docker.io/alpine/helm:3.16.3|[\"charts.helm.sh\"]|/stable|/pkgs/helm" ;;
+    conan)       echo "docker.io/conanio/conan:latest|[\"center.conan.io\", \"center2.conan.io\"]||/pkgs/conan" ;;
+    swift)       echo "docker.io/library/swift:5.10|[\"api.spm.swift.org\"]||/pkgs/swift" ;;
+    conda)       echo "docker.io/continuumio/miniconda3:latest|[\"repo.anaconda.com\", \"conda.anaconda.org\"]||/pkgs/conda" ;;
+    nix)         echo "docker.io/nixos/nix:latest|[\"cache.nixos.org\"]||/pkgs/nix" ;;
+    huggingface) echo "docker.io/library/python:3.12-alpine|[\"huggingface.co\", \"*.huggingface.co\", \"cdn-lfs.huggingface.co\"]||/pkgs/huggingface" ;;
+    protobuf)    echo "docker.io/library/alpine:3.24|[\"buf.build\"]||/pkgs/protobuf" ;;
+    debian)      echo "docker.io/library/debian:12-slim|[\"deb.debian.org\", \"security.debian.org\", \"archive.ubuntu.com\", \"security.ubuntu.com\"]||/pkgs/debian" ;;
+    apk)         echo "docker.io/library/alpine:3.24|[\"dl-cdn.alpinelinux.org\"]||/pkgs/apk" ;;
+    rpm)         echo "docker.io/library/fedora:40|[\"dl.fedoraproject.org\"]||/pkgs/rpm" ;;
+    oci)         echo "docker.io/library/alpine:3.24|[\"registry-1.docker.io\", \"docker.io\", \"production.cloudflare.docker.com\"]||" ;;
+    *)           echo "" ;;
   esac
 }
-proto_match() {
-  case "$1" in
-    npm)    echo '["registry.npmjs.org", "*.npmjs.org"]' ;;
-    pypi)   echo '["pypi.org", "files.pythonhosted.org"]' ;;
-    go)     echo '["proxy.golang.org", "sum.golang.org"]' ;;
-    cargo)  echo '["index.crates.io", "crates.io", "static.crates.io"]' ;;
-    maven)  echo '["repo.maven.apache.org"]' ;;
-    debian) echo '["deb.debian.org", "security.debian.org", "archive.ubuntu.com", "security.ubuntu.com"]' ;;
-    apk)    echo '["dl-cdn.alpinelinux.org"]' ;;
-    rpm)    echo '["dl.fedoraproject.org"]' ;;
-    oci)    echo '["registry-1.docker.io", "docker.io", "production.cloudflare.docker.com"]' ;;
-  esac
-}
-proto_strip() { case "$1" in maven) echo "/maven2" ;; *) echo "" ;; esac; }
-proto_add()   { case "$1" in oci) echo "" ;; *) echo "/pkgs/$1" ;; esac; }
 
-# The command each tool runs; success = exit 0 and new CAS blobs.
-proto_cmd() {
-  case "$1" in
-    npm)    echo 'cd /tmp && npm install --no-audit --no-fund left-pad' ;;
-    pypi)   echo 'pip install --no-cache-dir --disable-pip-version-check six' ;;
-    go)     echo 'mkdir -p /w && cd /w && go mod init t >/dev/null 2>&1; GOFLAGS=-mod=mod GONOSUMCHECK=1 GONOSUMDB=* GOSUMDB=off go get golang.org/x/text@v0.14.0' ;;
-    cargo)  echo 'mkdir -p /w/src && cd /w && printf "[package]\nname=\"t\"\nversion=\"0.1.0\"\nedition=\"2021\"\n\n[dependencies]\nanyhow=\"1\"\n" > Cargo.toml && echo "fn main(){}" > src/main.rs && cargo fetch' ;;
-    maven)  echo 'mkdir -p /w && cd /w && cat > pom.xml <<X
-<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><groupId>t</groupId><artifactId>t</artifactId><version>1.0</version>
-<dependencies><dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><version>2.0.9</version></dependency></dependencies>
-</project>
-X
-keytool -importcert -noprompt -alias easylab -file /etc/easyproxy/ca.crt -keystore /tmp/ts.p12 -storetype PKCS12 -storepass changeit >/dev/null 2>&1
-JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/tmp/ts.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12" mvn -q -B -Dmaven.repo.local=/tmp/m2 org.apache.maven.plugins:maven-dependency-plugin:3.6.1:resolve' ;;
-    debian) echo 'apt-get update -o Acquire::Retries=0 && apt-get install -y --no-install-recommends ca-certificates jq' ;;
-    apk)    echo 'apk update && apk add --no-cache jq' ;;
-    rpm)    echo 'cp /etc/easyproxy/ca.crt /etc/pki/ca-trust/source/anchors/easylab.crt && update-ca-trust && rm -f /etc/yum.repos.d/*.repo && printf "[fedora]\nname=fedora\nbaseurl=https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/\nenabled=1\ngpgcheck=0\n" > /etc/yum.repos.d/f.repo && dnf -y --refresh install jq' ;;
-    oci)    echo 'cat /etc/easyproxy/ca.crt >> /etc/ssl/certs/ca-certificates.crt; wget -qO- --header="Accept: application/vnd.docker.distribution.manifest.list.v2+json" https://registry-1.docker.io/v2/library/alpine/manifests/3.24 >/dev/null' ;;
-  esac
+parse_row() { # sets R_IMG R_MATCH R_STRIP R_ADD
+  IFS='|' read -r R_SUFFIX R_MATCH R_STRIP R_ADD <<<"$(proto_row "$1")"
+  R_IMG="${IMAGE_PREFIX}/${R_SUFFIX}"
 }
 
 cas_count() {
   kubectl exec -n "$NS" "deploy/artifact-$1" -- sh -c 'ls /data/blobs/sha256/*/* 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]'
 }
 
+write_script_cm() {
+  local p="$1" name="pull-$1"
+  kubectl create configmap "${name}-script" -n "$NS" \
+    --from-file="${p}.sh=${HERE}/scripts/${p}.sh" \
+    --dry-run=client -o yaml | kubectl apply -n "$NS" -f - >/dev/null
+}
+
 write_rules_cm() {
-  local p="$1" name="pull-$p" strip add
-  strip="$(proto_strip "$p")"; add="$(proto_add "$p")"
+  local p="$1" name="pull-$1"
+  parse_row "$p"
   {
     echo "apiVersion: v1"
     echo "kind: ConfigMap"
@@ -89,18 +89,23 @@ write_rules_cm() {
     echo "data:"
     echo "  rules.yaml: |"
     echo "    rules:"
-    echo "      - match: $(proto_match "$p")"
+    echo "      - match: ${R_MATCH}"
     echo "        action: rewrite"
     echo "        target: \"artifact-${p}.${NS}.svc.cluster.local:80\""
-    [ -n "$strip" ] && echo "        strip_prefix: \"${strip}\""
-    [ -n "$add" ] && echo "        add_prefix: \"${add}\""
+    [ -n "$R_STRIP" ] && echo "        strip_prefix: \"${R_STRIP}\""
+    [ -n "$R_ADD" ] && echo "        add_prefix: \"${R_ADD}\""
+    # Optional extra rules (e.g. a tool that must bootstrap itself from pypi).
+    if [ -f "${HERE}/scripts/${p}.rules.yaml" ]; then
+      sed 's/^/      /' "${HERE}/scripts/${p}.rules.yaml"
+    fi
     echo "    default: direct"
     echo "    mitm_default: false"
   } | kubectl apply -n "$NS" -f - >/dev/null
 }
 
 write_pod() {
-  local p="$1" name="pull-$p"
+  local p="$1" name="pull-$1"
+  parse_row "$p"
   cat <<YAML | kubectl apply -n "$NS" -f - >/dev/null
 apiVersion: v1
 kind: Pod
@@ -113,17 +118,21 @@ spec:
     options: [{ name: ndots, value: "5" }]
   containers:
   - name: tool
-    image: $(proto_image "$p")
-    command: ["sleep", "900"]
+    image: ${R_IMG}
+    command: ["sleep", "1800"]
     resources:
-      requests: { cpu: 50m, memory: 64Mi }
-      limits:   { cpu: "1", memory: 1Gi }
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: "2", memory: 4Gi }
     env:
     - { name: SSL_CERT_FILE, value: /etc/easyproxy/ca.crt }
     - { name: NODE_EXTRA_CA_CERTS, value: /etc/easyproxy/ca.crt }
     - { name: REQUESTS_CA_BUNDLE, value: /etc/easyproxy/ca.crt }
+    - { name: CURL_CA_BUNDLE, value: /etc/easyproxy/ca.crt }
     - { name: GIT_SSL_CAINFO, value: /etc/easyproxy/ca.crt }
-    volumeMounts: [{ name: ca, mountPath: /etc/easyproxy/ca.crt, subPath: ca.crt, readOnly: true }]
+    - { name: SSL_CERT_DIR, value: /etc/easyproxy/ca }
+    volumeMounts:
+    - { name: ca, mountPath: /etc/easyproxy/ca.crt, subPath: ca.crt, readOnly: true }
+    - { name: script, mountPath: /scripts, readOnly: true }
   - name: easyproxy
     image: ${EASYPX_IMAGE}
     resources:
@@ -148,6 +157,7 @@ spec:
     - { name: ca, mountPath: /etc/easyproxy/ca, readOnly: true }
   volumes:
   - { name: rules, configMap: { name: ${name}-rules } }
+  - { name: script, configMap: { name: ${name}-script } }
   - { name: ca, secret: { secretName: ${CA_SECRET} } }
 YAML
 }
@@ -156,28 +166,27 @@ run_one() {
   local p="$1" name="pull-$1" before after growth out rc rewrites
   before="$(cas_count "$p")"
   write_rules_cm "$p"
+  write_script_cm "$p"
   kubectl delete pod -n "$NS" "$name" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1
   write_pod "$p"
 
-  if ! kubectl wait -n "$NS" --for=condition=Ready "pod/${name}" --timeout=180s >/dev/null 2>&1; then
+  if ! kubectl wait -n "$NS" --for=condition=Ready "pod/${name}" --timeout=300s >/dev/null 2>&1; then
     echo "FAIL $p  (pod not ready)"; fail=$((fail+1)); RESULTS+=("FAIL $p pod-not-ready")
     kubectl logs -n "$NS" "$name" -c easyproxy --tail=5 2>&1 | sed 's/^/      | /'
     return
   fi
-  out="$(kubectl exec -n "$NS" "$name" -c tool -- sh -c "$(proto_cmd "$p")" 2>&1)"; rc=$?
-  # The proxy must have classified at least one upstream connection as a
-  # rewrite (proof the request was steered through the sidecar, not direct).
+  out="$(kubectl exec -n "$NS" "$name" -c tool -- timeout 600 sh "/scripts/${p}.sh" 2>&1)"; rc=$?
   rewrites="$(kubectl logs -n "$NS" "$name" -c easyproxy 2>/dev/null | grep -c '"action":"rewrite"')"
   sleep 2
   after="$(cas_count "$p")"; growth=$(( ${after:-0} - ${before:-0} ))
   if [ "$rc" -eq 0 ] && [ "${rewrites:-0}" -gt 0 ]; then
-    echo "PASS $p  (client ok, $rewrites rewrite conns, CAS +$growth)"; pass=$((pass+1)); RESULTS+=("PASS $p ($rewrites conns, CAS +$growth)")
+    echo "PASS $p  ($rewrites rewrite conns, CAS +$growth)"; pass=$((pass+1)); RESULTS+=("PASS $p ($rewrites conns, CAS +$growth)")
   elif [ "$rc" -eq 0 ]; then
-    echo "FAIL $p  (client ok but no rewrite conn — proxy bypassed)"; fail=$((fail+1)); RESULTS+=("FAIL $p bypassed")
+    echo "FAIL $p  (client ok but no rewrite conn — bypassed)"; fail=$((fail+1)); RESULTS+=("FAIL $p bypassed")
     kubectl logs -n "$NS" "$name" -c easyproxy --tail=8 2>&1 | sed 's/^/      | /'
   else
     echo "FAIL $p  (client rc=$rc)"; fail=$((fail+1)); RESULTS+=("FAIL $p rc=$rc")
-    echo "$out" | tail -8 | sed 's/^/      | /'
+    echo "$out" | tail -12 | sed 's/^/      | /'
   fi
   [ "$KEEP" = "1" ] || kubectl delete pod -n "$NS" "$name" --ignore-not-found >/dev/null 2>&1
 }
@@ -186,5 +195,5 @@ for p in "${PROTOCOLS[@]}"; do run_one "$p"; done
 
 echo "====================================="
 printf '%s\n' "${RESULTS[@]}"
-echo "MATRIX: $pass pass, $warn warn, $fail fail"
+echo "MATRIX: $pass pass, $fail fail"
 [ "$fail" -eq 0 ]

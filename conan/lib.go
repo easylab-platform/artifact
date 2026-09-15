@@ -94,6 +94,14 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 	// /conans/{name}/{ver}/{user}/{channel}/revisions[...]
 	_ = user
 	_ = channel
+	// Pull-through: a recipe with nothing cached locally is served straight
+	// from the upstream (center2) so a client can discover its revisions and
+	// fetch recipe files. Package sub-paths keep their own handling below.
+	if (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		!strings.Contains(rest, "/packages/") && !s.recipeKnown(r.Context(), name, ver) {
+		s.proxyRecipe(w, r, path)
+		return
+	}
 	if parts[4] == "revisions" {
 		// DELETE /revisions/{rev} — remove the whole recipe.
 		if r.Method == http.MethodDelete {
@@ -131,9 +139,12 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 				// Package /files LISTING (no filename): return the dict of
 				// package files for the pid, so the client knows what to GET.
 				if filename == "" {
-					artifactkit.JSON(w, http.StatusOK, map[string]any{
-						"files": s.packageFiles(r.Context(), name, parts),
-					})
+					if files := s.packageFiles(r.Context(), name, parts); len(files) > 0 {
+						artifactkit.JSON(w, http.StatusOK, map[string]any{"files": files})
+						return
+					}
+					// Nothing cached locally: proxy the upstream listing.
+					s.replyOrProxy(w, r, nil, "/v2/conans/"+rest)
 					return
 				}
 				// For package file PUTs, persist the pid + prev so a later
@@ -175,6 +186,13 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 					return
 				}
 				if data, ok := s.loadFile(r.Context(), name, ver, filename); ok {
+					artifactkit.OctetResponse(w, r, data)
+					return
+				}
+				// Package file not cached locally: pull it through from the
+				// upstream (center2), caching the bytes under this slot.
+				if data, ok := s.fetchUpstreamFile(r, path); ok {
+					storeFile(s.Registry, name, ver, verSlot, data, r.Context())
 					artifactkit.OctetResponse(w, r, data)
 					return
 				}
@@ -225,6 +243,12 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 				return
 			}
 			if data, ok := s.loadFile(r.Context(), name, ver, filename); ok {
+				artifactkit.OctetResponse(w, r, data)
+				return
+			}
+			// Recipe file not cached: pull it through from upstream.
+			if data, ok := s.fetchUpstreamFile(r, path); ok {
+				storeFile(s.Registry, name, ver, filename, data, r.Context())
 				artifactkit.OctetResponse(w, r, data)
 				return
 			}
@@ -446,7 +470,9 @@ func (s *State) proxyRecipe(w http.ResponseWriter, r *http.Request, path string)
 	}
 	remote := s.Registry.RemoteAt(base)
 	if body, err := remote.GetBytes(r.Context(), "/v2/"+strings.TrimLeft(path, "/")); err == nil {
-		artifactkit.OctetResponse(w, r, body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
 		return
 	}
 	artifactkit.Error(w, http.StatusNotFound, "not found")
@@ -581,6 +607,30 @@ func (s *State) recipeExists(ctx context.Context, name, ver string) bool {
 		return false
 	}
 	return len(vs) > 0
+}
+
+// recipeKnown reports whether this recipe has any local trace (metadata or a
+// recorded file); unknown recipes are served straight from upstream.
+func (s *State) recipeKnown(ctx context.Context, name, ver string) bool {
+	return s.recipeExists(ctx, name, ver)
+}
+
+// fetchUpstreamFile pulls a conans/... path's bytes through from center2 so
+// package/recipe files are cached server-side on first access.
+func (s *State) fetchUpstreamFile(r *http.Request, path string) ([]byte, bool) {
+	base := s.Registry.Upstreams.Get("conan")
+	if c := s.Registry.Upstreams.Sub("conan", "center"); c != "" {
+		base = c
+	}
+	if base == "" {
+		return nil, false
+	}
+	remote := s.Registry.RemoteAt(base)
+	body, err := remote.GetBytes(r.Context(), "/v2/"+strings.TrimLeft(path, "/"))
+	if err != nil {
+		return nil, false
+	}
+	return body, true
 }
 
 // recorded files (Conan's /files response is a dict keyed by filename).

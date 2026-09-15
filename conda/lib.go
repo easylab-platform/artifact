@@ -65,10 +65,20 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.Trim(sub, "/")
-	channel, rest, ok := strings.Cut(path, "/")
-	if !ok || rest == "" {
-		artifactkit.Error(w, http.StatusNotFound, "channel required")
+	if path == "" {
+		artifactkit.Error(w, http.StatusNotFound, "path required")
 		return
+	}
+	// The client's original path is preserved by the egress rewrite, so it
+	// already mirrors the upstream layout exactly:
+	//   repo.anaconda.com/pkgs/<channel>/<subdir>/repodata.json
+	//   conda.anaconda.org/<channel>/<subdir>/repodata.json
+	// The first segment is therefore part of the upstream path, not a repo
+	// key we rewrite. Use it only to pick the upstream base and cache group.
+	upstreamPath := path
+	channel := path
+	if i := strings.Index(path, "/"); i > 0 {
+		channel = path[:i]
 	}
 	base := s.upstreamFor(channel)
 	if base == "" {
@@ -76,19 +86,19 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	repo := channel + "/" + subdirOf(rest)
-	if art, err := s.Registry.Meta.Get(r.Context(), "conda", repo, rest); err == nil && len(art.Blobs) > 0 {
-		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(rest)) {
+	repo := channel + "/" + subdirOf(path)
+	if art, err := s.Registry.Meta.Get(r.Context(), "conda", repo, path); err == nil && len(art.Blobs) > 0 {
+		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(path)) {
 			return
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "conda", base, "/"+rest)
+	fetched, err := s.Registry.Fetch(r.Context(), "conda", base, "/"+upstreamPath)
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if digest := storeCache(s, r.Context(), repo, rest, fetched.Data); digest != "" &&
-		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(rest)) {
+	if digest := storeCache(s, r.Context(), repo, path, fetched.Data); digest != "" &&
+		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(path)) {
 		return
 	}
 	artifactkit.OctetResponse(w, r, fetched.Data)

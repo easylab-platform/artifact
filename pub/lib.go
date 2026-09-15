@@ -62,6 +62,9 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"advisories": []any{}, "advisoriesUpdated": "1970-01-01T00:00:00Z"})
 	case strings.HasPrefix(path, "api/packages/") && strings.Contains(path, "/versions/"):
 		s.versionArchive(w, r, path)
+	case strings.HasPrefix(path, "api/archives/"):
+		// Dart's `pub` downloads <archive_url> = {host}/api/archives/{name}-{version}.tar.gz.
+		s.archive(w, r, strings.TrimPrefix(path, "api/archives/"))
 	case strings.HasPrefix(path, "api/packages/"):
 		name := strings.TrimPrefix(path, "api/packages/")
 		if r.Method == http.MethodDelete {
@@ -198,28 +201,34 @@ func (s *State) versionArchive(w http.ResponseWriter, r *http.Request, path stri
 	artifactkit.JSON(w, http.StatusOK, map[string]any{"name": name, "version": version, "archive_url": s.base() + "/packages/" + artifactkit.URLencode(name) + "/" + version + ".tar.gz", "pubspec": map[string]any{"name": name, "version": version}})
 }
 
+// archive serves a package tarball. Two shapes arrive:
+//   - /packages/{name}/{version}.tar.gz     (the archive_url we advertise)
+//   - /api/archives/{name}-{version}.tar.gz (the upstream Hub's shape)
 func (s *State) archive(w http.ResponseWriter, r *http.Request, rest string) {
 	rel := strings.Trim(rest, "/")
-	filename := rel[strings.LastIndex(rel, "/")+1:]
-	stem := strings.TrimSuffix(filename, ".tar.gz")
+	parts := strings.Split(rel, "/")
+	filename := parts[len(parts)-1]
 	var name, version string
-	if strings.Contains(rel, "/") {
-		name = strings.Split(rel, "/")[0]
-		version = stem
+	if len(parts) >= 2 {
+		name = parts[0]
+		version = strings.TrimSuffix(filename, ".tar.gz")
 	} else {
-		name, version = nameVersionFromStem(stem)
+		name, version = nameVersionFromStem(strings.TrimSuffix(filename, ".tar.gz"))
 	}
-	fullName := name + "-" + stem + ".tar.gz"
+	if name == "" || version == "" {
+		artifactkit.Error(w, http.StatusNotFound, "not found")
+		return
+	}
 	if art, err := s.Registry.Meta.Get(r.Context(), "pub", name, version); err == nil {
 		for _, b := range art.Blobs {
-			if b.Name == filename || b.Name == fullName || strings.HasSuffix(b.Name, filename) {
+			if b.Name == filename || strings.HasSuffix(b.Name, filename) {
 				if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), b.Digest, "application/octet-stream", filename) {
 					return
 				}
 			}
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "pub", "", "/packages/"+fullName)
+	fetched, err := s.Registry.Fetch(r.Context(), "pub", "", "/api/archives/"+artifactkit.URLencode(name+"-"+version+".tar.gz"))
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
