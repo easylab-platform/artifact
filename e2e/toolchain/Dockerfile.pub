@@ -1,1 +1,5 @@
-FROM forgejo.develop.10.199.64.20.nip.io/root/dart:stable
+FROM forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:latest
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+RUN curl -fsSL -o /tmp/dart.zip "${EASYLAB}/pkgs/generic/dart/3.13.4/dartsdk-linux-x64-release.zip" \
+ && unzip -q /tmp/dart.zip -d /opt && mv /opt/dart-sdk /opt/dart && rm /tmp/dart.zip
+ENV PATH=/opt/dart/bin:$PATH

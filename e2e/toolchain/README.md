@@ -15,8 +15,8 @@ client toolchain, rather than one giant all-in-one image.
   - `rpm`  → `root/fedora:44` (dnf/rpm native)
   - `apk`  → `root/alpine:3.24` (apk native)
   - `nix`  → `root/nix:2.35.2` (nix native)
-  - `composer` → `root/composer:2.10.3` (self-contained php+composer)
-  - `pub`  → `root/dart:stable`
+  - `composer` builds on the official `php:8.5.10-cli-bookworm` image (a
+    Debian base; the official composer image is Alpine).
 - `manifest.txt` — every toolchain artifact (name|version|file|url-or-LOCAL).
 - `mirror.sh` — fetch each artifact (once, via the dev-box proxy) and PUT it
   into easylab `/pkgs/generic/<name>/<ver>/<file>`; idempotent.
@@ -33,7 +33,7 @@ EASYLAB=http://<easylab-ip> ARTIFACT_TOKEN=devtoken ./mirror.sh
 ## Versions (2026-09-15)
 node 26.8.2 · go 1.27.1 · rust 1.98.1 · python 3.14.7 + uv 0.12.14 ·
 temurin jdk 25.0.4.1 · maven 3.9.16 · dotnet 10.0.401 · ruby 4.0.7 ·
-php 8.4.23 · composer 2.10.3 · erlang OTP 29.0.6 · elixir 1.20.4 ·
+php 8.5.10 · composer 2.10.3 · erlang OTP 29.0.6 · elixir 1.20.4 ·
 dart 3.13.3 · helm 4.3.0 · buf 1.73.0 · conan 2.32.0 · skopeo 1.24.0 ·
 regctl 0.11.6 · miniconda latest · nix-portable v012 ·
 apk-tools-static 3.0.8 · ruby via ruby-builder · swift 6.4.0
@@ -43,7 +43,8 @@ apk-tools-static 3.0.8 · ruby via ruby-builder · swift 6.4.0
   its shebangs; it is unpacked at exactly that path.
 - `hex`: the OTP tarball has no `bin/`; its `Install -minimal` creates it. A
   copy of the hex archive is baked in (`/opt/hex-archive`) for offline use.
-- `composer` uses the official composer image because static-php-cli's 8.5
-  build segfaults on this kernel.
+- `composer` runs on the official php:8.5.10-cli-bookworm image + unzip/git
+  (composer extracts dist zips); it no longer uses static-php-cli, whose phar
+  handling segfaulted in this container runtime.
 - `swift` has no public registry upstream (api.spm.swift.org is NXDOMAIN); its
   test drives the adapter's SCM-to-registry bridge.

@@ -1,1 +1,15 @@
-FROM forgejo.develop.10.199.64.20.nip.io/root/composer:2.10.3
+FROM forgejo.develop.10.199.64.20.nip.io/root/php:8.5.10-cli-bookworm
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+# composer extracts dist zips: needs the unzip binary (the php image omits it)
+# plus git for source fallbacks.
+RUN set -eux; \
+    printf 'Types: deb\nURIs: http://mirrors.ustc.edu.cn/debian\nSuites: bookworm bookworm-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://mirrors.ustc.edu.cn/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' \
+        > /etc/apt/sources.list.d/debian.sources; \
+    apt-get -o Acquire::Retries=10 update; \
+    apt-get -o Acquire::Retries=10 install -y --no-install-recommends unzip git ca-certificates; \
+    rm -rf /var/lib/apt/lists/*; \
+    printf 'Types: deb\nURIs: http://deb.debian.org/debian\nSuites: bookworm bookworm-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: http://deb.debian.org/debian-security\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' \
+        > /etc/apt/sources.list.d/debian.sources
+RUN curl -fsSL -o /opt/composer.phar "${EASYLAB}/pkgs/generic/composer/2.10.3/composer.phar" \
+ && printf '#!/bin/sh\nexec php /opt/composer.phar "$@"\n' > /usr/local/bin/composer \
+ && chmod +x /usr/local/bin/composer
