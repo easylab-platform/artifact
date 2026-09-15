@@ -26,17 +26,20 @@ import (
 
 func main() {
 	var (
-		listen      = flag.String("listen", ":8080", "HTTP listen address")
-		dataDir     = flag.String("data", "./data", "substrate root (sqlite + blobs + upstreams)")
-		protocols   = flag.String("protocols", "", "comma-separated protocols to mount (default: all registered)")
-		selfBase    = flag.String("self-base", "", "external base URL for auth realms / self URIs")
-		tokens      = flag.String("tokens", "", "`token=level` pairs (read|write) to seed into the credential DB (hashed), comma separated; repeat on every start to keep them registered")
-		airGap      = flag.Bool("air-gap", false, "disable all upstream pull-through")
-		blobBackend = flag.String("blob-backend", "filesystem", "blob backend: filesystem | s3")
+		listen        = flag.String("listen", ":8080", "HTTP listen address")
+		dataDir       = flag.String("data", "./data", "substrate root (sqlite + blobs + upstreams)")
+		protocols     = flag.String("protocols", "", "comma-separated protocols to mount (default: all registered)")
+		selfBase      = flag.String("self-base", "", "external base URL for auth realms / self URIs")
+		tokens        = flag.String("tokens", "", "`token=level` pairs (read|write) to seed into the credential DB (hashed), comma separated; repeat on every start to keep them registered")
+		airGap        = flag.Bool("air-gap", false, "disable all upstream pull-through")
+		blobBackend   = flag.String("blob-backend", "filesystem", "blob backend: filesystem | s3")
+		upstreamSet   = flag.String("upstreams", "", "override upstream base for a format, `format=url` pairs comma separated (e.g. go=http://proxy.golang.org)")
+		upstreamProxy = flag.String("upstream-proxy", "", "HTTP proxy URL for upstream fetches (empty = follow env, \"none\" = direct)")
 	)
 	flag.Parse()
 
 	upstreams := defaultUpstreams(*airGap)
+	applyUpstreamOverrides(upstreams, *upstreamSet, *upstreamProxy)
 
 	// Open the metadata store (SQLite) always; blob backend is chosen below.
 	idxPath := filepath.Join(*dataDir, "pkglab.db")
@@ -146,6 +149,16 @@ func defaultUpstreams(airGap bool) *artifactkit.Upstreams {
 			"pypi":     "https://pypi.org",
 			"rubygems": "https://rubygems.org",
 			"swift":    "https://api.spm.swift.org",
+			// System packages.
+			"apk":    "https://dl-cdn.alpinelinux.org",
+			"debian": "https://deb.debian.org",
+			"rpm":    "https://dl.fedoraproject.org",
+			// AI/ML, functional, LFS, schema registries.
+			"conda":       "https://repo.anaconda.com",
+			"huggingface": "https://huggingface.co",
+			"nix":         "https://cache.nixos.org",
+			"protobuf":    "https://buf.build",
+			"gitlfs":      "",
 			// Sub-endpoints that live on a different host than the format's
 			// primary upstream (crates.io: index + static downloads are
 			// served from index.crates.io / static.crates.io).
@@ -162,6 +175,39 @@ func defaultUpstreams(airGap bool) *artifactkit.Upstreams {
 		Proxy:     map[string]string{},
 		AirGap:    airGap,
 	}
+}
+
+// applyUpstreamOverrides mutates the upstream table from flag input:
+//   - overrides: comma-separated "format=url" pairs replacing a format's base
+//     (also usable to add a non-default format key).
+//   - proxy: an HTTP proxy URL applied to every format's upstream fetches
+//     (mihomo in the dev cluster); "none" forces direct connections.
+func applyUpstreamOverrides(u *artifactkit.Upstreams, overrides, proxy string) {
+	for _, pair := range strings.Split(overrides, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(pair, "=")
+		if !ok {
+			continue
+		}
+		u.Overrides[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	if proxy == "" {
+		return
+	}
+	if u.Proxy == nil {
+		u.Proxy = map[string]string{}
+	}
+	if strings.EqualFold(proxy, "none") {
+		u.Proxy["*"] = ""
+		return
+	}
+	for k := range u.Defaults {
+		u.Proxy[k] = proxy
+	}
+	u.Proxy["*"] = proxy
 }
 
 func configFor(name, selfBase string, auth artifactkit.Auth, dataDir string) map[string]any {

@@ -84,7 +84,9 @@ func (u *Upstreams) Sub(format, sub string) string {
 	return trimSlash(u.Defaults[key])
 }
 
-// ProxyURL returns the proxy policy for a key, walking dotted parents.
+// ProxyURL returns the proxy policy for a key, walking dotted parents, then
+// falling back to the "*" catch-all entry when present (applied to every
+// upstream). "" means direct; absence means the env proxy.
 func (u *Upstreams) ProxyURL(key string) (string, bool) {
 	for {
 		if v, ok := u.Proxy[key]; ok {
@@ -96,9 +98,13 @@ func (u *Upstreams) ProxyURL(key string) (string, bool) {
 				goto next
 			}
 		}
-		return "", false
+		break
 	next:
 	}
+	if v, ok := u.Proxy["*"]; ok {
+		return v, true
+	}
+	return "", false
 }
 
 // ProxyFactory returns a client factory honored by the Upstreams' proxy
