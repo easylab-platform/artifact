@@ -189,7 +189,7 @@ func (s *State) pkg(w http.ResponseWriter, r *http.Request, name string) {
 		payload = pbBytes(payload, 1, rel)
 	}
 	payload = pbStr(payload, 2, name)
-	payload = pbStr(payload, 3, "pkglab")
+	payload = pbStr(payload, 3, "hexpm")
 	s.signedGzip(w, r, payload)
 }
 
