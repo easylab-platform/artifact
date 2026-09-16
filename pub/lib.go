@@ -138,28 +138,14 @@ func (s *State) finish(w http.ResponseWriter, r *http.Request) {
 func (s *State) pkgMetadata(w http.ResponseWriter, r *http.Request, name string) {
 	name = strings.Trim(name, "/")
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "pub", name)
-	if len(versions) == 0 {
-		remote, err := s.Registry.Remote("pub", "")
-		if err == nil {
-			if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/api/packages/"+artifactkit.URLencode(name)); err == nil {
-				artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
-				return
-			}
-		}
-		artifactkit.Error(w, http.StatusNotFound, "not found")
-		return
-	}
 	artifactkit.SortSemver(versions)
 	base := s.base()
-	latest := artifactkit.HighestVersion(versions)
-	if latest == "" && len(versions) > 0 {
-		latest = versions[len(versions)-1]
-	}
-	// Upstream metadata (when reachable) is the authoritative source for each
-	// version's pubspec: the synthesized entry below omits dependencies, which
-	// makes the client mis-resolve transitive packages. Merge upstream entries
-	// for versions we have locally; only synthesize what upstream lacks.
+	// Upstream metadata is authoritative for the publish metadata: it carries
+	// each version's dependencies (the synthesized entry omits them, which
+	// makes the client mis-resolve transitive packages) and the full version
+	// list (a local cache fill must not hide versions we have not seen yet).
 	upstream := map[string]map[string]any{}
+	var upstreamOrder []string
 	if remote, err := s.Registry.Remote("pub", ""); err == nil {
 		if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/api/packages/"+artifactkit.URLencode(name)); err == nil {
 			var doc struct {
@@ -169,9 +155,26 @@ func (s *State) pkgMetadata(w http.ResponseWriter, r *http.Request, name string)
 				for _, v := range doc.Versions {
 					if ver, _ := v["version"].(string); ver != "" {
 						upstream[ver] = v
+						upstreamOrder = append(upstreamOrder, ver)
 					}
 				}
 			}
+		}
+	}
+	if len(versions) == 0 && len(upstreamOrder) == 0 {
+		artifactkit.Error(w, http.StatusNotFound, "not found")
+		return
+	}
+	// Local versions first, then any upstream-only version.
+	seen := map[string]bool{}
+	all := append([]string{}, versions...)
+	for _, v := range versions {
+		seen[v] = true
+	}
+	for _, v := range upstreamOrder {
+		if !seen[v] {
+			all = append(all, v)
+			seen[v] = true
 		}
 	}
 	synth := func(v string) map[string]any {
@@ -184,39 +187,37 @@ func (s *State) pkgMetadata(w http.ResponseWriter, r *http.Request, name string)
 			"archive_url": base + "/packages/" + artifactkit.URLencode(name) + "/" + v + ".tar.gz", "archive_sha256": sha,
 		}
 	}
-	var vs []any
-	for _, v := range versions {
-		if up, ok := upstream[v]; ok {
-			cp := map[string]any{}
-			for k, val := range up {
-				cp[k] = val
-			}
-			// Point the archive at this registry (the client must not fetch
-			// the origin directly).
-			cp["archive_url"] = base + "/packages/" + artifactkit.URLencode(name) + "/" + v + ".tar.gz"
-			if art, err := s.Registry.Meta.Get(r.Context(), "pub", name, v); err == nil && len(art.Blobs) > 0 {
-				cp["archive_sha256"] = art.Blobs[0].Hex()
-			}
-			vs = append(vs, cp)
-			continue
+	entry := func(v string) map[string]any {
+		synthetic := synth(v)
+		up, ok := upstream[v]
+		if !ok {
+			return synthetic
 		}
-		vs = append(vs, synth(v))
-	}
-	latestEntry := synth(latest)
-	if up, ok := upstream[latest]; ok {
 		cp := map[string]any{}
 		for k, val := range up {
 			cp[k] = val
 		}
-		cp["archive_url"] = base + "/packages/" + artifactkit.URLencode(name) + "/" + latest + ".tar.gz"
-		if art, err := s.Registry.Meta.Get(r.Context(), "pub", name, latest); err == nil && len(art.Blobs) > 0 {
+		// Always point the archive at this registry, and use the locally-known
+		// hash when we have the bytes.
+		cp["archive_url"] = synthetic["archive_url"]
+		if art, err := s.Registry.Meta.Get(r.Context(), "pub", name, v); err == nil && len(art.Blobs) > 0 {
 			cp["archive_sha256"] = art.Blobs[0].Hex()
 		}
-		latestEntry = cp
+		return cp
+	}
+	var vs []any
+	var latestMap map[string]any
+	for _, v := range all {
+		e := entry(v)
+		vs = append(vs, e)
+		latestMap = e
+	}
+	if lv := artifactkit.HighestVersion(all); lv != "" {
+		latestMap = entry(lv)
 	}
 	artifactkit.JSON(w, http.StatusOK, map[string]any{
 		"name":     name,
-		"latest":   latestEntry,
+		"latest":   latestMap,
 		"versions": vs,
 	})
 }
