@@ -269,6 +269,14 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 				return
 			}
 		}
+		// /revisions/{rev}/search — list this recipe's package binaries. A
+		// locally-published recipe has no upstream counterpart, so answer from
+		// local storage (empty when no binary was uploaded): proxying would
+		// 404 and abort the client.
+		if strings.HasSuffix(rest, "/search") && s.recipeExists(r.Context(), name, ver) {
+			artifactkit.JSON(w, http.StatusOK, s.packageSearch(r.Context(), name))
+			return
+		}
 		// remaining sub-paths (files listing, download_urls, upload_urls,
 		// packages) — proxy upstream when not locally known.
 		s.replyOrProxy(w, r, nil, "/v2/conans/"+rest)
@@ -563,6 +571,69 @@ func (s *State) packageFiles(ctx context.Context, name string, parts []string) m
 		out[fname] = url
 	}
 	return out
+}
+
+// packageSearch returns a locally-published recipe's package binaries in the
+// shape Conan's /search endpoint expects: pid -> configuration. Only the
+// settings/options/content a pid's stored conaninfo.txt records are surfaced;
+// the list is enough for the client to then fetch the package files.
+func (s *State) packageSearch(ctx context.Context, name string) map[string]any {
+	vs, _ := s.Registry.Meta.ListVersions(ctx, "conan", name)
+	out := map[string]any{}
+	for _, v := range vs {
+		if !strings.HasPrefix(v, "package/") {
+			continue
+		}
+		rest := strings.TrimPrefix(v, "package/")
+		pid := strings.SplitN(rest, "/", 2)[0]
+		if pid == "" {
+			continue
+		}
+		if _, seen := out[pid]; seen {
+			continue
+		}
+		info := map[string]any{"settings": map[string]any{}, "options": map[string]any{}, "content": "", "requires": []any{}}
+		// The conaninfo.txt lives under the same pid slot: replace the
+		// filename with "conaninfo.txt" ("package/{pid}/{prev}/conaninfo.txt").
+		if i := strings.LastIndex(v, "/"); i > 0 {
+			infoKey := v[:i] + "/conaninfo.txt"
+			if data, ok := s.loadFile(ctx, name, infoKey, infoKey); ok {
+				settings, options, content := parseConaninfo(string(data))
+				info["settings"], info["options"], info["content"] = settings, options, content
+			}
+		}
+		out[pid] = info
+	}
+	return out
+}
+
+// parseConaninfo extracts the [settings]/[options] maps and the raw content
+// from a conaninfo.txt body.
+func parseConaninfo(body string) (map[string]any, map[string]any, string) {
+	settings := map[string]any{}
+	options := map[string]any{}
+	section := ""
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section = strings.Trim(line, "[]")
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch section {
+		case "settings":
+			settings[k] = v
+		case "options":
+			options[k] = v
+		}
+	}
+	return settings, options, body
 }
 
 // packageRev returns the recorded package revision for a pid if present.
