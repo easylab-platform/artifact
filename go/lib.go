@@ -51,9 +51,15 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/pkgs/go")
 	path = strings.Trim(path, "/")
 
-	if path == "upload" && r.Method == http.MethodPut {
-		s.upload(w, r)
-		return
+	if path == "upload" {
+		switch r.Method {
+		case http.MethodPut:
+			s.upload(w, r)
+			return
+		case http.MethodDelete:
+			s.deleteModule(w, r)
+			return
+		}
 	}
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -216,6 +222,40 @@ func (s *State) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	storeVersionSource(s.Registry, name, version, data, "push", r.Context())
 	artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
+}
+
+func (s *State) deleteModule(w http.ResponseWriter, r *http.Request) {
+	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		return
+	}
+	module := r.URL.Query().Get("name")
+	if module == "" {
+		module = r.URL.Query().Get("module")
+	}
+	if module == "" {
+		artifactkit.Error(w, http.StatusBadRequest, "missing name")
+		return
+	}
+	version := r.URL.Query().Get("version")
+	if version != "" {
+		if art, err := s.Registry.Meta.Get(r.Context(), "go", module, version); err == nil {
+			for _, b := range art.Blobs {
+				artifactkit.LogMetaErr("blob delete", s.Registry.Blobs.Delete(r.Context(), b.Digest))
+			}
+		}
+		artifactkit.LogMetaErr("meta delete", s.Registry.Meta.Delete(r.Context(), "go", module, version))
+	} else {
+		vs, _ := s.Registry.Meta.ListVersions(r.Context(), "go", module)
+		for _, v := range vs {
+			if art, err := s.Registry.Meta.Get(r.Context(), "go", module, v); err == nil {
+				for _, b := range art.Blobs {
+					artifactkit.LogMetaErr("blob delete", s.Registry.Blobs.Delete(r.Context(), b.Digest))
+				}
+			}
+			artifactkit.LogMetaErr("meta delete", s.Registry.Meta.Delete(r.Context(), "go", module, v))
+		}
+	}
+	artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func storeVersionSource(reg *artifactkit.Registry, module, version string, data []byte, source string, ctx context.Context) {
