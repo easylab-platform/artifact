@@ -30,6 +30,7 @@ func main() {
 		dataDir       = flag.String("data", "./data", "substrate root (sqlite + blobs + upstreams)")
 		protocols     = flag.String("protocols", "", "comma-separated protocols to mount (default: all registered)")
 		selfBase      = flag.String("self-base", "", "external base URL for auth realms / self URIs")
+		selfBaseRaw   = flag.Bool("self-base-raw", false, "treat -self-base as the protocol's own upstream origin (do NOT append /pkgs/<name>): emitted URLs take the upstream shape so an intercepting client proxy can map them back")
 		tokens        = flag.String("tokens", "", "`token=level` pairs (read|write) to seed into the credential DB (hashed), comma separated; repeat on every start to keep them registered")
 		airGap        = flag.Bool("air-gap", false, "disable all upstream pull-through")
 		blobBackend   = flag.String("blob-backend", "filesystem", "blob backend: filesystem | s3")
@@ -88,7 +89,7 @@ func main() {
 		if name == "" {
 			continue
 		}
-		handler, err := artifactkit.Build(name, reg, configFor(name, *selfBase, auth, *dataDir))
+		handler, err := artifactkit.Build(name, reg, configFor(name, *selfBase, *selfBaseRaw, auth, *dataDir))
 		if err != nil {
 			log.Fatalf("build protocol %q: %v", name, err)
 		}
@@ -210,14 +211,20 @@ func applyUpstreamOverrides(u *artifactkit.Upstreams, overrides, proxy string) {
 	u.Proxy["*"] = proxy
 }
 
-func configFor(name, selfBase string, auth artifactkit.Auth, dataDir string) map[string]any {
+func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, dataDir string) map[string]any {
 	cfg := map[string]any{}
 	// Each protocol mounts under /pkgs/<name> (OCI is special-cased to /v2),
 	// so its emitted self-URLs must carry that prefix. selfBase is the global
 	// origin (scheme://host[:port]). For OCI, SelfBase is used ONLY to derive
 	// the /token realm, which lives at the origin root — so pass the bare base.
+	//
+	// With -self-base-raw the base is the protocol's OWN upstream origin: the
+	// adapter emits upstream-shaped URLs (registry.npmjs.org/react, pypi.org/
+	// simple/..., index.crates.io/config.json) unchanged, and an intercepting
+	// client proxy (easyproxy) maps them back onto /pkgs/<name>. This is what
+	// makes publish/pull fully transparent to an unmodified client.
 	if selfBase != "" {
-		if name == "oci" {
+		if name == "oci" || selfBaseRaw {
 			cfg["self_base"] = strings.TrimSuffix(selfBase, "/")
 		} else {
 			cfg["self_base"] = strings.TrimSuffix(selfBase, "/") + "/pkgs/" + name
