@@ -75,7 +75,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusMethodNotAllowed)
-	case trimmed == "users/me":
+	case trimmed == "users/me" || trimmed == "api/users/me":
 		// `mix hex.publish` probes the authenticated user before publishing;
 		// it maps the "organizations" key of this response (absent key =>
 		// crash), so it must always be present.
