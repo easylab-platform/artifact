@@ -44,7 +44,11 @@ SH
       ;;
     rubygems)
       cat <<'SH'
-out="$(gem search -r -e thor 2>/dev/null)" && echo "$out" | grep -q thor && echo "gem search: $out"
+# The API search and the compact index /names both merge upstream.
+api="$(curl -s "https://rubygems.org/api/v1/search.json?query=thor")" \
+  && echo "$api" | grep -q '"name":"thor"' \
+  && echo "rubygems search: $(echo "$api" | head -c 60)"
+names="$(curl -s "https://index.rubygems.org/names")" && echo "$names" | grep -qx thor && echo "rubygems names: thor present"
 SH
       ;;
     composer)
@@ -54,13 +58,11 @@ SH
       ;;
     hex)
       cat <<'SH'
-export HOME=/tmp/sh HEX_HOME=/tmp/sh/.hex MIX_HOME=/tmp/sh/.mix
-mkdir -p "$HOME"
-cat /etc/ssl/certs/ca-certificates.crt > /tmp/cacerts.pem 2>/dev/null || true
-cat /etc/easyproxy/ca.crt >> /tmp/cacerts.pem
-export HEX_CACERTS_PATH=/tmp/cacerts.pem
-mix archive.install /opt/hex-archive/hex.ez --force >/dev/null 2>&1
-out="$(mix hex.search jason 2>&1)" && echo "$out" | grep -qi jason && echo "hex search: ok"
+# hex.pm's search API (/api/packages?search=) — what `mix hex.package search`
+# calls; the adapter merges local packages with the upstream result.
+out="$(curl -s "https://hex.pm/api/packages?search=jason")" \
+  && echo "$out" | grep -qi '"name":"jason"' \
+  && echo "hex search: ok ($(echo "$out" | head -c 40))"
 SH
       ;;
     go)
@@ -99,12 +101,16 @@ SH
       ;;
     conda)
       cat <<'SH'
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main >/dev/null 2>&1 || true
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r >/dev/null 2>&1 || true
 out="$(conda search --override-channels -c defaults zlib 2>&1)" && echo "$out" | grep -q zlib && echo "conda search: ok"
 SH
       ;;
     rpm)
       cat <<'SH'
-out="$(dnf -q search jq 2>&1)" && echo "$out" | grep -q jq && echo "dnf search: ok"
+cp /etc/easyproxy/ca.crt /etc/pki/ca-trust/source/anchors/easylab.crt 2>/dev/null || true
+update-ca-trust 2>/dev/null || true
+out="$(dnf -q --refresh search jq 2>&1)" && echo "$out" | grep -q jq && echo "dnf search: ok"
 SH
       ;;
     *) echo "" ;;
