@@ -53,28 +53,33 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 
 func init() { artifactkit.Register("rpm", NewHandler) }
 
-// ServeHTTP dispatches /pkgs/rpm/{repo}/{upstream path}.
+// ServeHTTP dispatches one repo key: a proxied mirror (fedora, a repo
+// override key, ...) or a self-published hosted repo. Hosted content wins for
+// the key; otherwise the request is proxied upstream.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	sub := strings.TrimPrefix(r.URL.Path, "/pkgs/rpm/")
-	sub = strings.TrimPrefix(sub, "rpm/")
-	if strings.HasPrefix(sub, "hosted/") {
-		s.Hosted.ServeHTTP(w, r, sub, "/pkgs/rpm/")
-		return
-	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	path := strings.Trim(sub, "/")
-	if path == "" {
+	sub := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/pkgs/rpm/"), "rpm/"), "/")
+	repo, rest, ok := artifactkit.SplitRepo(sub)
+	if !ok {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
-	repo, rest, ok := strings.Cut(path, "/")
-	if !ok || rest == "" {
-		artifactkit.Error(w, http.StatusNotFound, "repo required")
-		return
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		if s.Hosted.Get(w, r, repo, rest) {
+			return
+		}
+		s.proxy(w, r, repo, rest)
+	case http.MethodPut, http.MethodPost:
+		s.Hosted.Put(w, r, repo, rest)
+	case http.MethodDelete:
+		s.Hosted.Delete(w, r, repo, rest)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// proxy pulls a repository path through from its upstream mirror.
+func (s *State) proxy(w http.ResponseWriter, r *http.Request, repo, rest string) {
 	base := s.upstreamFor(repo)
 	if base == "" {
 		artifactkit.Error(w, http.StatusNotFound, "unknown rpm repo: "+repo)

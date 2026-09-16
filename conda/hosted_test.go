@@ -40,14 +40,14 @@ func TestHostedRepodata(t *testing.T) {
 	pkg := []byte("fake-conda-content")
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/pkgs/conda/hosted/mychannel/linux-64/mytool-1.2.3-py310_0.conda", bytes.NewReader(pkg))
+	req := httptest.NewRequest(http.MethodPut, "/pkgs/conda/mychannel/linux-64/mytool-1.2.3-py310_0.conda", bytes.NewReader(pkg))
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("upload: %d %s", rec.Code, rec.Body.String())
 	}
 
 	rec2 := httptest.NewRecorder()
-	s.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/pkgs/conda/hosted/mychannel/linux-64/repodata.json", nil))
+	s.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/pkgs/conda/mychannel/linux-64/repodata.json", nil))
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("repodata: %d", rec2.Code)
 	}
@@ -77,7 +77,7 @@ func TestHostedRepodata(t *testing.T) {
 
 	// Download.
 	rec3 := httptest.NewRecorder()
-	s.ServeHTTP(rec3, httptest.NewRequest(http.MethodGet, "/pkgs/conda/hosted/mychannel/linux-64/mytool-1.2.3-py310_0.conda", nil))
+	s.ServeHTTP(rec3, httptest.NewRequest(http.MethodGet, "/pkgs/conda/mychannel/linux-64/mytool-1.2.3-py310_0.conda", nil))
 	if rec3.Code != http.StatusOK || !bytes.Equal(rec3.Body.Bytes(), pkg) {
 		t.Fatalf("download: %d", rec3.Code)
 	}

@@ -55,30 +55,31 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 
 func init() { artifactkit.Register("apk", NewHandler) }
 
-// ServeHTTP dispatches /pkgs/apk/{repo}/{suite}/{arch}/{file}.
+// ServeHTTP dispatches one repo key: a proxied repository (v<ver>/<component>
+// /<arch>) or a self-published hosted repo. Hosted content wins for the key;
+// otherwise the request is proxied upstream.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	sub := strings.TrimPrefix(r.URL.Path, "/pkgs/apk/")
-	sub = strings.TrimPrefix(sub, "apk/")
-	if strings.HasPrefix(sub, "hosted/") {
-		s.Hosted.ServeHTTP(w, r, sub, "/pkgs/apk/")
-		return
-	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	path := strings.Trim(sub, "/")
-	if path == "" {
+	sub := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/pkgs/apk/"), "apk/"), "/")
+	repo, rest, ok := artifactkit.SplitRepo(sub)
+	if !ok {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
+		if s.Hosted.Get(w, r, repo, rest) {
+			return
+		}
+		// APK repo keys span multiple path segments (v3.24/main/x86_64), so
+		// the whole format-relative path is the proxy path here.
+		s.fetch(w, r, sub)
+	case http.MethodPut, http.MethodPost:
+		s.Hosted.Put(w, r, repo, rest)
+	case http.MethodDelete:
+		s.Hosted.Delete(w, r, repo, rest)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
 	}
-	s.fetch(w, r, path)
 }
 
 // fetch serves a repository path (index or package) through the local CAS

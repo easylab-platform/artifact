@@ -10,21 +10,38 @@ import (
 	"strings"
 )
 
-// Hosted repository support. A "hosted" path segment in an adapter's URL
-// namespace routes to this shared handler instead of upstream pull-through:
+// Hosted repository support. A repository key (the first path segment after
+// the format) names a repository in one namespace shared by proxied and
+// hosted repos:
 //
-//	/pkgs/<format>/hosted/<repo>/<pkg path>    upload / download
-//	/pkgs/<format>/hosted/<repo>/<generated>   generated index (per adapter)
+//	/pkgs/<format>/<repo>/<name>    upload / download / generated index
 //
-// Uploads store bytes in the CAS and record an artifact row; downloads
-// stream from the CAS. Index generation is adapter-specific (each adapter
-// passes a Generator), because the file format differs per ecosystem.
+// A GET for a repo that has hosted content is served from the CAS (or a
+// generated index); otherwise the request is a proxied fetch. Uploads always
+// target the hosted store. Internally hosted rows live under the repository
+// name "hosted/<repo>" so they never collide with pull-through cache rows.
 
 // HostedStore is the minimal backend the hosted handler needs (satisfied by
 // Registry).
 type HostedStore struct {
 	Registry *Registry
 }
+
+// SplitRepo splits a format-relative path into a repository key (its first
+// segment) and the remaining path inside it. rest may be empty (repo root).
+func SplitRepo(p string) (repo, rest string, ok bool) {
+	p = strings.Trim(p, "/")
+	if p == "" {
+		return "", "", false
+	}
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		return p[:i], p[i+1:], true
+	}
+	return p, "", true
+}
+
+// repoKey is the internal metadata repository name for a hosted repo.
+func repoKey(repo string) string { return "hosted/" + repo }
 
 // HostedUpload stores uploaded bytes under (format, repo, name) and indexes
 // them. It returns the digest and size.
@@ -38,7 +55,7 @@ func (h HostedStore) HostedUpload(ctx context.Context, format, repo, name string
 		return "", 0, err
 	}
 	if err := h.Registry.Meta.Put(ctx, Artifact{
-		Format: format, Repository: "hosted/" + repo, Version: name,
+		Format: format, Repository: repoKey(repo), Version: name,
 		MediaType: "application/octet-stream", Digest: stored.Digest,
 		Blobs:  []Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: baseName(name)}},
 		Source: "push",
@@ -50,7 +67,7 @@ func (h HostedStore) HostedUpload(ctx context.Context, format, repo, name string
 
 // HostedFile returns the stored digest for one hosted file ("" when absent).
 func (h HostedStore) HostedFile(ctx context.Context, format, repo, name string) (string, bool) {
-	art, err := h.Registry.Meta.Get(ctx, format, "hosted/"+repo, name)
+	art, err := h.Registry.Meta.Get(ctx, format, repoKey(repo), name)
 	if err != nil || len(art.Blobs) == 0 {
 		return "", false
 	}
@@ -59,7 +76,7 @@ func (h HostedStore) HostedFile(ctx context.Context, format, repo, name string) 
 
 // HostedList returns every hosted file name under a repo (sorted).
 func (h HostedStore) HostedList(ctx context.Context, format, repo string) ([]string, error) {
-	vs, err := h.Registry.Meta.ListVersions(ctx, format, "hosted/"+repo)
+	vs, err := h.Registry.Meta.ListVersions(ctx, format, repoKey(repo))
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +90,7 @@ func (h HostedStore) HostedDelete(ctx context.Context, format, repo, name string
 	if !ok {
 		return nil
 	}
-	if err := h.Registry.Meta.Delete(ctx, format, "hosted/"+repo, name); err != nil {
+	if err := h.Registry.Meta.Delete(ctx, format, repoKey(repo), name); err != nil {
 		return err
 	}
 	// Best-effort blob GC: only delete when no other artifact references it.
@@ -125,7 +142,7 @@ type HostedFile struct {
 	Size   int64
 }
 
-// HostedHandler serves the hosted paths for one format.
+// HostedHandler serves an upload/generated-index repo for one format.
 type HostedHandler struct {
 	Format    string
 	Store     HostedStore
@@ -133,18 +150,25 @@ type HostedHandler struct {
 	Generator Generator
 }
 
-// ServeHTTP dispatches /pkgs/<format>/hosted/<repo>/<name>.
-func (h *HostedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, sub string, prefix string) bool {
-	rest := strings.TrimPrefix(sub, "hosted/")
-	repo, name, ok := cutRepoName(rest)
-	if !ok {
-		Error(w, http.StatusNotFound, "not found")
-		return true
+// Get serves a hosted file or generated index from repo. It reports whether
+// the request was handled (true) or the caller should fall back to proxying
+// (false) because the repo holds no hosted content.
+//
+//	repo  the repository key (first path segment)
+//	name  the path inside the repo
+func (h *HostedHandler) Get(w http.ResponseWriter, r *http.Request, repo, name string) bool {
+	if h == nil {
+		return false
 	}
-	switch r.Method {
-	case http.MethodGet, http.MethodHead:
-		if h.Generator != nil {
-			if gf, ok := h.generated(r.Context(), repo, name); ok {
+	name = path.Clean(name)
+	if name == "." || name == "" {
+		return false
+	}
+	// A generated index (e.g. repodata/repomd.xml, Packages) takes priority
+	// because it is derived, not stored.
+	if h.Generator != nil {
+		if names, err := h.Store.HostedList(r.Context(), h.Format, repo); err == nil && len(names) > 0 {
+			if gf, ok := h.generate(r.Context(), repo, names, name); ok {
 				w.Header().Set("Content-Type", gf.ContentType)
 				w.Header().Set("Content-Length", fmt.Sprint(len(gf.Body)))
 				w.WriteHeader(http.StatusOK)
@@ -154,48 +178,42 @@ func (h *HostedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, sub st
 				return true
 			}
 		}
-		if digest, ok := h.Store.HostedFile(r.Context(), h.Format, repo, name); ok {
-			if ServeBlobAt(w, r, h.Store.Registry.Blobs, r.Context(), digest, "application/octet-stream") {
-				return true
-			}
-		}
-		Error(w, http.StatusNotFound, "not found")
-		return true
-	case http.MethodPut, http.MethodPost:
-		if !AuthorizeWrite(w, r, h.Auth) {
-			return true
-		}
-		if _, _, err := h.Store.HostedUpload(r.Context(), h.Format, repo, name, r.Body); err != nil {
-			Error(w, http.StatusBadRequest, "upload: "+err.Error())
-			return true
-		}
-		_ = prefix // reserved
-		w.WriteHeader(http.StatusCreated)
-		return true
-	case http.MethodDelete:
-		if !AuthorizeWrite(w, r, h.Auth) {
-			return true
-		}
-		if err := h.Store.HostedDelete(r.Context(), h.Format, repo, name); err != nil {
-			Error(w, http.StatusInternalServerError, err.Error())
-			return true
-		}
-		w.WriteHeader(http.StatusNoContent)
-		return true
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return true
 	}
+	if digest, ok := h.Store.HostedFile(r.Context(), h.Format, repo, name); ok {
+		if ServeBlobAt(w, r, h.Store.Registry.Blobs, r.Context(), digest, "application/octet-stream") {
+			return true
+		}
+	}
+	return false
 }
 
-// generated regenerates the repo index and returns the requested member.
-// The requested name must be a generated index document (or, for adapters
-// whose index location is fixed, match the generator's canonical name).
-func (h *HostedHandler) generated(ctx context.Context, repo, name string) (GeneratedFile, bool) {
-	names, err := h.Store.HostedList(ctx, h.Format, repo)
-	if err != nil {
-		return GeneratedFile{}, false
+// Put stores an uploaded file into repo.
+func (h *HostedHandler) Put(w http.ResponseWriter, r *http.Request, repo, name string) {
+	if !AuthorizeWrite(w, r, h.Auth) {
+		return
 	}
+	if _, _, err := h.Store.HostedUpload(r.Context(), h.Format, repo, name, r.Body); err != nil {
+		Error(w, http.StatusBadRequest, "upload: "+err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+// Delete removes a hosted file from repo.
+func (h *HostedHandler) Delete(w http.ResponseWriter, r *http.Request, repo, name string) {
+	if !AuthorizeWrite(w, r, h.Auth) {
+		return
+	}
+	if err := h.Store.HostedDelete(r.Context(), h.Format, repo, name); err != nil {
+		Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// generate regenerates the repo index from a known file list and returns the
+// requested member.
+func (h *HostedHandler) generate(ctx context.Context, repo string, names []string, name string) (GeneratedFile, bool) {
 	files := make([]HostedFile, 0, len(names))
 	for _, n := range names {
 		digest, ok := h.Store.HostedFile(ctx, h.Format, repo, n)
@@ -210,19 +228,6 @@ func (h *HostedHandler) generated(ctx context.Context, repo, name string) (Gener
 	}
 	gf, ok := out[name]
 	return gf, ok
-}
-
-// cutRepoName splits "<repo>/<name>" where repo is one path segment.
-func cutRepoName(rest string) (repo, name string, ok bool) {
-	rest = strings.Trim(rest, "/")
-	if rest == "" {
-		return "", "", false
-	}
-	i := strings.IndexByte(rest, '/')
-	if i < 0 {
-		return "", "", false
-	}
-	return rest[:i], path.Clean(rest[i+1:]), true
 }
 
 // baseName is path.Base without the os import.

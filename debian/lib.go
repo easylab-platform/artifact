@@ -28,8 +28,8 @@ import (
 type State struct {
 	Registry *artifactkit.Registry
 	Auth     artifactkit.Auth
-	// Hosted serves /pkgs/debian/hosted/... (self-published packages, no
-	// upstream, unsigned index for [trusted=yes] sources).
+	// Hosted serves self-published packages under the same repo key as the
+	// proxied archive (unsigned index for [trusted=yes] sources).
 	Hosted *artifactkit.HostedHandler
 }
 
@@ -49,32 +49,38 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 
 func init() { artifactkit.Register("debian", NewHandler) }
 
-// ServeHTTP dispatches /pkgs/debian/{distro}/<archive path> and
-// /pkgs/debian/hosted/<repo>/<pkg> (self-published).
+// ServeHTTP dispatches one repo key: a proxied archive (debian,
+// debian-security, ubuntu) or a self-published hosted repo. Hosted content
+// for the key wins; otherwise the request is proxied upstream.
 //
 // The egress proxy preserves the original host path, so an apt source of
 // "http://deb.debian.org/debian" arrives as /pkgs/debian/debian/dists/... —
-// the first segment is the archive key (debian | debian-security | ubuntu).
+// the first segment is the repository key.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	sub := strings.TrimPrefix(r.URL.Path, "/pkgs/debian/")
-	if strings.HasPrefix(sub, "hosted/") {
-		s.Hosted.ServeHTTP(w, r, sub, "/pkgs/debian/")
-		return
-	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	path := strings.Trim(sub, "/")
-	if path == "" {
+	sub := strings.Trim(strings.TrimPrefix(r.URL.Path, "/pkgs/debian/"), "/")
+	repo, rest, ok := artifactkit.SplitRepo(sub)
+	if !ok {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
-	archive, rest, ok := strings.Cut(path, "/")
-	if !ok || rest == "" {
-		artifactkit.Error(w, http.StatusNotFound, "archive required")
-		return
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		if s.Hosted.Get(w, r, repo, rest) {
+			return
+		}
+		s.proxy(w, r, repo, rest)
+	case http.MethodPut, http.MethodPost:
+		s.Hosted.Put(w, r, repo, rest)
+	case http.MethodDelete:
+		s.Hosted.Delete(w, r, repo, rest)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// proxy pulls a path through from the archive's upstream mirror.
+func (s *State) proxy(w http.ResponseWriter, r *http.Request, archive, rest string) {
+	path := archive + "/" + rest
 	base := upstreamFor(archive, rest)
 	if base == "" {
 		artifactkit.Error(w, http.StatusNotFound, "unknown archive: "+archive)

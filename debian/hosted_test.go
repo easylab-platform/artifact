@@ -42,7 +42,7 @@ func TestHostedUploadAndIndex(t *testing.T) {
 
 	// Upload.
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/pkgs/debian/hosted/easylab/easylab-worker_1.0.0_amd64.deb", bytes.NewReader(deb))
+	req := httptest.NewRequest(http.MethodPut, "/pkgs/debian/easylab/easylab-worker_1.0.0_amd64.deb", bytes.NewReader(deb))
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("upload: %d %s", rec.Code, rec.Body.String())
@@ -50,7 +50,7 @@ func TestHostedUploadAndIndex(t *testing.T) {
 
 	// Index.
 	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest(http.MethodGet, "/pkgs/debian/hosted/easylab/Packages", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/pkgs/debian/easylab/Packages", nil)
 	s.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("index: %d", rec2.Code)
@@ -68,7 +68,7 @@ func TestHostedUploadAndIndex(t *testing.T) {
 
 	// Download.
 	rec3 := httptest.NewRecorder()
-	req3 := httptest.NewRequest(http.MethodGet, "/pkgs/debian/hosted/easylab/easylab-worker_1.0.0_amd64.deb", nil)
+	req3 := httptest.NewRequest(http.MethodGet, "/pkgs/debian/easylab/easylab-worker_1.0.0_amd64.deb", nil)
 	s.ServeHTTP(rec3, req3)
 	if rec3.Code != http.StatusOK || !bytes.Equal(rec3.Body.Bytes(), deb) {
 		t.Fatalf("download: %d", rec3.Code)
@@ -76,12 +76,12 @@ func TestHostedUploadAndIndex(t *testing.T) {
 
 	// Delete then index empties.
 	rec4 := httptest.NewRecorder()
-	s.ServeHTTP(rec4, httptest.NewRequest(http.MethodDelete, "/pkgs/debian/hosted/easylab/easylab-worker_1.0.0_amd64.deb", nil))
+	s.ServeHTTP(rec4, httptest.NewRequest(http.MethodDelete, "/pkgs/debian/easylab/easylab-worker_1.0.0_amd64.deb", nil))
 	if rec4.Code != http.StatusNoContent {
 		t.Fatalf("delete: %d", rec4.Code)
 	}
 	rec5 := httptest.NewRecorder()
-	s.ServeHTTP(rec5, httptest.NewRequest(http.MethodGet, "/pkgs/debian/hosted/easylab/Packages", nil))
+	s.ServeHTTP(rec5, httptest.NewRequest(http.MethodGet, "/pkgs/debian/easylab/Packages", nil))
 	if strings.Contains(rec5.Body.String(), "easylab-worker") {
 		t.Fatalf("index after delete:\n%s", rec5.Body.String())
 	}

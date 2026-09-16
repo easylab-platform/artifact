@@ -52,47 +52,53 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 
 func init() { artifactkit.Register("conda", NewHandler) }
 
-// ServeHTTP dispatches /pkgs/conda/{channel}/{path}.
+// ServeHTTP dispatches one repo key: a proxied channel (pkgs/main,
+// conda-forge, ...) or a self-published hosted channel. Hosted content wins
+// for the key; otherwise the request is proxied upstream.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	sub := strings.TrimPrefix(r.URL.Path, "/pkgs/conda/")
-	sub = strings.TrimPrefix(sub, "conda/")
-	if strings.HasPrefix(sub, "hosted/") {
-		s.Hosted.ServeHTTP(w, r, sub, "/pkgs/conda/")
-		return
-	}
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	path := strings.Trim(sub, "/")
-	if path == "" {
+	sub := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/pkgs/conda/"), "conda/"), "/")
+	repo, rest, ok := artifactkit.SplitRepo(sub)
+	if !ok {
 		artifactkit.Error(w, http.StatusNotFound, "path required")
 		return
 	}
-	// The client's original path is preserved by the egress rewrite, so it
-	// already mirrors the upstream layout exactly:
-	//   repo.anaconda.com/pkgs/<channel>/<subdir>/repodata.json
-	//   conda.anaconda.org/<channel>/<subdir>/repodata.json
-	// The first segment is therefore part of the upstream path, not a repo
-	// key we rewrite. Use it only to pick the upstream base and cache group.
-	upstreamPath := path
-	channel := path
-	if i := strings.Index(path, "/"); i > 0 {
-		channel = path[:i]
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		if s.Hosted.Get(w, r, repo, rest) {
+			return
+		}
+		s.proxy(w, r, sub, repo, rest)
+	case http.MethodPut, http.MethodPost:
+		s.Hosted.Put(w, r, repo, rest)
+	case http.MethodDelete:
+		s.Hosted.Delete(w, r, repo, rest)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// proxy pulls a channel path through from its upstream. The client's original
+// path is preserved by the egress rewrite, so it already mirrors the upstream
+// layout exactly:
+//
+//	repo.anaconda.com/pkgs/<channel>/<subdir>/repodata.json
+//	conda.anaconda.org/<channel>/<subdir>/repodata.json
+//
+// path is the full format-relative path and channel its first segment.
+func (s *State) proxy(w http.ResponseWriter, r *http.Request, path, channel, rest string) {
 	base := s.upstreamFor(channel)
 	if base == "" {
 		artifactkit.Error(w, http.StatusNotFound, "unknown conda channel: "+channel)
 		return
 	}
 
-	repo := channel + "/" + subdirOf(path)
+	repo := channel + "/" + subdirOf(rest)
 	if art, err := s.Registry.Meta.Get(r.Context(), "conda", repo, path); err == nil && len(art.Blobs) > 0 {
 		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(path)) {
 			return
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "conda", base, "/"+upstreamPath)
+	fetched, err := s.Registry.Fetch(r.Context(), "conda", base, "/"+path)
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return

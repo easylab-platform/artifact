@@ -39,7 +39,7 @@ func TestHostedRepodata(t *testing.T) {
 	rpmBytes := []byte("fake-rpm-content")
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/pkgs/rpm/hosted/fedora41/mypkg-1.0-1.x86_64.rpm", bytes.NewReader(rpmBytes))
+	req := httptest.NewRequest(http.MethodPut, "/pkgs/rpm/fedora41/mypkg-1.0-1.x86_64.rpm", bytes.NewReader(rpmBytes))
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("upload: %d %s", rec.Code, rec.Body.String())
@@ -47,7 +47,7 @@ func TestHostedRepodata(t *testing.T) {
 
 	// repomd.xml.
 	rec2 := httptest.NewRecorder()
-	s.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/pkgs/rpm/hosted/fedora41/repodata/repomd.xml", nil))
+	s.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/pkgs/rpm/fedora41/repodata/repomd.xml", nil))
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("repomd: %d", rec2.Code)
 	}
@@ -68,7 +68,7 @@ func TestHostedRepodata(t *testing.T) {
 
 	// Fetch the primary referenced by repomd (must be regenerable).
 	rec3 := httptest.NewRecorder()
-	s.ServeHTTP(rec3, httptest.NewRequest(http.MethodGet, "/pkgs/rpm/hosted/fedora41/"+loc, nil))
+	s.ServeHTTP(rec3, httptest.NewRequest(http.MethodGet, "/pkgs/rpm/fedora41/"+loc, nil))
 	if rec3.Code != http.StatusOK {
 		t.Fatalf("primary: %d %s", rec3.Code, rec3.Body.String())
 	}
@@ -78,7 +78,7 @@ func TestHostedRepodata(t *testing.T) {
 
 	// Package download.
 	rec4 := httptest.NewRecorder()
-	s.ServeHTTP(rec4, httptest.NewRequest(http.MethodGet, "/pkgs/rpm/hosted/fedora41/mypkg-1.0-1.x86_64.rpm", nil))
+	s.ServeHTTP(rec4, httptest.NewRequest(http.MethodGet, "/pkgs/rpm/fedora41/mypkg-1.0-1.x86_64.rpm", nil))
 	if rec4.Code != http.StatusOK || !bytes.Equal(rec4.Body.Bytes(), rpmBytes) {
 		t.Fatalf("pkg download: %d", rec4.Code)
 	}
