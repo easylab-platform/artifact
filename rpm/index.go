@@ -35,7 +35,12 @@ func GenerateRepodata(store artifactkit.HostedStore) artifactkit.Generator {
 			if !strings.HasSuffix(f.Name, ".rpm") {
 				continue
 			}
-			name, ver, rel, arch := nvrArch(f.Name)
+			// Hosted names are "<arch>/<file>.rpm"; the NVR parses the base.
+			rel := f.Name
+			if i := strings.LastIndexByte(rel, '/'); i >= 0 {
+				rel = rel[i+1:]
+			}
+			name, ver, relv, arch := nvrArch(rel)
 			sum := sha256Hex(f.Digest)
 			pkgs = append(pkgs, fmt.Sprintf(`<package type="rpm">
 <name>%s</name>
@@ -56,7 +61,7 @@ func GenerateRepodata(store artifactkit.HostedStore) artifactkit.Generator {
 <rpm:sourcerpm></rpm:sourcerpm>
 <rpm:header-range start="0" end="0"/>
 </format>
-</package>`, name, arch, ver, rel, sum, name, name, nowUnix(), nowUnix(), f.Size, f.Size, f.Size, f.Name))
+</package>`, name, arch, ver, relv, sum, name, name, nowUnix(), nowUnix(), f.Size, f.Size, f.Size, f.Name))
 			count++
 		}
 		fmt.Fprintf(&primary, "%d\">", count)

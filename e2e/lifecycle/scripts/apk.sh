@@ -70,7 +70,8 @@ use_repo() {
 install_pkg() { # $1 = expected version
   use_repo
   apk update --allow-untrusted >/dev/null 2>&1
-  apk add --allow-untrusted "${PKG}" >/dev/null 2>&1
+  # --upgrade lets the v2 install replace a previously installed v1.
+  apk add --allow-untrusted --upgrade "${PKG}" >/dev/null 2>&1
   out="$("${PKG}" 2>&1 | tail -1)"
   echo "$out" | grep -q "$1" || { echo "apk: got '$out' want $1"; return 1; }
   echo "apk: ${PKG} $1 ok"
