@@ -17,6 +17,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -124,9 +125,9 @@ func main() {
 	// ARTIFACT_DEBUG=1 logs every request (method, path, framing, status) and
 	// is invaluable when a client's upload/download framing is in question.
 	debug := os.Getenv("ARTIFACT_DEBUG") != ""
-	var root http.Handler = mux
+	var root http.Handler = cleanPaths(mux)
 	if debug {
-		root = debugHandler(mux)
+		root = debugHandler(root)
 	}
 	srv := &http.Server{
 		Addr:              addr,
@@ -140,6 +141,29 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// cleanPaths canonicalizes the request path before routing. Go's ServeMux
+// already issues a 301 for paths that need cleaning, but clients such as apt
+// do not always follow that redirect for their per-line base URLs (they send
+// "/repo/./Packages" with a literal "." segment). Cleaning first keeps apt's
+// flat-repo requests on the same route as a normal fetch.
+func cleanPaths(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "" && strings.Contains(r.URL.Path, "/.") {
+			if u := *r.URL; true {
+				u.Path = path.Clean(u.Path)
+				if u.RawPath != "" {
+					u.RawPath = path.Clean(u.RawPath)
+				}
+				r2 := new(http.Request)
+				*r2 = *r
+				r2.URL = &u
+				r = r2
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // debugHandler logs each request's method, path, body framing and the

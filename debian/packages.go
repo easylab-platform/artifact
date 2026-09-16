@@ -1,6 +1,8 @@
 package debian
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"sort"
 	"strings"
@@ -49,10 +51,29 @@ func GeneratePackages(store artifactkit.HostedStore) artifactkit.Generator {
 			b.WriteString("SHA256: " + digestHex(f.Digest) + "\n")
 			b.WriteString("\n")
 		}
+		body := []byte(b.String())
+		gz, err := gzipBytes(body)
+		if err != nil {
+			return nil, err
+		}
 		return map[string]artifactkit.GeneratedFile{
-			"Packages": {Body: []byte(b.String()), ContentType: "text/plain"},
+			"Packages":    {Body: body, ContentType: "text/plain"},
+			"Packages.gz": {Body: gz, ContentType: "application/gzip"},
 		}, nil
 	}
+}
+
+// gzipBytes gzips a document (apt prefers Packages.gz over Packages).
+func gzipBytes(body []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(body); err != nil {
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // debControlFields extracts the control stanza of a hosted .deb.

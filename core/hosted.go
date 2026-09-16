@@ -220,7 +220,11 @@ func (h *HostedHandler) generate(ctx context.Context, repo string, names []strin
 		if !ok {
 			continue
 		}
-		files = append(files, HostedFile{Name: n, Digest: digest})
+		f := HostedFile{Name: n, Digest: digest}
+		if sz, err := h.Store.Registry.Blobs.Stat(ctx, digest); err == nil && sz != nil {
+			f.Size = *sz
+		}
+		files = append(files, f)
 	}
 	out, err := h.Generator(files)
 	if err != nil {

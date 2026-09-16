@@ -24,41 +24,64 @@ import (
 // clients install hosted packages with `apk add --allow-untrusted` (pull-
 // through packages keep the upstream APKINDEX and its original signature).
 //
-// Metadata (name/version/arch) is derived from the filename; the content
-// checksum (C:) is the real sha1 of the stored bytes.
+// Files are named "<arch>/<pkg>.apk" (the client appends "<arch>/
+// APKINDEX.tar.gz" to every repository URL), so one index is emitted per
+// arch subdirectory. Metadata (name/version) is derived from the filename;
+// the content checksum (C:) is the real sha1 of the stored bytes.
 func GenerateAPKINDEX(store artifactkit.HostedStore) artifactkit.Generator {
 	return func(files []artifactkit.HostedFile) (map[string]artifactkit.GeneratedFile, error) {
-		var index bytes.Buffer
+		indexes := map[string]*bytes.Buffer{}
 		for _, f := range files {
 			if !strings.HasSuffix(f.Name, ".apk") {
 				continue
 			}
-			name, version, arch := nameVersionArch(f.Name)
+			arch, rel := splitArch(f.Name)
+			buf := indexes[arch]
+			if buf == nil {
+				buf = &bytes.Buffer{}
+				indexes[arch] = buf
+			}
+			name, version, _ := nameVersionArch(rel)
 			data, err := readBlob(store, f.Digest)
 			if err != nil {
 				continue
 			}
 			sum := sha1.Sum(data)
 			cs := "Q1" + base64.StdEncoding.EncodeToString(sum[:])
-			fmt.Fprintf(&index, "C:%s\n", cs)
-			fmt.Fprintf(&index, "P:%s\n", name)
-			fmt.Fprintf(&index, "V:%s\n", version)
-			fmt.Fprintf(&index, "A:%s\n", arch)
-			fmt.Fprintf(&index, "S:%d\n", f.Size)
-			fmt.Fprintf(&index, "I:%d\n", f.Size)
-			fmt.Fprintf(&index, "T:hosted package %s\n", name)
-			fmt.Fprintf(&index, "o:%s\n", name)
-			fmt.Fprintf(&index, "t:%d\n", time.Now().UTC().Unix())
-			index.WriteString("\n")
+			fmt.Fprintf(buf, "C:%s\n", cs)
+			fmt.Fprintf(buf, "P:%s\n", name)
+			fmt.Fprintf(buf, "V:%s\n", version)
+			fmt.Fprintf(buf, "A:%s\n", arch)
+			fmt.Fprintf(buf, "S:%d\n", f.Size)
+			fmt.Fprintf(buf, "I:%d\n", f.Size)
+			fmt.Fprintf(buf, "T:hosted package %s\n", name)
+			fmt.Fprintf(buf, "o:%s\n", name)
+			fmt.Fprintf(buf, "t:%d\n", time.Now().UTC().Unix())
+			buf.WriteString("\n")
 		}
-		body, ct, err := tarGz("APKINDEX", index.Bytes())
-		if err != nil {
-			return nil, err
+		out := map[string]artifactkit.GeneratedFile{}
+		for arch, buf := range indexes {
+			body, ct, err := tarGz("APKINDEX", buf.Bytes())
+			if err != nil {
+				return nil, err
+			}
+			out[arch+"/APKINDEX.tar.gz"] = artifactkit.GeneratedFile{Body: body, ContentType: ct}
+			if len(indexes) == 1 {
+				// A flat repo URL (no arch) still resolves.
+				out["APKINDEX.tar.gz"] = artifactkit.GeneratedFile{Body: body, ContentType: ct}
+			}
 		}
-		return map[string]artifactkit.GeneratedFile{
-			"APKINDEX.tar.gz": {Body: body, ContentType: ct},
-		}, nil
+		return out, nil
 	}
+}
+
+// splitArch splits "<arch>/<file>" into its parts; a bare filename has arch
+// "noarch".
+func splitArch(name string) (arch, file string) {
+	if i := strings.IndexByte(name, '/'); i >= 0 {
+		return name[:i], name[i+1:]
+	}
+	return "noarch", name
 }
 
 // tarGz wraps content in a gzipped tar with a single member.
