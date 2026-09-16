@@ -445,6 +445,12 @@ func (s *State) replyOrProxy(w http.ResponseWriter, r *http.Request, local any, 
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write(body)
 			return
+		} else if st, ok := err.(*artifactkit.UpstreamStatusError); ok && st.Status == http.StatusNotFound {
+			// Propagate a genuine "not in the upstream" as 404: the conan
+			// client uses it to mean "no prebuilt binary — build locally",
+			// and treats a gateway error as fatal instead.
+			artifactkit.Error(w, http.StatusNotFound, "not found")
+			return
 		}
 	}
 	artifactkit.Error(w, http.StatusBadGateway, "upstream")

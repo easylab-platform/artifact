@@ -10,14 +10,22 @@ make_pkg() { # $1 = version
 name: ${NAME}
 description: lc probe
 version: $1
+homepage: https://easylab.invalid/lc
 environment:
   sdk: ^3.0.0
 EOF
   printf "const packageVersion = '%s';\n" "$1" > "$WORK/pkg/lib/${NAME}.dart"
+  echo "# lc probe" > "$WORK/pkg/README.md"
+  printf "## %s\n\n- probe\n" "$1" > "$WORK/pkg/CHANGELOG.md"
+  printf 'MIT License\n' > "$WORK/pkg/LICENSE"
 }
 
 publish_pkg() { # $1 = version
   make_pkg "$1"
+  # Without a token pub.dev publishing tries interactive Google OAuth; a
+  # stored secret token makes the client send a bearer token instead (the
+  # open registry ignores its value).
+  echo lc-token | dart pub token add https://pub.dev >/dev/null 2>&1
   cd "$WORK/pkg"
   dart pub publish --force >/dev/null
 }

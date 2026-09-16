@@ -11,7 +11,7 @@ export GEM_PATH="$GEM_HOME"
 
 build_and_push() { # $1 = version
   mkdir -p "$WORK/gem/lib"
-  cat > "$WORK/gem/lc_probe.gemspec" <<EOF
+  cat > "$WORK/gem/lc-probe-${SUFFIX}.gemspec" <<EOF
 Gem::Specification.new do |s|
   s.name = "lc-probe-${SUFFIX}"
   s.version = "$1"
@@ -24,7 +24,7 @@ EOF
   printf 'module LcProbe\n  VERSION = "%s".freeze\nend\n' "$1" > "$WORK/gem/lib/lc_probe_${SUFFIX}.rb"
   cd "$WORK/gem"
   gem build "lc-probe-${SUFFIX}.gemspec" >/dev/null
-  gem push "lc-probe-${SUFFIX}-$1.gem" --host https://rubygems.org >/dev/null
+  gem push "lc-probe-${SUFFIX}-$1.gem" --host https://rubygems.org -k rubygems_api_token >/dev/null
 }
 
 case "$STAGE" in
@@ -34,7 +34,7 @@ publish)
   ;;
 public)
   gem install thor -N >/dev/null
-  ruby -e 'require "thor"; puts "rubygems: public thor #{Thor::VERSION}"'
+  ruby -e 'require "thor"; Thor::Shell::Color.new.say("rubygems: public thor ok")'
   ;;
 private)
   gem install "lc-probe-${SUFFIX}" -v "$V1" -N >/dev/null
