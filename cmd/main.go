@@ -13,6 +13,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -147,15 +148,32 @@ func debugHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		lw := &logResponseWriter{ResponseWriter: w, status: 200}
+		var body counter
+		if r.Body != nil {
+			r.Body = &countingBody{ReadCloser: r.Body, n: &body}
+		}
 		next.ServeHTTP(lw, r)
 		cl := r.Header.Get("Content-Length")
 		if cl == "" {
 			cl = "-"
 		}
-		log.Printf("req %s %s cl=%s te=%q ct=%q -> %d (%s)",
+		log.Printf("req %s %s cl=%s te=%q ct=%q body=%d -> %d (%s)",
 			r.Method, r.URL.Path, cl, r.TransferEncoding, r.Header.Get("Content-Type"),
-			lw.status, time.Since(start).Round(time.Millisecond))
+			body.n, lw.status, time.Since(start).Round(time.Millisecond))
 	})
+}
+
+type counter struct{ n int64 }
+
+type countingBody struct {
+	io.ReadCloser
+	n *counter
+}
+
+func (b *countingBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	b.n.n += int64(n)
+	return n, err
 }
 
 type logResponseWriter struct {
