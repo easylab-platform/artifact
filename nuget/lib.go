@@ -282,6 +282,9 @@ func (s *State) deletePkg(w http.ResponseWriter, r *http.Request, id, ver string
 	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
 		return
 	}
+	// IDs are stored lowercased (see push); NuGet IDs are case-insensitive and
+	// the client DELETE carries whatever casing it was given.
+	id = lower(id)
 	if art, err := s.Registry.Meta.Get(r.Context(), "nuget", id, ver); err == nil {
 		for _, b := range art.Blobs {
 			artifactkit.LogMetaErr("blob delete", s.Registry.Blobs.Delete(r.Context(), b.Digest))

@@ -30,6 +30,8 @@ UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci})
 KEEP="${KEEP:-0}"
 
+source "${HERE}/rules.sh"
+
 pass=0; fail=0
 declare -a RESULTS
 
@@ -37,43 +39,6 @@ declare -a RESULTS
 #   match json | strip_prefix | add_prefix
 # The tool image is always ${TOOL_IMAGE_PREFIX}-<proto>:${TOOL_TAG}; the client
 # command is ./scripts/<proto>.sh.
-proto_row() {
-  case "$1" in
-    npm)         echo '["registry.npmjs.org", "*.npmjs.org"]||/pkgs/npm' ;;
-    pypi)        echo '["pypi.org", "files.pythonhosted.org"]||/pkgs/pypi' ;;
-    go)          echo '["proxy.golang.org", "sum.golang.org"]||/pkgs/go' ;;
-    cargo)       echo '["index.crates.io", "crates.io", "static.crates.io"]||/pkgs/cargo' ;;
-    maven)       echo '["repo.maven.apache.org"]|/maven2|/pkgs/maven' ;;
-    nuget)       echo '["api.nuget.org", "azuresearch-usnc.nuget.org"]||/pkgs/nuget' ;;
-    rubygems)    echo '["rubygems.org", "index.rubygems.org"]||/pkgs/rubygems' ;;
-    composer)    echo '["repo.packagist.org"]||/pkgs/composer' ;;
-    hex)         echo '["repo.hex.pm"]||/pkgs/hex' ;;
-    pub)         echo '["pub.dev"]||/pkgs/pub' ;;
-    helm)        echo '["charts.helm.sh"]|/stable|/pkgs/helm' ;;
-    conan)       echo '["center.conan.io", "center2.conan.io"]||/pkgs/conan' ;;
-    swift)       echo '["api.spm.swift.org"]||/pkgs/swift' ;;
-    conda)       echo '["repo.anaconda.com", "conda.anaconda.org"]||/pkgs/conda' ;;
-    nix)         echo '["cache.nixos.org"]||/pkgs/nix' ;;
-    huggingface) echo '["huggingface.co", "*.huggingface.co", "cdn-lfs.huggingface.co"]||/pkgs/huggingface' ;;
-    protobuf)    echo '["buf.build"]||/pkgs/protobuf' ;;
-    debian)      echo '["deb.debian.org", "security.debian.org", "archive.ubuntu.com", "security.ubuntu.com"]||/pkgs/debian' ;;
-    apk)         echo '["dl-cdn.alpinelinux.org"]||/pkgs/apk' ;;
-    rpm)         echo '["dl.fedoraproject.org"]||/pkgs/rpm' ;;
-    oci)         echo '["registry-1.docker.io", "docker.io", "production.cloudflare.docker.com"]||' ;;
-    *)           echo "" ;;
-  esac
-}
-
-parse_row() { # sets R_IMG R_MATCH R_STRIP R_ADD
-  IFS='|' read -r R_MATCH R_STRIP R_ADD <<<"$(proto_row "$1")"
-  # rpm/apk/nix use native Fedora/Alpine/Nix bases, independent of the debian
-  # variant, so they always use the default tag.
-  case "$1" in
-    rpm|apk|nix) R_IMG="${TOOL_IMAGE_PREFIX}-$1:latest" ;;
-    *)           R_IMG="${TOOL_IMAGE_PREFIX}-$1:${TOOL_TAG}" ;;
-  esac
-}
-
 cas_count() {
   kubectl exec -n "$NS" "deploy/artifact-$1" -- sh -c 'ls /data/blobs/sha256/*/* 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]'
 }
@@ -104,31 +69,6 @@ write_script_cm() {
   kubectl create configmap "${name}-script" -n "$NS" \
     --from-file="${p}.sh=${HERE}/scripts/${p}.sh" \
     --dry-run=client -o yaml | kubectl apply -n "$NS" -f - >/dev/null
-}
-
-write_rules_cm() {
-  local p="$1" name="pull-$1"
-  parse_row "$p"
-  {
-    echo "apiVersion: v1"
-    echo "kind: ConfigMap"
-    echo "metadata:"
-    echo "  name: ${name}-rules"
-    echo "data:"
-    echo "  rules.yaml: |"
-    echo "    rules:"
-    echo "      - match: ${R_MATCH}"
-    echo "        action: rewrite"
-    echo "        target: \"artifact-${p}.${NS}.svc.cluster.local:80\""
-    [ -n "$R_STRIP" ] && echo "        strip_prefix: \"${R_STRIP}\""
-    [ -n "$R_ADD" ] && echo "        add_prefix: \"${R_ADD}\""
-    # Optional extra rules (e.g. a tool that must bootstrap itself from pypi).
-    if [ -f "${HERE}/scripts/${p}.rules.yaml" ]; then
-      sed 's/^/      /' "${HERE}/scripts/${p}.rules.yaml"
-    fi
-    echo "    default: direct"
-    echo "    mitm_default: false"
-  } | kubectl apply -n "$NS" -f - >/dev/null
 }
 
 write_pod() {
@@ -196,7 +136,7 @@ YAML
 run_one() {
   local p="$1" name="pull-$1" before after growth out rc rewrites
   before="$(cas_count "$p")"
-  write_rules_cm "$p"
+  write_rules_cm pull "$p"
   write_script_cm "$p"
   kubectl delete pod -n "$NS" "$name" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1
   write_pod "$p"
