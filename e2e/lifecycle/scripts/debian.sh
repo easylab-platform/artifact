@@ -50,7 +50,7 @@ publish_deb() { # $1 = version
 }
 
 configure_repo() {
-  printf 'deb [trusted=yes] http://artifact-debian.temp.svc.cluster.local/pkgs/debian/%s ./\n' "$REPO" > "$SRC"
+  printf 'deb [trusted=yes] http://deb.debian.org/%s ./\n' "$REPO" > "$SRC"
 }
 
 install_pkg() { # $1 = expected version
@@ -62,7 +62,7 @@ install_pkg() { # $1 = expected version
     -o Dir::Etc::sourcelist="$SRC" -o Dir::Etc::sourceparts="-" \
     install -y --allow-unauthenticated --reinstall "${PKGDIR}" >/dev/null 2>&1
   out="$("$PKGDIR" 2>&1 | tail -1)"
-  echo "$out" | grep -q "$1" || { echo "debian: got '$out' want $1"; exit 1; }
+  echo "$out" | grep -q "$1" || { echo "debian: got '$out' want $1"; return 1; }
   echo "debian: ${PKGDIR} $1 ok"
 }
 
