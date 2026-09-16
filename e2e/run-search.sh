@@ -110,6 +110,11 @@ SH
       cat <<'SH'
 cp /etc/easyproxy/ca.crt /etc/pki/ca-trust/source/anchors/easylab.crt 2>/dev/null || true
 update-ca-trust 2>/dev/null || true
+# Fedora's default repos use metalink (mirrors.fedoraproject.org, not in the
+# spoof policy); pin the baseurl so the search is served by the mirror.
+rm -f /etc/yum.repos.d/*.repo
+printf '[main]\ninstall_weak_deps=False\nreleasever=44\n' > /etc/dnf/dnf.conf
+printf '[fedora]\nname=fedora\nbaseurl=https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/x86_64/os/\nenabled=1\ngpgcheck=0\noptional_metadata_types=primary\n' > /etc/yum.repos.d/fedora.repo
 out="$(dnf -q --refresh search jq 2>&1)" && echo "$out" | grep -q jq && echo "dnf search: ok"
 SH
       ;;
