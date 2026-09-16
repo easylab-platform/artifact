@@ -7,8 +7,8 @@ artifact Service. Success = the client's package manager installs/downloads a
 package through the proxy AND the sidecar logged >=1 `rewrite` connection
 (proving the request was not bypassed).
 
-Current status: **20/20 protocols PASS** (see the "Deviations" section for
-`nuget`, which is excluded by default for environment reasons).
+Current status: **21/21 protocols PASS** (see the "Deviations" section for
+hosts that are environment-sensitive).
 
 ## Layout
 - `deploy-protocol.sh` — one Deployment+Service per protocol (`artifact-<p>`);
@@ -39,6 +39,24 @@ KEEP=1 PROTOCOLS=cargo ./run.sh               # keep the pod for debugging
   connection is re-originated with its path mapped, not just the first).
 - artifact >= v0.1.14 (oci blob redirects, per-protocol routing fixes).
 
+## Lifecycle harness
+`../lifecycle/run.sh` walks five stages per protocol — publish (A) → public
+(B installs a well-known upstream package) → private (B installs A's package
+from clean caches) → upgrade (A publishes v2, B consumes it) → delete — with
+the protocol's REAL client, through the same spoofed sidecar. A and B are
+separate processes with isolated HOMEs/caches in one pod.
+
+- Hosted families (**debian/apk/rpm/conda**) publish into a self-published
+  repo served by the adapter itself (`/pkgs/<format>/<repo>/...`, no `/hosted`
+  segment) and install it with apt/apk/dnf/conda.
+- **cargo**, **rubygems**, **pub** treat delete as yank/retract (no
+  unpublish in the client).
+- Pipelines that need a network bootstrap (composer twine, helm cm-push,
+  abuild, rpmbuild, hex archive) install their tooling from the mirror
+  first; helm's cm-push plugin is baked into the tool image.
+
+Current status: **18/18 protocols PASS** all five stages.
+
 ## Notes / gotchas
 - Tools whose TLS trust store is not file-env driven need the CA imported
   explicitly: `maven` (keytool + JAVA_TOOL_OPTIONS), `hex` (HEX_CACERTS_PATH),
@@ -50,11 +68,10 @@ KEEP=1 PROTOCOLS=cargo ./run.sh               # keep the pod for debugging
   npm) are the reason the proxy rewrites every request, not just the first.
 
 ## Deviations
-- **nuget** (`mcr.microsoft.com/dotnet/sdk`) is excluded from the default
-  list: its layers come off a Southeast-Asia Azure CDN that this cluster's
-  egress reaches at ~80KB/s, so the ~18MB layer pull times out. It uses the
-  same HTTP pull-through path as every other protocol; run it explicitly where
-  the CDN is fast.
+- **nuget**: its layers come off a Southeast-Asia Azure CDN that this cluster's
+  egress reaches slowly, so the ~18MB layer pull can time out. It uses the same
+  HTTP pull-through path as every other protocol and passes when the CDN is
+  fast.
 - **swift**: SwiftPM has NO public registry upstream (`api.spm.swift.org` and
   `packages.swift.org` are NXDOMAIN as of 2026-09); its normal resolution path
   is a git clone from GitHub. The script therefore exercises the adapter's
