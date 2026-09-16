@@ -60,15 +60,17 @@ write_rules_cm() {
     echo "data:"
     echo "  rules.yaml: |"
     echo "    rules:"
+    # Extras first (first match wins), then the main rewrite rule. A
+    # bare-suffix main rule (e.g. "hex.pm") also matches subdomains
+    # (builds.hex.pm), so direct carve-outs must precede it.
+    if [ -f "${RULES_DIR}/scripts/${p}.rules.yaml" ]; then
+      sed 's/^/      /' "${RULES_DIR}/scripts/${p}.rules.yaml"
+    fi
     echo "      - match: ${R_MATCH}"
     echo "        action: rewrite"
     echo "        target: \"artifact-${p}.${NS}.svc.cluster.local:80\""
     [ -n "$R_STRIP" ] && echo "        strip_prefix: \"${R_STRIP}\""
     [ -n "$R_ADD" ] && echo "        add_prefix: \"${R_ADD}\""
-    # Optional extra rules (e.g. a tool that must bootstrap itself from pypi).
-    if [ -f "${RULES_DIR}/scripts/${p}.rules.yaml" ]; then
-      sed 's/^/      /' "${RULES_DIR}/scripts/${p}.rules.yaml"
-    fi
     echo "    default: direct"
     echo "    mitm_default: false"
   } | kubectl apply -n "$NS" -f - >/dev/null

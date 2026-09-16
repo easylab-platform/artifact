@@ -26,3 +26,4 @@ php|8.4.23|php-8.4.23-cli-linux-x86_64.tar.gz|https://dl.static-php.dev/static-p
 hex-archive|2.5.1|hex-2.5.1-otp-29.ez|LOCAL:/tmp/hex-2.5.1-otp-29.ez
 php-src|8.5.10|php-8.5.10.tar.gz|LOCAL:/tmp/php-8.5.10.tar.gz
 swift|6.4.0-debian13|swift-6.4.0-RELEASE-debian13.tar.gz|LOCAL:/tmp/swift-6.4.0-RELEASE-debian13.tar.gz
+hex-archive|2.5.1|registry-public-key.pem|LOCAL:/tmp/hexreg.pub

@@ -8,5 +8,6 @@ RUN curl -fsSL -o /tmp/otp.tar.gz "${EASYLAB}/pkgs/generic/otp/29.0.6/OTP-29.0.6
  && curl -fsSL -o /tmp/elixir.zip "${EASYLAB}/pkgs/generic/elixir/1.20.4/elixir-v1.20.4-otp-29.zip" \
  && mkdir -p /opt/elixir && unzip -q /tmp/elixir.zip -d /opt/elixir && rm /tmp/elixir.zip \
  && mkdir -p /opt/hex-archive \
- && curl -fsSL -o /opt/hex-archive/hex.ez "${EASYLAB}/pkgs/generic/hex-archive/2.5.1/hex-2.5.1-otp-29.ez"
+ && curl -fsSL -o /opt/hex-archive/hex.ez "${EASYLAB}/pkgs/generic/hex-archive/2.5.1/hex-2.5.1-otp-29.ez" \
+ && curl -fsSL -o /opt/registry-pub.pem "${EASYLAB}/pkgs/generic/hex-archive/2.5.1/registry-public-key.pem"
 ENV PATH=/opt/erlang/bin:/opt/elixir/bin:$PATH

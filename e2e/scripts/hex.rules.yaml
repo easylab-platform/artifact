@@ -1,0 +1,5 @@
+# builds.hex.pm (hex.pm's CDN) must be classified BEFORE the bare-suffix
+# "hex.pm" rule: bare-suffix matching also matches subdomains, so a trailing
+# direct rule would never be reached.
+- match: ["builds.hex.pm"]
+  action: direct

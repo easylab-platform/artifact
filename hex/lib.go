@@ -43,9 +43,13 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path = strings.TrimPrefix(path, "/hex")
 	path = strings.Trim(path, "/")
 
-	// Optional {repo}/ prefix before the standard routes.
+	// Optional {repo}/ prefix before the standard routes. The API host
+	// (hex.pm) serves everything under "api/" — strip that too, so
+	// api/packages/<n>/releases/<v> and packages/<n>/releases/<v> are the
+	// same routes.
 	trimmed := strings.TrimPrefix(path, "hexpm/")
 	trimmed = strings.TrimPrefix(trimmed, "registry/")
+	trimmed = strings.TrimPrefix(trimmed, "api/")
 
 	switch {
 	case trimmed == "public_key" || strings.HasSuffix(trimmed, "/public_key"):
@@ -75,7 +79,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusMethodNotAllowed)
-	case trimmed == "users/me" || trimmed == "api/users/me":
+	case trimmed == "users/me":
 		// `mix hex.publish` probes the authenticated user before publishing;
 		// it maps the "organizations" key of this response (absent key =>
 		// crash), so it must always be present.
