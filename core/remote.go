@@ -131,36 +131,57 @@ func (r *Remote) Get(ctx context.Context, path string) (*http.Response, error) {
 	return r.client.Do(req)
 }
 
-// GetBytes GETs and errors on non-2xx, returning the body bytes. A transient
-// failure — transport error or a 502/503/504 (egress proxies often surface
-// upstream blips that way) — is retried once: these are idempotent index/file
-// GETs, and a single retry removes most e2e flake from a shared proxy hop.
+// GetBytes GETs and errors on non-2xx, returning the body bytes. Transient
+// failures — transport errors or 502/503/504 responses (an egress proxy often
+// surfaces upstream blips that way) — are retried: these are idempotent
+// index/file GETs, and short backoff rides out multi-second proxy flaps.
 func (r *Remote) GetBytes(ctx context.Context, path string) ([]byte, error) {
-	resp, err := r.Get(ctx, path)
-	if err == nil && (resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504) {
-		_ = resp.Body.Close()
-		err = &UpstreamStatusError{Path: path, Status: resp.StatusCode}
-		resp = nil
-	}
+	resp, err := r.getStable(ctx, path)
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, err
-		}
-		select {
-		case <-ctx.Done():
-			return nil, err
-		case <-time.After(500 * time.Millisecond):
-		}
-		resp, err = r.Get(ctx, path)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, &UpstreamStatusError{Path: path, Status: resp.StatusCode}
 	}
 	return io.ReadAll(resp.Body)
+}
+
+// retryBackoff spaces the retries in getStable (a flap usually clears within
+// a couple of seconds).
+var retryBackoff = []time.Duration{500 * time.Millisecond, 1500 * time.Millisecond}
+
+// getStable performs a GET, retrying transport errors and 502/503/504
+// (classic egress-proxy hiccup codes) with backoff. Redirects and other
+// statuses are returned as-is on the first response.
+func (r *Remote) getStable(ctx context.Context, path string) (*http.Response, error) {
+	resp, err := r.Get(ctx, path)
+	for _, wait := range retryBackoff {
+		if err == nil && resp.StatusCode != 502 && resp.StatusCode != 503 && resp.StatusCode != 504 {
+			return resp, nil
+		}
+		code := 0
+		if resp != nil {
+			code = resp.StatusCode
+			_ = resp.Body.Close()
+		}
+		if ctx.Err() != nil {
+			if code == 0 {
+				return nil, err
+			}
+			return nil, &UpstreamStatusError{Path: path, Status: code}
+		}
+		select {
+		case <-ctx.Done():
+			if code == 0 {
+				return nil, err
+			}
+			return nil, &UpstreamStatusError{Path: path, Status: code}
+		case <-time.After(wait):
+		}
+		resp, err = r.Get(ctx, path)
+	}
+	return resp, err
 }
 
 // GetCached GETs through a TTL cache keyed by absolute URL (for small index
@@ -200,26 +221,9 @@ func (r *Registry) Fetch(ctx context.Context, format, upstreamBase, path string)
 	if err != nil {
 		return Fetched{}, err
 	}
-	resp, err := remote.Get(ctx, path)
-	if err == nil && (resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504) {
-		// Egress-proxy blip: worth one retry before surfacing to the client.
-		code := resp.StatusCode
-		_ = resp.Body.Close()
-		resp, err = nil, &UpstreamStatusError{Path: path, Status: code}
-	}
+	resp, err := remote.getStable(ctx, path)
 	if err != nil {
-		if ctx.Err() != nil {
-			return Fetched{}, fmt.Errorf("http: %w", err)
-		}
-		select {
-		case <-ctx.Done():
-			return Fetched{}, fmt.Errorf("http: %w", err)
-		case <-time.After(500 * time.Millisecond):
-		}
-		resp, err = remote.Get(ctx, path)
-		if err != nil {
-			return Fetched{}, fmt.Errorf("http: %w", err)
-		}
+		return Fetched{}, fmt.Errorf("http: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
