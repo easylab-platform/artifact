@@ -19,7 +19,7 @@ proto_row() {
     nuget)       echo '["api.nuget.org", "azuresearch-usnc.nuget.org"]||/pkgs/nuget' ;;
     rubygems)    echo '["rubygems.org", "index.rubygems.org"]||/pkgs/rubygems' ;;
     composer)    echo '["repo.packagist.org"]||/pkgs/composer' ;;
-    hex)         echo '["repo.hex.pm"]||/pkgs/hex' ;;
+    hex)         echo '["repo.hex.pm", "hex.pm", "api.hex.pm"]||/pkgs/hex' ;;
     pub)         echo '["pub.dev"]||/pkgs/pub' ;;
     helm)        echo '["charts.helm.sh"]|/stable|/pkgs/helm' ;;
     conan)       echo '["center.conan.io", "center2.conan.io"]||/pkgs/conan' ;;

@@ -75,6 +75,13 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusMethodNotAllowed)
+	case trimmed == "users/me":
+		// `mix hex.publish` probes the authenticated user before publishing.
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"username": "lc", "email": "lc@easylab.invalid", "inserted_at": "2024-01-01T00:00:00Z"})
+	case trimmed == "organizations" || strings.HasPrefix(trimmed, "organizations/"):
+		// The publish task lists the user's organizations to offer
+		// organization ownership; an empty list keeps the public flow.
+		artifactkit.JSON(w, http.StatusOK, []any{})
 	case strings.HasPrefix(trimmed, "tarballs/"):
 		s.tarball(w, r, strings.TrimPrefix(trimmed, "tarballs/"))
 	default:
