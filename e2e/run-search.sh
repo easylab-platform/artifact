@@ -33,6 +33,20 @@ search_cmd() {
   case "$1" in
     npm)
       cat <<'SH'
+# HTTP/2 through the MITM'd sidecar: gRPC/Connect clients need h2 ALPN.
+node -e '
+const http2=require("http2");
+const c=http2.connect("https://registry.npmjs.org");
+c.on("connect",s=>{
+  if(s.alpnProtocol!=="h2"){console.error("alpn",s.alpnProtocol);process.exit(1)}
+  const r=c.request({":path":"/left-pad",":method":"GET"});
+  r.on("response",h=>{console.log("npm h2: status",h[":status"]);process.exit(h[":status"]===200?0:1)});
+  r.on("error",e=>{console.error(e.message);process.exit(1)});
+  r.end();
+});
+c.on("error",e=>{console.error(e.message);process.exit(1)});
+setTimeout(()=>{console.error("h2 timeout");process.exit(1)},10000);
+'
 cd /tmp && npm search express --no-audit --no-fund --json 2>/dev/null \
   | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const o=JSON.parse(d);if(!o.length)process.exit(1);console.log("npm search:",o.length,"hits, first",o[0].name)})'
 SH
