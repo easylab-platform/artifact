@@ -201,8 +201,25 @@ func (r *Registry) Fetch(ctx context.Context, format, upstreamBase, path string)
 		return Fetched{}, err
 	}
 	resp, err := remote.Get(ctx, path)
+	if err == nil && (resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504) {
+		// Egress-proxy blip: worth one retry before surfacing to the client.
+		code := resp.StatusCode
+		_ = resp.Body.Close()
+		resp, err = nil, &UpstreamStatusError{Path: path, Status: code}
+	}
 	if err != nil {
-		return Fetched{}, fmt.Errorf("http: %w", err)
+		if ctx.Err() != nil {
+			return Fetched{}, fmt.Errorf("http: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return Fetched{}, fmt.Errorf("http: %w", err)
+		case <-time.After(500 * time.Millisecond):
+		}
+		resp, err = remote.Get(ctx, path)
+		if err != nil {
+			return Fetched{}, fmt.Errorf("http: %w", err)
+		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
