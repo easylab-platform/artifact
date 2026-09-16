@@ -157,9 +157,10 @@ func debugHandler(next http.Handler) http.Handler {
 		if cl == "" {
 			cl = "-"
 		}
-		log.Printf("req %s %s cl=%s te=%q ct=%q body=%d -> %d (%s)",
+		log.Printf("req %s %s cl=%s te=%q ct=%q body=%d dedic=%q sha1=%q -> %d (%s)",
 			r.Method, r.URL.Path, cl, r.TransferEncoding, r.Header.Get("Content-Type"),
-			body.n, lw.status, time.Since(start).Round(time.Millisecond))
+			body.n, r.Header.Get("X-Checksum-Deploy"), r.Header.Get("X-Checksum-Sha1"),
+			lw.status, time.Since(start).Round(time.Millisecond))
 	})
 }
 
