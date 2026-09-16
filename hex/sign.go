@@ -4,7 +4,7 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/x509"
 	"encoding/pem"
 )
@@ -60,13 +60,14 @@ func init() {
 	}
 }
 
-// signPayload signs with RSA SHA-256 PKCS#1 v1.5 (what the hex registry uses).
+// signPayload signs with RSA SHA-512 PKCS#1 v1.5 (mix_hex_registry verifies
+// with :public_key.verify(..., :sha512, ...)).
 func signPayload(payload []byte) ([]byte, error) {
 	if staticPrivateKey == nil {
 		return nil, errNoKey
 	}
-	digest := sha256.Sum256(payload)
-	return rsa.SignPKCS1v15(rand.Reader, staticPrivateKey, crypto.SHA256, digest[:])
+	digest := sha512.Sum512(payload)
+	return rsa.SignPKCS1v15(rand.Reader, staticPrivateKey, crypto.SHA512, digest[:])
 }
 
 type hexError string
