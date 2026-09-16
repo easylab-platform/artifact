@@ -4,14 +4,52 @@
 # never traverse another protocol's sidecar). The Service name is artifact-<p>.
 set -euo pipefail
 NS="${NS:-temp}"
-IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:v0.1.15}"
+IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:v0.1.16}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci})
+
+# ORIGIN=1 mounts each adapter in "upstream origin" mode (--self-base-raw):
+# self URLs take the upstream shape (registry.npmjs.org/left-pad/-/x.tgz,
+# pypi.org/simple/...) so a spoofing sidecar maps them back with add_prefix.
+# The origins must match the hostnames in run.sh's proto_row rules.
+proto_origin() {
+  case "$1" in
+    npm)         echo "https://registry.npmjs.org" ;;
+    pypi)        echo "https://pypi.org" ;;
+    go)          echo "https://proxy.golang.org" ;;
+    cargo)       echo "https://index.crates.io" ;;
+    maven)       echo "https://repo.maven.apache.org/maven2" ;;
+    nuget)       echo "https://api.nuget.org" ;;
+    rubygems)    echo "https://rubygems.org" ;;
+    composer)    echo "https://repo.packagist.org" ;;
+    hex)         echo "https://repo.hex.pm" ;;
+    pub)         echo "https://pub.dev" ;;
+    helm)        echo "https://charts.helm.sh" ;;
+    conan)       echo "https://center2.conan.io" ;;
+    swift)       echo "https://api.spm.swift.org" ;;
+    conda)       echo "https://repo.anaconda.com" ;;
+    nix)         echo "https://cache.nixos.org" ;;
+    huggingface) echo "https://huggingface.co" ;;
+    protobuf)    echo "https://buf.build" ;;
+    debian)      echo "http://deb.debian.org" ;;
+    apk)         echo "http://dl-cdn.alpinelinux.org" ;;
+    rpm)         echo "https://dl.fedoraproject.org" ;;
+    oci)         echo "https://registry-1.docker.io" ;;
+    *)           echo "" ;;
+  esac
+}
+
+ORIGIN="${ORIGIN:-1}"
 
 for p in "${PROTOCOLS[@]}"; do
   name="artifact-${p}"
   extra=""
   extra_args=""
+  self_base="http://${name}.${NS}.svc.cluster.local"
+  if [ "$ORIGIN" = "1" ] && [ -n "$(proto_origin "$p")" ]; then
+    self_base="$(proto_origin "$p")"
+    extra_args="${extra_args}, \"--self-base-raw\""
+  fi
   if [ "$p" = "oci" ]; then
     extra=$'        - name: ARTIFACT_MAX_BODY\n          value: "34359738368"\n'
   fi
@@ -20,7 +58,7 @@ for p in "${PROTOCOLS[@]}"; do
     # linux/releases/40/Everything/x86_64/os/; the proxy preserves that path,
     # and the rpm adapter treats the first segment ("pub") as the repo key and
     # fetches "<base>/<rest>", so the base is .../pub.
-    extra_args=', "--upstreams=rpm=https://dl.fedoraproject.org/pub"'
+    extra_args="${extra_args}, \"--upstreams=rpm=https://dl.fedoraproject.org/pub\""
   fi
   cat <<YAML | kubectl apply -n "${NS}" -f -
 apiVersion: apps/v1
@@ -38,7 +76,7 @@ spec:
       containers:
       - name: artifact
         image: ${IMAGE}
-        args: ["--listen=:8080", "--data=/data", "--protocols=${p}", "--self-base=http://${name}.${NS}.svc.cluster.local"$extra_args]
+        args: ["--listen=:8080", "--data=/data", "--protocols=${p}", "--self-base=${self_base}"${extra_args}]
         ports: [{ name: http, containerPort: 8080 }]
         resources:
           requests: { cpu: 50m, memory: 64Mi }

@@ -131,11 +131,30 @@ func (r *Remote) Get(ctx context.Context, path string) (*http.Response, error) {
 	return r.client.Do(req)
 }
 
-// GetBytes GETs and errors on non-2xx, returning the body bytes.
+// GetBytes GETs and errors on non-2xx, returning the body bytes. A transient
+// failure — transport error or a 502/503/504 (egress proxies often surface
+// upstream blips that way) — is retried once: these are idempotent index/file
+// GETs, and a single retry removes most e2e flake from a shared proxy hop.
 func (r *Remote) GetBytes(ctx context.Context, path string) ([]byte, error) {
 	resp, err := r.Get(ctx, path)
+	if err == nil && (resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504) {
+		_ = resp.Body.Close()
+		err = &UpstreamStatusError{Path: path, Status: resp.StatusCode}
+		resp = nil
+	}
 	if err != nil {
-		return nil, err
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(500 * time.Millisecond):
+		}
+		resp, err = r.Get(ctx, path)
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
