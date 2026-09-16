@@ -60,9 +60,9 @@ X
     if composer install --no-interaction --no-progress >/dev/null 2>&1; then ok=1; break; fi
     sleep 2
   done
-  [ "$ok" = "1" ] || { echo "composer: install ${PKG}@$1 failed"; exit 1; }
+  [ "$ok" = "1" ] || { echo "composer: install ${PKG}@$1 failed"; return 1; }
   got="$(php -r 'require "vendor/autoload.php"; echo \Easylab\LcProbe\Probe::VERSION;')"
-  [ "$got" = "$2" ] || { echo "composer: got $got want $2"; exit 1; }
+  [ "$got" = "$2" ] || { echo "composer: got $got want $2"; return 1; }
   echo "composer: ${PKG} $got ok"
 }
 

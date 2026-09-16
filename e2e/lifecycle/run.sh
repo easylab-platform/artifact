@@ -29,7 +29,7 @@ CA_SECRET="${CA_SECRET:-artifact-e2e-ca}"
 UPSTREAM_DNS="${UPSTREAM_DNS:-172.18.0.10}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 # Real-client protocols first; extend the list as stage scripts are added.
-PROTOCOLS=(${PROTOCOLS:-npm pypi cargo maven nuget rubygems pub conan oci hex swift})
+PROTOCOLS=(${PROTOCOLS:-npm pypi cargo maven nuget rubygems pub conan oci hex swift helm composer})
 KEEP="${KEEP:-0}"
 V1="${V1:-1.0.0}"
 V2="${V2:-2.0.0}"
