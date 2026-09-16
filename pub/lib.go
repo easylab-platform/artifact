@@ -155,24 +155,68 @@ func (s *State) pkgMetadata(w http.ResponseWriter, r *http.Request, name string)
 	if latest == "" && len(versions) > 0 {
 		latest = versions[len(versions)-1]
 	}
-	var vs []any
-	for _, v := range versions {
+	// Upstream metadata (when reachable) is the authoritative source for each
+	// version's pubspec: the synthesized entry below omits dependencies, which
+	// makes the client mis-resolve transitive packages. Merge upstream entries
+	// for versions we have locally; only synthesize what upstream lacks.
+	upstream := map[string]map[string]any{}
+	if remote, err := s.Registry.Remote("pub", ""); err == nil {
+		if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/api/packages/"+artifactkit.URLencode(name)); err == nil {
+			var doc struct {
+				Versions []map[string]any `json:"versions"`
+			}
+			if json.Unmarshal([]byte(body), &doc) == nil {
+				for _, v := range doc.Versions {
+					if ver, _ := v["version"].(string); ver != "" {
+						upstream[ver] = v
+					}
+				}
+			}
+		}
+	}
+	synth := func(v string) map[string]any {
 		sha := ""
 		if art, err := s.Registry.Meta.Get(r.Context(), "pub", name, v); err == nil && len(art.Blobs) > 0 {
 			sha = art.Blobs[0].Hex()
 		}
-		vs = append(vs, map[string]any{
+		return map[string]any{
 			"version": v, "pubspec": map[string]any{"name": name, "version": v, "environment": map[string]any{"sdk": ">=3.0.0 <4.0.0"}},
 			"archive_url": base + "/packages/" + artifactkit.URLencode(name) + "/" + v + ".tar.gz", "archive_sha256": sha,
-		})
+		}
 	}
-	latestSHA := ""
-	if art, err := s.Registry.Meta.Get(r.Context(), "pub", name, latest); err == nil && len(art.Blobs) > 0 {
-		latestSHA = art.Blobs[0].Hex()
+	var vs []any
+	for _, v := range versions {
+		if up, ok := upstream[v]; ok {
+			cp := map[string]any{}
+			for k, val := range up {
+				cp[k] = val
+			}
+			// Point the archive at this registry (the client must not fetch
+			// the origin directly).
+			cp["archive_url"] = base + "/packages/" + artifactkit.URLencode(name) + "/" + v + ".tar.gz"
+			if art, err := s.Registry.Meta.Get(r.Context(), "pub", name, v); err == nil && len(art.Blobs) > 0 {
+				cp["archive_sha256"] = art.Blobs[0].Hex()
+			}
+			vs = append(vs, cp)
+			continue
+		}
+		vs = append(vs, synth(v))
+	}
+	latestEntry := synth(latest)
+	if up, ok := upstream[latest]; ok {
+		cp := map[string]any{}
+		for k, val := range up {
+			cp[k] = val
+		}
+		cp["archive_url"] = base + "/packages/" + artifactkit.URLencode(name) + "/" + latest + ".tar.gz"
+		if art, err := s.Registry.Meta.Get(r.Context(), "pub", name, latest); err == nil && len(art.Blobs) > 0 {
+			cp["archive_sha256"] = art.Blobs[0].Hex()
+		}
+		latestEntry = cp
 	}
 	artifactkit.JSON(w, http.StatusOK, map[string]any{
 		"name":     name,
-		"latest":   map[string]any{"version": latest, "archive_url": base + "/packages/" + artifactkit.URLencode(name) + "/" + latest + ".tar.gz", "archive_sha256": latestSHA, "pubspec": map[string]any{"name": name, "version": latest, "environment": map[string]any{"sdk": ">=3.0.0 <4.0.0"}}},
+		"latest":   latestEntry,
 		"versions": vs,
 	})
 }
