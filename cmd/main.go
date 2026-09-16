@@ -245,11 +245,13 @@ func defaultUpstreams(airGap bool) *artifactkit.Upstreams {
 			// served from index.crates.io / static.crates.io).
 			"cargo.index":        "https://index.crates.io",
 			"cargo.static":       "https://static.crates.io/crates",
+			"composer.search":    "https://packagist.org",
 			"conan.center":       "https://center2.conan.io",
 			"go.sumdb":           "https://sum.golang.org",
 			"nuget.search":       "https://azuresearch-usnc.nuget.org",
 			"nuget.registration": "https://api.nuget.org",
 			"hex.repo":           "https://repo.hex.pm",
+			"hex.api":            "https://hex.pm",
 			"rubygems.index":     "https://index.rubygems.org",
 			"rubygems.gems":      "https://rubygems.org/gems",
 		},

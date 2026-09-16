@@ -327,9 +327,9 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 		})
 		seen[name] = true
 	}
-	if base := s.Registry.Upstreams.Get("hex"); base != "" {
+	if base := s.Registry.Upstreams.Sub("hex", "api"); base != "" {
 		remote := s.Registry.RemoteAt(base)
-		p := "/packages"
+		p := "/api/packages"
 		if raw := r.URL.RawQuery; raw != "" {
 			p += "?" + raw
 		}

@@ -48,10 +48,16 @@ parse_row() { # sets R_IMG R_MATCH R_STRIP R_ADD
 
 # write_rules_cm <name-prefix> <proto> writes ConfigMap <name-prefix>-<proto>-rules
 # into NS, mapping the protocol's upstream hostnames onto artifact-<proto>.
+# UNIFIED_SVC, when set, makes every rule target that one Service instead (the
+# unified-mount topology: only the add_prefix differs between rules).
 write_rules_cm() {
   local p="$2" prefix="$1"
   local name="${prefix}-$2"
   parse_row "$p"
+  local target="artifact-${p}.${NS}.svc.cluster.local:80"
+  if [ -n "${UNIFIED_SVC:-}" ]; then
+    target="${UNIFIED_SVC}.${NS}.svc.cluster.local:80"
+  fi
   {
     echo "apiVersion: v1"
     echo "kind: ConfigMap"
@@ -68,7 +74,7 @@ write_rules_cm() {
     fi
     echo "      - match: ${R_MATCH}"
     echo "        action: rewrite"
-    echo "        target: \"artifact-${p}.${NS}.svc.cluster.local:80\""
+    echo "        target: \"${target}\""
     [ -n "$R_STRIP" ] && echo "        strip_prefix: \"${R_STRIP}\""
     [ -n "$R_ADD" ] && echo "        add_prefix: \"${R_ADD}\""
     echo "    default: direct"

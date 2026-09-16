@@ -39,8 +39,14 @@ declare -a RESULTS
 #   match json | strip_prefix | add_prefix
 # The tool image is always ${TOOL_IMAGE_PREFIX}-<proto>:${TOOL_TAG}; the client
 # command is ./scripts/<proto>.sh.
+#
+# UNIFIED_SVC=<name> points every sidecar rule at one Service (see
+# deploy-unified.sh) instead of the per-protocol artifact-<p>; the matrix then
+# proves the unified-mount topology is transparent.
 cas_count() {
-  kubectl exec -n "$NS" "deploy/artifact-$1" -- sh -c 'ls /data/blobs/sha256/*/* 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]'
+  local dep="deploy/artifact-$1"
+  [ -n "${UNIFIED_SVC:-}" ] && dep="deploy/${UNIFIED_SVC}"
+  kubectl exec -n "$NS" "$dep" -- sh -c 'ls /data/blobs/sha256/*/* 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]'
 }
 
 # rewrite_count prints how many rewrite connections the sidecar has logged for

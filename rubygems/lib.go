@@ -98,8 +98,31 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) names(w http.ResponseWriter, r *http.Request) {
+	// The compact index's /names lists every gem; `gem search` reads it, so a
+	// local-only list would hide the whole public registry. Merge the upstream
+	// names (cached) beneath the local ones.
 	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "rubygems")
-	artifactkit.Text(w, http.StatusOK, strings.Join(repos, "\n"), "text/plain")
+	seen := map[string]bool{}
+	var names []string
+	for _, n := range repos {
+		if !seen[n] {
+			names = append(names, n)
+			seen[n] = true
+		}
+	}
+	if base := s.Registry.Upstreams.Sub("rubygems", "index"); base != "" {
+		remote := s.Registry.RemoteAt(base)
+		if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/names"); err == nil {
+			for _, line := range strings.Split(body, "\n") {
+				line = strings.TrimSpace(line)
+				if line != "" && !seen[line] {
+					names = append(names, line)
+					seen[line] = true
+				}
+			}
+		}
+	}
+	artifactkit.Text(w, http.StatusOK, strings.Join(names, "\n"), "text/plain")
 }
 
 func (s *State) versionsAPI(w http.ResponseWriter, r *http.Request, name string) {

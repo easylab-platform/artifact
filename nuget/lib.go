@@ -53,9 +53,9 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/v3/index.json":
 		s.serviceIndex(w, r)
-	case path == "/v3/query":
+	case strings.HasPrefix(path, "/v3/query"):
 		s.search(w, r)
-	case path == "/v3/autocomplete":
+	case strings.HasPrefix(path, "/v3/autocomplete"):
 		s.autocomplete(w, r)
 	case strings.HasPrefix(path, "/v3/registration/") && strings.HasSuffix(path, "/index.json"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/v3/registration/"), "/index.json")
@@ -109,8 +109,14 @@ func (s *State) serviceIndex(w http.ResponseWriter, r *http.Request) {
 	artifactkit.JSON(w, http.StatusOK, map[string]any{
 		"version": "3.0.0",
 		"resources": []any{
+			// Modern NuGet clients look for the unversioned resource types as
+			// well as the 3.5.0 ones; `dotnet package search` requires a
+			// SearchQueryService it recognizes.
+			map[string]any{"@id": base + "/v3/query", "@type": "SearchQueryService"},
 			map[string]any{"@id": base + "/v3/query", "@type": "SearchQueryService/3.5.0"},
+			map[string]any{"@id": base + "/v3/autocomplete", "@type": "SearchAutocompleteService"},
 			map[string]any{"@id": base + "/v3/autocomplete", "@type": "SearchAutocompleteService/3.5.0"},
+			map[string]any{"@id": base + "/v3/registration", "@type": "RegistrationsBaseUrl"},
 			map[string]any{"@id": base + "/v3/registration", "@type": "RegistrationsBaseUrl/3.6.0"},
 			map[string]any{"@id": base + "/v3/flatcontainer/", "@type": "PackageBaseAddress/3.0.0"},
 			map[string]any{"@id": base + "/v3/package", "@type": "PackagePublish/2.0.0"},

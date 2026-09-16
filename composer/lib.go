@@ -124,9 +124,14 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 		results = append(results, map[string]any{"name": n, "description": "", "url": "", "downloads": 0})
 		seen[n] = true
 	}
-	// Merge packagist's search results so uncached public packages are
-	// discoverable.
-	if base := s.Registry.Upstreams.Get("composer"); base != "" {
+	// packagist's search API lives on packagist.org, not the metadata host
+	// (repo.packagist.org/search.json 404s). Prefer the composer.search
+	// upstream when configured.
+	base := s.Registry.Upstreams.Sub("composer", "search")
+	if base == "" {
+		base = s.Registry.Upstreams.Get("composer")
+	}
+	if base != "" {
 		remote := s.Registry.RemoteAt(base)
 		p := "/search.json"
 		if raw := r.URL.RawQuery; raw != "" {
