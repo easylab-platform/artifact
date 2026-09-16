@@ -65,6 +65,8 @@ install_pkg() { # $1 = expected version
   configure_repo
   dnf -y --refresh --disablerepo=fedora install "${PKG}" >/dev/null 2>&1 || \
     dnf -y --refresh install "${PKG}" >/dev/null 2>&1
+  # A newer build of an installed package needs an upgrade, not an install.
+  dnf -y --disablerepo=fedora upgrade "${PKG}" >/dev/null 2>&1 || true
   out="$("${PKG}" 2>&1 | tail -1)"
   echo "$out" | grep -q "$1" || { echo "rpm: got '$out' want $1"; return 1; }
   echo "rpm: ${PKG} $1 ok"

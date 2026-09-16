@@ -54,7 +54,11 @@ func GenerateRepodata(store artifactkit.HostedStore) artifactkit.Generator {
 			}
 		}
 		out := map[string]artifactkit.GeneratedFile{}
-		for subdir := range unionSubdirs(bySubdir, condaBySubdir) {
+		// conda always probes the channel's noarch subdir, so emit an (empty)
+		// noarch/repodata.json even when only arch-specific packages exist.
+		subdirs := unionSubdirs(bySubdir, condaBySubdir)
+		subdirs["noarch"] = struct{}{}
+		for subdir := range subdirs {
 			doc := map[string]any{
 				"info":             map[string]any{"subdir": subdir},
 				"packages":         orEmpty(bySubdir[subdir]),
