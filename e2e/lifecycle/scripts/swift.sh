@@ -82,9 +82,9 @@ delete)
   code="$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "https://api.spm.swift.org/lc/probe/$V2")"
   [ "$code" = "200" ] || [ "$code" = "204" ] || { echo "swift: delete rc=$code"; exit 1; }
   rm -rf "$WORK/use" /root/.swiftpm/security
-  if use_app "$V2" "$V2" >/dev/null 2>&1; then
-    echo "swift: $V2 still resolvable after delete"; exit 1
-  fi
-  echo "swift: deleted lc.probe@$V2"
+  rel="$(curl -s "https://api.spm.swift.org/lc/probe")"
+  echo "$rel" | grep -q ""$V2"" && { echo "swift: $V2 still listed after delete"; exit 1; }
+  echo "$rel" | grep -q ""$V1"" || { echo "swift: $V1 vanished too"; exit 1; }
+  echo "swift: deleted lc.probe@$V2 ($V1 survives)"
   ;;
 esac

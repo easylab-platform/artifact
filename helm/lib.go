@@ -172,9 +172,10 @@ func (s *State) upload(w http.ResponseWriter, r *http.Request) {
 	if version == "" {
 		version = "0.1.0"
 	}
-	if fname == "" {
-		fname = name + "-" + version + ".tgz"
-	}
+	// chartmuseum's push (the only client that PUTs here) sends the file with
+	// its client-local temp path as the filename; the index URL must reference
+	// a bare "<chart>-<version>.tgz".
+	fname = name + "-" + version + ".tgz"
 	storeChart(s.Registry, name, version, fname, data, r.Context())
 	artifactkit.JSON(w, http.StatusCreated, map[string]any{"saved": true})
 }
