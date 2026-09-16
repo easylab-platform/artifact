@@ -82,18 +82,16 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) packagesJSON(w http.ResponseWriter, r *http.Request) {
-	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "composer")
 	base := s.base()
-	providers := map[string]any{}
-	for _, name := range repos {
-		providers[name] = map[string]any{"sha256": nil}
-	}
+	// Only the Composer 2 metadata (p2) protocol is advertised. Advertising
+	// providers-api makes Composer 1-era clients query /providers/<name>.json
+	// first, which this mirror does not index.
 	artifactkit.JSON(w, http.StatusOK, map[string]any{
-		"packages": []any{}, "metadata-url": base + "/p2/%package%.json",
-		"available-packages": repos, "providers-url": base + "/p/%package%$%hash%.json",
-		"providers": providers, "providers-api": base + "/providers/%package%.json",
-		"list": base + "/list.json", "search": base + "/search.json?q=%query%&type=%type%",
-		"provider-includes": map[string]any{}, "notify-batch": base + "/downloads/",
+		"packages":     []any{},
+		"metadata-url": base + "/p2/%package%.json",
+		"list":         base + "/list.json",
+		"search":       base + "/search.json?q=%query%&type=%type%",
+		"notify-batch": base + "/downloads/",
 	})
 }
 
@@ -202,7 +200,18 @@ func (s *State) provider(w http.ResponseWriter, r *http.Request, rest string) {
 }
 
 func (s *State) providersAPI(w http.ResponseWriter, r *http.Request, rest string) {
-	_ = rest
+	// Proxy the upstream providers listing: it enumerates every version of a
+	// package, so serving an empty map here makes the client believe the
+	// package does not exist. Locally-published packages are still served by
+	// p2/<name>/<version>.json, which the client queries first.
+	rest = strings.Trim(rest, "/")
+	if base := s.Registry.Upstreams.Get("composer"); base != "" {
+		remote := s.Registry.RemoteAt(base)
+		if body, err := remote.GetBytes(r.Context(), "/providers/"+rest); err == nil {
+			artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
+			return
+		}
+	}
 	artifactkit.JSON(w, http.StatusOK, map[string]any{"providers": map[string]any{}})
 }
 
