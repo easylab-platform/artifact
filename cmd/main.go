@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -119,9 +120,16 @@ func main() {
 	addr := *listen
 	log.Printf("artifact listening on %s (%d protocols: %s), data=%s, airgap=%v",
 		addr, mounted, names, *dataDir, *airGap)
+	// ARTIFACT_DEBUG=1 logs every request (method, path, framing, status) and
+	// is invaluable when a client's upload/download framing is in question.
+	debug := os.Getenv("ARTIFACT_DEBUG") != ""
+	var root http.Handler = mux
+	if debug {
+		root = debugHandler(mux)
+	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           root,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       10 * time.Minute, // large layer uploads stream slowly
 		WriteTimeout:      10 * time.Minute, // large layer downloads stream slowly
@@ -131,6 +139,33 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// debugHandler logs each request's method, path, body framing and the
+// resulting status when ARTIFACT_DEBUG is set.
+func debugHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		lw := &logResponseWriter{ResponseWriter: w, status: 200}
+		next.ServeHTTP(lw, r)
+		cl := r.Header.Get("Content-Length")
+		if cl == "" {
+			cl = "-"
+		}
+		log.Printf("req %s %s cl=%s te=%q ct=%q -> %d (%s)",
+			r.Method, r.URL.Path, cl, r.TransferEncoding, r.Header.Get("Content-Type"),
+			lw.status, time.Since(start).Round(time.Millisecond))
+	})
+}
+
+type logResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *logResponseWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
 }
 
 func defaultUpstreams(airGap bool) *artifactkit.Upstreams {
