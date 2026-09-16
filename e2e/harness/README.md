@@ -39,6 +39,24 @@ KEEP=1 PROTOCOLS=cargo ./run.sh               # keep the pod for debugging
   connection is re-originated with its path mapped, not just the first).
 - artifact >= v0.1.14 (oci blob redirects, per-protocol routing fixes).
 
+## Unified mount
+`deploy-unified.sh` deploys ONE artifact Deployment+Service mounting every
+protocol, with a per-protocol self-base map (`--self-base-map npm=https://
+registry.npmjs.org,pypi=https://pypi.org,...`). Each adapter then emits its own
+upstream-shaped self URLs, so all sidecar rules point at the same Service and
+differ only by `add_prefix`. `UNIFIED_SVC=artifact-unified ./run.sh` and
+`UNIFIED_SVC=artifact-unified ../lifecycle/run.sh` prove the topology is
+transparent: 21/21 pull and 18/18 lifecycle pass against one instance.
+
+## Search/aux matrix
+`run-search.sh` drives each client's SEARCH (or other auxiliary) endpoint and
+asserts real results, with `GOSUMDB` at its default (the go build verifies
+against `sum.golang.org`, which the adapter now caches and serves). It also
+asserts h2 ALPN end-to-end (npm's node http2 client).
+
+Current status: **11/11 PASS** (npm, cargo, rubygems, composer, hex, go,
+pypi, nuget, helm, conda, rpm).
+
 ## Lifecycle harness
 `../lifecycle/run.sh` walks five stages per protocol — publish (A) → public
 (B installs a well-known upstream package) → private (B installs A's package
