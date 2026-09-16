@@ -79,6 +79,16 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// `mix hex.publish` probes the authenticated user before publishing;
 		// it maps the "organizations" key of this response (absent key =>
 		// crash), so it must always be present.
+		if wantsErlang := strings.Contains(r.Header.Get("Accept"), "hex+erlang"); wantsErlang {
+			// hex_core requests the erlang external term format; JSON is also
+			// accepted by hex_core only when the server rejects +erlang. Serve
+			// a term_to_binary-encoded map to keep the client happy.
+			term := erlangUsersMe()
+			w.Header().Set("Content-Type", "application/vnd.hex+erlang")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(term)
+			return
+		}
 		artifactkit.JSON(w, http.StatusOK, map[string]any{
 			"username": "lc", "email": "lc@easylab.invalid",
 			"inserted_at": "2024-01-01T00:00:00Z", "organizations": []any{},
