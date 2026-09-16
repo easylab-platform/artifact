@@ -266,7 +266,7 @@ func (r *Registry) FetchViaRedirect(ctx context.Context, url string) (Fetched, e
 func (r *Registry) FetchAbsolute(ctx context.Context, url string) (Fetched, error) {
 	factory := NewClientFactory()
 	remote := NewRemote(factory, "", proxyPtr(r.Upstreams, "generic"))
-	resp, err := remote.Get(ctx, url)
+	resp, err := remote.getStable(ctx, url)
 	if err != nil {
 		return Fetched{}, fmt.Errorf("http: %w", err)
 	}
