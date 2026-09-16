@@ -108,8 +108,9 @@ func (s *State) config(w http.ResponseWriter, r *http.Request) {
 
 func (s *State) search(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(r.URL.Query().Get("q"))
-	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "cargo")
 	var crates []any
+	seen := map[string]bool{}
+	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "cargo")
 	for _, name := range repos {
 		if q != "" && !strings.Contains(strings.ToLower(name), q) {
 			continue
@@ -120,6 +121,30 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 			latest = versions[len(versions)-1]
 		}
 		crates = append(crates, map[string]any{"name": name, "max_version": latest})
+		seen[name] = true
+	}
+	// Merge crates.io's search so uncached public crates are discoverable.
+	if base := s.Registry.Upstreams.Get("cargo"); base != "" {
+		remote := s.Registry.RemoteAt(base)
+		p := "/api/v1/crates"
+		if raw := r.URL.RawQuery; raw != "" {
+			p += "?" + raw
+		}
+		if body, err := remote.GetBytes(r.Context(), p); err == nil {
+			var up struct {
+				Crates []map[string]any `json:"crates"`
+			}
+			if json.Unmarshal(body, &up) == nil {
+				for _, m := range up.Crates {
+					if n, _ := m["name"].(string); n != "" && !seen[n] {
+						crates = append(crates, m)
+					}
+				}
+			}
+		}
+	}
+	if crates == nil {
+		crates = []any{}
 	}
 	artifactkit.JSON(w, http.StatusOK, map[string]any{"crates": crates, "meta": map[string]any{"total": len(crates)}})
 }

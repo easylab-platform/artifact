@@ -66,6 +66,28 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Checksum database (sum.golang.org). Three shapes hit this mirror:
+	//   /sumdb/sum.golang.org/<path>   (GOPROXY sumdb passthrough)
+	//   /lookup/... , /tile/...        (direct sumdb access, host spoofed)
+	//   /latest, /supported            (direct sumdb metadata)
+	// All are read-only, so cache+forward verbatim.
+	if strings.HasPrefix(path, "sumdb/") {
+		rest := strings.TrimPrefix(path, "sumdb/")
+		// Drop the "<sumdb-host>/" prefix; the upstream base selects it.
+		if _, tail, ok := strings.Cut(rest, "/"); ok {
+			rest = tail
+		} else {
+			rest = ""
+		}
+		s.sumdb(w, r, rest)
+		return
+	}
+	if strings.HasPrefix(path, "lookup/") || strings.HasPrefix(path, "tile/") ||
+		path == "latest" || path == "supported" {
+		s.sumdb(w, r, path)
+		return
+	}
+
 	switch {
 	case strings.HasSuffix(path, "/@latest"):
 		s.latest(w, r, strings.TrimSuffix(path, "/@latest"))
@@ -177,6 +199,50 @@ func (s *State) proxyOne(w http.ResponseWriter, r *http.Request, module, suffix,
 		return
 	}
 	artifactkit.Text(w, http.StatusOK, string(body), ct)
+}
+
+// sumdb proxies the Go checksum database, caching lookups/tiles in the CAS so
+// repeated installs do not re-fetch them. The upstream base is the "go.sumdb"
+// upstream when set, else sum.golang.org. sumdb responses are signed by the
+// database; caching them verbatim preserves verification.
+func (s *State) sumdb(w http.ResponseWriter, r *http.Request, rest string) {
+	rest = strings.Trim(rest, "/")
+	if rest == "" {
+		artifactkit.Error(w, http.StatusNotFound, "not found")
+		return
+	}
+	base := s.Registry.Upstreams.Sub("go", "sumdb")
+	if base == "" {
+		base = "https://sum.golang.org"
+	}
+	// Split the first path segment (lookup | tile | latest | supported).
+	seg, tail, _ := strings.Cut(rest, "/")
+	key := "sumdb/" + seg + "/" + tail
+	if art, err := s.Registry.Meta.Get(r.Context(), "go", key, "sumdb"); err == nil && len(art.Blobs) > 0 {
+		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, "text/plain; charset=UTF-8") {
+			return
+		}
+	}
+	upURL := "/" + rest
+	if q := r.URL.RawQuery; q != "" {
+		upURL += "?" + q
+	}
+	remote := s.Registry.RemoteAt(base)
+	body, err := remote.GetBytes(r.Context(), upURL)
+	if err != nil {
+		artifactkit.Error(w, http.StatusNotFound, "not found")
+		return
+	}
+	stored, serr := s.Registry.StoreAndHash(r.Context(), body)
+	if serr == nil {
+		artifactkit.LogMetaErr("go sumdb cache", s.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
+			Format: "go", Repository: key, Version: "sumdb",
+			MediaType: "text/plain", Digest: stored.Digest,
+			Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: seg}},
+			Source: "pull",
+		}))
+	}
+	artifactkit.OctetResponse(w, r, body)
 }
 
 func (s *State) registryFetch(ctx context.Context, path string) ([]byte, error) {

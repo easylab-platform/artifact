@@ -154,14 +154,36 @@ func (s *State) owners(w http.ResponseWriter, r *http.Request) {
 
 func (s *State) searchGem(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(r.URL.Query().Get("query"))
-	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "rubygems")
 	var out []any
+	seen := map[string]bool{}
+	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "rubygems")
 	for _, name := range repos {
 		if q != "" && !strings.Contains(strings.ToLower(name), q) {
 			continue
 		}
 		versions, _ := s.Registry.Meta.ListVersions(r.Context(), "rubygems", name)
 		out = append(out, map[string]any{"name": name, "version": artifactkit.HighestVersion(versions)})
+		seen[name] = true
+	}
+	// Merge the upstream search so uncached public gems are discoverable.
+	if remote, _ := s.Registry.Remote("rubygems", ""); remote != nil {
+		p := "/api/v1/search.json"
+		if raw := r.URL.RawQuery; raw != "" {
+			p += "?" + raw
+		}
+		if body, err := remote.GetBytes(r.Context(), p); err == nil {
+			var up []map[string]any
+			if json.Unmarshal(body, &up) == nil {
+				for _, m := range up {
+					if n, _ := m["name"].(string); n != "" && !seen[n] {
+						out = append(out, m)
+					}
+				}
+			}
+		}
+	}
+	if out == nil {
+		out = []any{}
 	}
 	artifactkit.JSON(w, http.StatusOK, out)
 }

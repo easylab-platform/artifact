@@ -110,8 +110,11 @@ func (s *State) simple(w http.ResponseWriter, r *http.Request, path string) {
 
 func (s *State) simpleRoot(w http.ResponseWriter, r *http.Request) {
 	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "pypi")
+	// The root index lists only local projects. The upstream root is ~46MB
+	// (tens of thousands of names), so it is never merged here; per-project
+	// pages (/simple/<name>/) merge upstream, which is the path installers use.
 	if wantsJSON(r) {
-		var projects []any
+		projects := make([]any, 0, len(repos))
 		for _, n := range repos {
 			projects = append(projects, map[string]any{"name": n})
 		}

@@ -182,8 +182,9 @@ func (s *State) couchUser(w http.ResponseWriter, r *http.Request, path, method s
 
 func (s *State) search(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(r.URL.Query().Get("text"), "%20", " "), "+", " "))
-	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "npm")
 	var objects []any
+	seen := map[string]bool{}
+	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "npm")
 	for _, repo := range repos {
 		if q != "" && !strings.Contains(strings.ToLower(repo), q) {
 			continue
@@ -194,6 +195,31 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 			latest = versions[len(versions)-1]
 		}
 		objects = append(objects, map[string]any{"package": map[string]any{"name": repo, "version": latest}})
+		seen[repo] = true
+	}
+	// Merge the upstream search so uncached public packages are discoverable.
+	if remote, _ := s.Registry.Remote("npm", ""); remote != nil {
+		p := "/-/v1/search"
+		if raw := r.URL.RawQuery; raw != "" {
+			p += "?" + raw
+		}
+		if body, err := remote.GetBytes(r.Context(), p); err == nil {
+			var up struct {
+				Objects []map[string]any `json:"objects"`
+			}
+			if json.Unmarshal(body, &up) == nil {
+				for _, o := range up.Objects {
+					if pkg, ok := o["package"].(map[string]any); ok {
+						if n, _ := pkg["name"].(string); n != "" && !seen[n] {
+							objects = append(objects, o)
+						}
+					}
+				}
+			}
+		}
+	}
+	if objects == nil {
+		objects = []any{}
 	}
 	artifactkit.JSON(w, http.StatusOK, map[string]any{"objects": objects, "total": len(objects), "time": ""})
 }

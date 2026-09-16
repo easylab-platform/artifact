@@ -114,13 +114,39 @@ func (s *State) listJSON(w http.ResponseWriter, r *http.Request) {
 
 func (s *State) search(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(r.URL.Query().Get("q"))
-	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "composer")
 	var results []any
+	seen := map[string]bool{}
+	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "composer")
 	for _, n := range repos {
 		if q != "" && !strings.Contains(strings.ToLower(n), q) {
 			continue
 		}
 		results = append(results, map[string]any{"name": n, "description": "", "url": "", "downloads": 0})
+		seen[n] = true
+	}
+	// Merge packagist's search results so uncached public packages are
+	// discoverable.
+	if base := s.Registry.Upstreams.Get("composer"); base != "" {
+		remote := s.Registry.RemoteAt(base)
+		p := "/search.json"
+		if raw := r.URL.RawQuery; raw != "" {
+			p += "?" + raw
+		}
+		if body, err := remote.GetBytes(r.Context(), p); err == nil {
+			var up struct {
+				Results []map[string]any `json:"results"`
+			}
+			if json.Unmarshal(body, &up) == nil {
+				for _, m := range up.Results {
+					if n, _ := m["name"].(string); n != "" && !seen[n] {
+						results = append(results, m)
+					}
+				}
+			}
+		}
+	}
+	if results == nil {
+		results = []any{}
 	}
 	artifactkit.JSON(w, http.StatusOK, map[string]any{"results": results, "total": len(results)})
 }

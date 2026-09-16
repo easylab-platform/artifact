@@ -34,6 +34,7 @@ func main() {
 		protocols     = flag.String("protocols", "", "comma-separated protocols to mount (default: all registered)")
 		selfBase      = flag.String("self-base", "", "external base URL for auth realms / self URIs")
 		selfBaseRaw   = flag.Bool("self-base-raw", false, "treat -self-base as the protocol's own upstream origin (do NOT append /pkgs/<name>): emitted URLs take the upstream shape so an intercepting client proxy can map them back")
+		selfBaseMap   = flag.String("self-base-map", "", "per-protocol origin overrides, `proto=url` pairs comma separated; each entry implies origin (raw) mode for that protocol (e.g. npm=https://registry.npmjs.org,pypi=https://pypi.org)")
 		tokens        = flag.String("tokens", "", "`token=level` pairs (read|write) to seed into the credential DB (hashed), comma separated; repeat on every start to keep them registered")
 		airGap        = flag.Bool("air-gap", false, "disable all upstream pull-through")
 		blobBackend   = flag.String("blob-backend", "filesystem", "blob backend: filesystem | s3")
@@ -87,12 +88,13 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	mounted := 0
+	selfBases := parseSelfBaseMap(*selfBaseMap)
 	for _, name := range strings.Split(names, ",") {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
-		handler, err := artifactkit.Build(name, reg, configFor(name, *selfBase, *selfBaseRaw, auth, *dataDir))
+		handler, err := artifactkit.Build(name, reg, configFor(name, *selfBase, *selfBaseRaw, auth, *dataDir, selfBases))
 		if err != nil {
 			log.Fatalf("build protocol %q: %v", name, err)
 		}
@@ -244,6 +246,7 @@ func defaultUpstreams(airGap bool) *artifactkit.Upstreams {
 			"cargo.index":        "https://index.crates.io",
 			"cargo.static":       "https://static.crates.io/crates",
 			"conan.center":       "https://center2.conan.io",
+			"go.sumdb":           "https://sum.golang.org",
 			"nuget.search":       "https://azuresearch-usnc.nuget.org",
 			"nuget.registration": "https://api.nuget.org",
 			"hex.repo":           "https://repo.hex.pm",
@@ -289,7 +292,29 @@ func applyUpstreamOverrides(u *artifactkit.Upstreams, overrides, proxy string) {
 	u.Proxy["*"] = proxy
 }
 
-func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, dataDir string) map[string]any {
+// parseSelfBaseMap parses "-self-base-map" (`proto=url` pairs). Each entry is
+// an origin (raw) override for one protocol, letting a single instance serve
+// every protocol with its own upstream-shaped self URLs.
+func parseSelfBaseMap(s string) map[string]string {
+	out := map[string]string{}
+	for _, pair := range strings.Split(s, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(pair, "=")
+		if !ok {
+			continue
+		}
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		if k != "" && v != "" {
+			out[k] = strings.TrimSuffix(v, "/")
+		}
+	}
+	return out
+}
+
+func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, dataDir string, selfBases map[string]string) map[string]any {
 	cfg := map[string]any{}
 	// Each protocol mounts under /pkgs/<name> (OCI is special-cased to /v2),
 	// so its emitted self-URLs must carry that prefix. selfBase is the global
@@ -301,7 +326,12 @@ func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, d
 	// simple/..., index.crates.io/config.json) unchanged, and an intercepting
 	// client proxy (easyproxy) maps them back onto /pkgs/<name>. This is what
 	// makes publish/pull fully transparent to an unmodified client.
-	if selfBase != "" {
+	//
+	// A -self-base-map entry is a per-protocol origin and implies raw mode for
+	// that protocol, so one instance serves every protocol with its own shape.
+	if origin, ok := selfBases[name]; ok && origin != "" {
+		cfg["self_base"] = origin
+	} else if selfBase != "" {
 		if name == "oci" || selfBaseRaw {
 			cfg["self_base"] = strings.TrimSuffix(selfBase, "/")
 		} else {

@@ -66,6 +66,11 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.releaseInfo(w, r, trimmed)
 	case strings.HasPrefix(trimmed, "packages/") && strings.HasSuffix(trimmed, "/owners"):
 		artifactkit.JSON(w, http.StatusOK, []any{})
+	case trimmed == "packages" || trimmed == "search":
+		// hex.pm's package search lives on the API host (/packages?search=).
+		// Merge local packages with the upstream result so both private and
+		// public names are discoverable.
+		s.search(w, r)
 	case strings.HasPrefix(trimmed, "packages/"):
 		name := strings.TrimPrefix(trimmed, "packages/")
 		if r.Method == http.MethodGet {
@@ -300,6 +305,51 @@ func (s *State) createRelease(w http.ResponseWriter, r *http.Request, trimmed st
 	w.WriteHeader(http.StatusCreated)
 }
 
+// search merges local packages with hex.pm's package search. hex.pm returns
+// an array of package objects; local packages are prepended (deduped by name).
+func (s *State) search(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var out []any
+	seen := map[string]bool{}
+	repos, _ := s.Registry.Meta.ListRepositoriesByFormat(r.Context(), "hex")
+	q := strings.ToLower(r.URL.Query().Get("search"))
+	for _, name := range repos {
+		if q != "" && !strings.Contains(strings.ToLower(name), q) {
+			continue
+		}
+		vs, _ := s.Registry.Meta.ListVersions(r.Context(), "hex", name)
+		out = append(out, map[string]any{
+			"name": name, "latest_version": artifactkit.HighestVersion(vs),
+			"downloads": 0, "html_url": "https://hex.pm/packages/" + name,
+		})
+		seen[name] = true
+	}
+	if base := s.Registry.Upstreams.Get("hex"); base != "" {
+		remote := s.Registry.RemoteAt(base)
+		p := "/packages"
+		if raw := r.URL.RawQuery; raw != "" {
+			p += "?" + raw
+		}
+		if body, err := remote.GetBytes(r.Context(), p); err == nil {
+			var up []map[string]any
+			if json.Unmarshal(body, &up) == nil {
+				for _, m := range up {
+					if n, _ := m["name"].(string); n != "" && !seen[n] {
+						out = append(out, m)
+					}
+				}
+			}
+		}
+	}
+	if out == nil {
+		out = []any{}
+	}
+	artifactkit.JSON(w, http.StatusOK, out)
+}
+
 func (s *State) proxyAll(w http.ResponseWriter, r *http.Request, path string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		artifactkit.Error(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -307,6 +357,11 @@ func (s *State) proxyAll(w http.ResponseWriter, r *http.Request, path string) {
 	}
 	upPath := strings.TrimPrefix(path, "pkgs/hex/")
 	upPath = strings.TrimPrefix(upPath, "hex/")
+	// Preserve the query string: hex's search and paginated endpoints
+	// (/api/packages?search=..., /api/packages?page=...) are query-driven.
+	if q := r.URL.RawQuery; q != "" {
+		upPath += "?" + q
+	}
 	if base := s.Registry.Upstreams.Get("hex"); base != "" {
 		remote := s.Registry.RemoteAt(base)
 		if body, err := remote.GetBytes(r.Context(), "/"+strings.Trim(upPath, "/")); err == nil {
