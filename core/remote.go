@@ -165,6 +165,11 @@ func (r *Remote) getStable(ctx context.Context, path string) (*http.Response, er
 			code = resp.StatusCode
 			_ = resp.Body.Close()
 		}
+		// Retries ride on the transport's keep-alive pool; if the pinned
+		// connection's egress route is the thing that's broken, every retry
+		// through it fails the same way. Drop the pool so the retry dials a
+		// fresh connection (and, with a proxy, possibly a fresh exit).
+		r.client.CloseIdleConnections()
 		if ctx.Err() != nil {
 			if code == 0 {
 				return nil, err
