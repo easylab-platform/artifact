@@ -731,13 +731,14 @@ func (s *State) recipeFiles(ctx context.Context, name string) map[string]any {
 
 func storeFile(reg *artifactkit.Registry, name, ver, filename string, data []byte, ctx context.Context) {
 	// Store the file body as a blob and index it under (conan, name, filename)
-	// so loadFile can find it; keep the recipe version as metadata.
-	if len(data) > 0 {
-		h, _ := artifactkit.ComputeHashesBytes(data)
-		digest := "sha256:" + h.SHA256
-		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, artifactkit.Artifact{Format: "conan", Repository: name, Version: filename, Source: "push", Blobs: []artifactkit.Descriptor{{Digest: digest, Size: int64(len(data)), Name: filename}}}))
-		}
+	// so loadFile can find it; keep the recipe version as metadata. An empty
+	// file is legitimate content (a package with no files has a 0-byte
+	// conaninfo.txt) and must still be recorded, or the client reports the
+	// package as corrupted.
+	h, _ := artifactkit.ComputeHashesBytes(data)
+	digest := "sha256:" + h.SHA256
+	if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
+		artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, artifactkit.Artifact{Format: "conan", Repository: name, Version: filename, Source: "push", Blobs: []artifactkit.Descriptor{{Digest: digest, Size: int64(len(data)), Name: filename}}}))
 	}
 }
 
