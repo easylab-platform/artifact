@@ -73,6 +73,28 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.putPath(w, r, path)
+	case method == http.MethodDelete:
+		// DELETE /{scope}/{name}/{version} — remove a release. The registry
+		// spec does not standardize deletion; the client-facing flow only
+		// needs the release to stop resolving afterwards.
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+			return
+		}
+		parts := strings.Split(path, "/")
+		if len(parts) != 3 {
+			artifactkit.Error(w, http.StatusNotFound, "invalid path")
+			return
+		}
+		full := parts[0] + "." + parts[1]
+		if _, err := s.Registry.Meta.Get(r.Context(), "swift", full, parts[2]); err != nil {
+			artifactkit.Error(w, http.StatusNotFound, "release not found")
+			return
+		}
+		if err := s.Registry.Meta.Delete(r.Context(), "swift", full, parts[2]); err != nil && !artifactkit.IsUnknown(err) {
+			artifactkit.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	case method == http.MethodGet || method == http.MethodHead:
 		parts := strings.Split(path, "/")
 		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
