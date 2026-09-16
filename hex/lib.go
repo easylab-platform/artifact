@@ -315,12 +315,17 @@ func (s *State) proxyAll(w http.ResponseWriter, r *http.Request, path string) {
 
 func (s *State) signedGzip(w http.ResponseWriter, r *http.Request, payload []byte) {
 	// Sign the payload bytes themselves, then wrap as the Hex registry
-	// envelope: field1 payload, field2 signature. Without a signing key the
-	// signature is empty (matches the reference: sign(payload) of a missing
-	// key -> empty). gzip the whole envelope.
+	// envelope: field1 payload, field2 signature. The signature is an RSA
+	// SHA-256 (PKCS#1 v1.5) over the payload with the static key whose public
+	// half /public_key serves — the mix client verifies it before unpacking,
+	// so an empty signature fails with "signature verification failed".
+	sig, err := signPayload(payload)
+	if err != nil {
+		sig = nil
+	}
 	var env []byte
 	env = pbBytes(env, 1, payload)
-	env = pbBytes(env, 2, nil) // empty signature
+	env = pbBytes(env, 2, sig)
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
 	_, _ = zw.Write(env)
@@ -527,4 +532,12 @@ func pbInt(b []byte, field, v int) []byte {
 	return pbVarint(b, uint64(v))
 }
 
-const staticPublicKey = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtxh/tzGZzJ4XG7ZxXyLZ\nH0Y4eZ8fP3w9d9xZT1j0wRjNwR2tWVhJZ3dYU2pLd1ZpbmcgaXMgYSBmaXhlZCBk\nZW1vIHB1YmxpYyBrZXkgZm9yIHRoZSByZWdpc3RyeSBtaXJyb3IuIFRoaXMgaXMg\nbm90IGEgc2VjdXJlIGtleSBidXQgcmVxdWlyZWQgZm9yIGNsaWVudCBib290c3Ry\nYXBwaW5nLgIDAQAB\n-----END PUBLIC KEY-----"
+const staticPublicKey = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA222P0sX1fAdDTKwaCALP
+c6m3X9m8LhUFoRAoDWinRUjPsZyIFtJ18EEasu4GeOltuZvO+fDf5qkMtRmuj638
+PFXKlb/YCrtdfhNCIup+EuwUxJJVHC2Uj0D48x+iQ7/QQZ2cdRZ3AReN+3SDeFlj
+nZDq0Qy9HEDJy/HFPm/KEGWD0Rxem9Bobwvz+6wsFUL9Zb28LBkygtCA9FJDi1su
+QSj9NamlgxEd+nOdn/6LuVSnRBSc8UCEX4EfGZIIpys/MePCA2DdlFprH8kuFqpY
+ynLTPvKdVLbp/eJEgnbBLwSL2SwkH8iUxUDedeQs0pxtVhn/kntpTGk/1lbk3y9D
+LQIDAQAB
+-----END PUBLIC KEY-----`
