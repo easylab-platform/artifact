@@ -238,6 +238,11 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 					return
 				}
 				storeFile(s.Registry, name, ver, filename, data, r.Context())
+				// The recipe revision is in the URL; remember it so a later
+				// /latest and /revisions listing returns the same value.
+				if len(parts) > 5 && parts[4] == "revisions" {
+					storeRecipeRev(s.Registry, name, ver, parts[5], r.Context())
+				}
 				u := s.base() + "/v2/conans/" + artifactkit.URLencode(name) + "/" + artifactkit.URLencode(ver) + "/_/_/revisions/0/files/" + artifactkit.URLencode(filename)
 				artifactkit.JSON(w, http.StatusOK, map[string]any{"files": map[string]any{filename: u}})
 				return
@@ -261,7 +266,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 					artifactkit.JSON(w, http.StatusOK, map[string]any{"revisions": []any{}})
 					return
 				}
-				rev := s.loadRecipeRev(r.Context(), name)
+				rev := s.loadRecipeRev(r.Context(), name, ver)
 				artifactkit.JSON(w, http.StatusOK, map[string]any{
 					"reference": name + "/" + ver + "@_/_",
 					"revisions": []any{map[string]any{"revision": rev, "time": "2024-01-01T00:00:00Z"}},
@@ -304,12 +309,12 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 			return
 		}
 		if _, err := s.Registry.Meta.Get(r.Context(), "conan", name, ver); err != nil {
-			rev := s.loadRecipeRev(r.Context(), name)
+			rev := s.loadRecipeRev(r.Context(), name, ver)
 			fallback := map[string]any{"revision": rev, "time": "2024-01-01T00:00:00Z"}
 			s.replyOrProxy(w, r, fallback, "/v2/conans/"+artifactkit.URLencode(name)+"/"+artifactkit.URLencode(ver)+"/_/_/latest")
 			return
 		}
-		rev := s.loadRecipeRev(r.Context(), name)
+		rev := s.loadRecipeRev(r.Context(), name, ver)
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"revision": rev, "time": "2024-01-01T00:00:00Z"})
 	case strings.HasPrefix(sub, "revisions"):
 		if _, err := s.Registry.Meta.Get(r.Context(), "conan", name, ver); err != nil {
@@ -319,7 +324,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 			artifactkit.Error(w, http.StatusNotFound, "revision not found")
 			return
 		}
-		rev := s.loadRecipeRev(r.Context(), name)
+		rev := s.loadRecipeRev(r.Context(), name, ver)
 		artifactkit.JSON(w, http.StatusOK, map[string]any{
 			"revisions": []any{map[string]any{"revision": rev, "time": "2024-01-01T00:00:00Z"}},
 		})
@@ -535,14 +540,12 @@ func (s *State) base() string {
 	return strings.TrimSuffix(s.SelfBase, "/")
 }
 
-func (s *State) loadRecipeRev(ctx context.Context, name string) string {
-	if art, err := s.Registry.Meta.Get(ctx, "conan", name, ""); err == nil && len(art.Proprietary) > 0 {
-		var m map[string]any
-		if json.Unmarshal(art.Proprietary, &m) == nil {
-			if r, ok := m["revision"].(string); ok && r != "" {
-				return r
-			}
-		}
+func (s *State) loadRecipeRev(ctx context.Context, name, ver string) string {
+	if rev, ok := loadRecipeRevOf(ctx, s.Registry, name, ver); ok {
+		return rev
+	}
+	if rev, ok := loadRecipeRevOf(ctx, s.Registry, name, ""); ok {
+		return rev
 	}
 	return "0"
 }
@@ -780,6 +783,35 @@ func storeFile(reg *artifactkit.Registry, name, ver, filename string, data []byt
 
 func removeVersion(reg *artifactkit.Registry, name, ver string, ctx context.Context) {
 	artifactkit.LogMetaErr("meta delete", reg.Meta.Delete(ctx, "conan", name, ver))
+}
+
+// storeRecipeRev records a recipe version plus the client-supplied recipe
+// revision under (conan, name, ver) with no blobs. That makes Meta.Get find
+// the version (so /latest and /revisions resolve) and preserves the revision
+// for later listings.
+func storeRecipeRev(reg *artifactkit.Registry, name, ver, rev string, ctx context.Context) {
+	if ver == "" {
+		return
+	}
+	if rev == "" {
+		rev = "0"
+	}
+	prop, _ := json.Marshal(map[string]any{"revision": rev})
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, artifactkit.Artifact{
+		Format: "conan", Repository: name, Version: ver, Source: "push", Proprietary: prop,
+	}))
+}
+
+func loadRecipeRevOf(ctx context.Context, reg *artifactkit.Registry, name, ver string) (string, bool) {
+	if art, err := reg.Meta.Get(ctx, "conan", name, ver); err == nil && len(art.Proprietary) > 0 {
+		var m map[string]any
+		if json.Unmarshal(art.Proprietary, &m) == nil {
+			if r, ok := m["revision"].(string); ok && r != "" {
+				return r, true
+			}
+		}
+	}
+	return "", false
 }
 
 func globMatch(name, pattern string) bool {
