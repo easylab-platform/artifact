@@ -311,13 +311,28 @@ func (a *Adapter) manifest(w http.ResponseWriter, r *http.Request, name, ref str
 			a.challenge(w, name, artifactkit.ActionDelete)
 			return
 		}
-		if err := a.state.Registry.Meta.Delete(r.Context(), "oci", name, ref); err != nil {
-			if artifactkit.IsUnknown(err) {
-				writeJSON(w, http.StatusNotFound, ociError("MANIFEST_UNKNOWN", "manifest unknown"))
-			} else {
-				writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
+		// Deleting a manifest removes the addressed revision. A delete by
+		// digest (what `skopeo delete`/`regctl` send after resolving a tag)
+		// must also drop any tag pointing at that same manifest, or the tag
+		// keeps resolving through its alias row.
+		delVersions := []string{ref}
+		if art, err := a.state.Registry.Meta.Get(r.Context(), "oci", name, ref); err == nil && art.Digest != "" {
+			if vs, err := a.state.Registry.Meta.ListVersions(r.Context(), "oci", name); err == nil {
+				for _, v := range vs {
+					if v == ref {
+						continue
+					}
+					if other, err := a.state.Registry.Meta.Get(r.Context(), "oci", name, v); err == nil && other.Digest == art.Digest {
+						delVersions = append(delVersions, v)
+					}
+				}
 			}
-			return
+		}
+		for _, v := range delVersions {
+			if err := a.state.Registry.Meta.Delete(r.Context(), "oci", name, v); err != nil && !artifactkit.IsUnknown(err) {
+				writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
+				return
+			}
 		}
 		w.WriteHeader(http.StatusAccepted)
 	default:
