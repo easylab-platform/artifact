@@ -39,17 +39,17 @@ func newHostedState(t *testing.T) *State {
 // checksum) is present and the archive decompresses.
 func TestHostedAPKINDEX(t *testing.T) {
 	s := newHostedState(t)
-	apkBytes := []byte("fake-apk-content")
+	apkBytes := buildApk(t, "mytool", "1.2.3-r0")
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/pkgs/apk/myrepo/mytool-1.2.3-r0.apk", bytes.NewReader(apkBytes))
+	req := httptest.NewRequest(http.MethodPut, "/pkgs/apk/myrepo/x86_64/mytool-1.2.3-r0.apk", bytes.NewReader(apkBytes))
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("upload: %d %s", rec.Code, rec.Body.String())
 	}
 
 	rec2 := httptest.NewRecorder()
-	s.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/pkgs/apk/myrepo/APKINDEX.tar.gz", nil))
+	s.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/pkgs/apk/myrepo/x86_64/APKINDEX.tar.gz", nil))
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("index: %d", rec2.Code)
 	}
@@ -74,10 +74,30 @@ func TestHostedAPKINDEX(t *testing.T) {
 
 	// Package download byte-for-byte.
 	rec3 := httptest.NewRecorder()
-	s.ServeHTTP(rec3, httptest.NewRequest(http.MethodGet, "/pkgs/apk/myrepo/mytool-1.2.3-r0.apk", nil))
+	s.ServeHTTP(rec3, httptest.NewRequest(http.MethodGet, "/pkgs/apk/myrepo/x86_64/mytool-1.2.3-r0.apk", nil))
 	if rec3.Code != http.StatusOK || !bytes.Equal(rec3.Body.Bytes(), apkBytes) {
 		t.Fatalf("download: %d", rec3.Code)
 	}
+}
+
+// buildApk returns a minimal-but-valid apk v2 package: two concatenated gzip
+// streams (control, then data), which is the shape apkPullChecksum expects.
+func buildApk(t *testing.T, name, version string) []byte {
+	t.Helper()
+	gz := func(content []byte) []byte {
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		if _, err := zw.Write(content); err != nil {
+			t.Fatal(err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return buf.Bytes()
+	}
+	control := gz([]byte(".PKGINFO"))
+	data := gz([]byte(name + " " + version))
+	return append(control, data...)
 }
 
 // TestNameVersionArch verifies apk filename parsing.

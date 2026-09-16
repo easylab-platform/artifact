@@ -1,3 +1,11 @@
 FROM forgejo.develop.10.199.64.20.nip.io/root/alpine:3.24
-# Alpine's apk is native here. The repository URL is set at test time by
-# scripts/apk.sh (dl-cdn.alpinelinux.org, intercepted by the spoofed proxy).
+# Alpine's apk is native here, and a static curl is baked in: apk itself has
+# no PUT support, and the lifecycle harness uploads hosted packages with it.
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+RUN set -eux; \
+    mkdir -p /opt/curl; \
+    wget -q -O /opt/curl/curl "${EASYLAB}/pkgs/generic/curl-static/8.11.1/curl-linux-x86_64-musl"; \
+    chmod +x /opt/curl/curl; \
+    ln -s /opt/curl/curl /usr/local/bin/curl
+# The repository URL is set at test time by scripts/apk.sh
+# (dl-cdn.alpinelinux.org, intercepted by the spoofed proxy).

@@ -26,8 +26,12 @@ import (
 //
 // Files are named "<arch>/<pkg>.apk" (the client appends "<arch>/
 // APKINDEX.tar.gz" to every repository URL), so one index is emitted per
-// arch subdirectory. Metadata (name/version) is derived from the filename;
-// the content checksum (C:) is the real sha1 of the stored bytes.
+// arch subdirectory. Metadata (name/version) is derived from the filename.
+//
+// C: is apk's "pull checksum": a base64 sha1 of the package's CONTROL gzip
+// member (the first member of the concatenated control+data stream), NOT of
+// the whole file — apk rejects the package with "v2 package integrity error"
+// when the two disagree.
 func GenerateAPKINDEX(store artifactkit.HostedStore) artifactkit.Generator {
 	return func(files []artifactkit.HostedFile) (map[string]artifactkit.GeneratedFile, error) {
 		indexes := map[string]*bytes.Buffer{}
@@ -46,8 +50,10 @@ func GenerateAPKINDEX(store artifactkit.HostedStore) artifactkit.Generator {
 			if err != nil {
 				continue
 			}
-			sum := sha1.Sum(data)
-			cs := "Q1" + base64.StdEncoding.EncodeToString(sum[:])
+			cs, ok := apkPullChecksum(data)
+			if !ok {
+				continue
+			}
 			fmt.Fprintf(buf, "C:%s\n", cs)
 			fmt.Fprintf(buf, "P:%s\n", name)
 			fmt.Fprintf(buf, "V:%s\n", version)
@@ -73,6 +79,39 @@ func GenerateAPKINDEX(store artifactkit.HostedStore) artifactkit.Generator {
 		}
 		return out, nil
 	}
+}
+
+// apkPullChecksum returns apk's C: value: "Q1" + base64(sha1(control member)).
+// A v2 .apk is a sequence of gzip streams: an optional .SIGN.RSA signature
+// member, then the control tar (.PKGINFO), then the data tar. apk checksums
+// the control member, so walk the members and hash the one carrying .PKGINFO.
+func apkPullChecksum(data []byte) (string, bool) {
+	offset := 0
+	for offset < len(data) {
+		r := bytes.NewReader(data[offset:])
+		zr, err := gzip.NewReader(r)
+		if err != nil {
+			return "", false
+		}
+		zr.Multistream(false)
+		raw, err := io.ReadAll(zr)
+		if err != nil {
+			return "", false
+		}
+		_ = zr.Close()
+		// bytes.Reader implements io.ByteReader, so gzip.Reader consumes from
+		// it directly (no read-ahead): Len() is exactly the bytes left.
+		consumed := len(data) - offset - r.Len()
+		if consumed <= 0 {
+			return "", false
+		}
+		if bytes.Contains(raw, []byte(".PKGINFO")) {
+			sum := sha1.Sum(data[offset : offset+consumed])
+			return "Q1" + base64.StdEncoding.EncodeToString(sum[:]), true
+		}
+		offset += consumed
+	}
+	return "", false
 }
 
 // splitArch splits "<arch>/<file>" into its parts; a bare filename has arch
