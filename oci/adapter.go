@@ -179,9 +179,25 @@ func proxyOf(u *artifactkit.Upstreams, key string) *string {
 }
 
 // ServeHTTP dispatches every /v2/* path by method.
+//
+// A docker/podman client carries the target registry in TLS SNI and the Host
+// header, never in the path (docker pull ghcr.io/acme/app sends
+// "GET /v2/acme/app/..."). The adapter therefore reads the registry from the
+// request Host and canonicalises docker hub's aliases (index.docker.io,
+// registry-1.docker.io → docker.io) so every alias shares one repository. When
+// the Host is the gateway itself (an in-cluster service name or an IP) the
+// default upstream is used instead.
 func (a *Adapter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rel := strings.TrimPrefix(r.URL.Path, "/v2")
 	rel = strings.TrimPrefix(rel, "/")
+	// The registry travels in the Host header. The scope middleware records it
+	// for the mounted server; when the adapter is driven directly (tests) fall
+	// back to the request Host so the same derivation applies.
+	if artifactkit.RegistryHostFrom(r.Context()) == "" {
+		if h := artifactkit.CanonicalHost(r.Host); artifactkit.IsRegistryHost(h) {
+			r = r.WithContext(artifactkit.WithRegistryHost(r.Context(), h))
+		}
+	}
 
 	switch {
 	case rel == "" || rel == "/":
@@ -273,14 +289,14 @@ func (a *Adapter) listTags(w http.ResponseWriter, r *http.Request, name string) 
 		a.challenge(w, name, artifactkit.ActionPull)
 		return
 	}
-	registry, repo := splitRegistry(name)
-	tags, _ := a.state.Registry.Meta.ListVersions(r.Context(), "oci", repo)
+	registry := artifactkit.RegistryHostFrom(r.Context())
+	tags, _ := a.state.Registry.Meta.ListVersions(r.Context(), "oci", name)
 	set := map[string]bool{}
 	for _, t := range tags {
 		set[t] = true
 	}
 	if up := a.upstreamForRegistry(registry); up != nil {
-		if utags, err := up.ListTags(repo); err == nil {
+		if utags, err := up.ListTags(name); err == nil {
 			for _, t := range utags {
 				if !set[t] {
 					tags = append(tags, t)
@@ -298,7 +314,6 @@ func (a *Adapter) manifest(w http.ResponseWriter, r *http.Request, name, ref str
 			return
 		}
 	}
-	registry, _ := splitRegistry(name)
 
 	switch r.Method {
 	case http.MethodHead:
@@ -316,7 +331,7 @@ func (a *Adapter) manifest(w http.ResponseWriter, r *http.Request, name, ref str
 			a.challenge(w, name, artifactkit.ActionPush)
 			return
 		}
-		a.putManifest(w, r, name, ref, registry)
+		a.putManifest(w, r, name, ref)
 	case http.MethodDelete:
 		if !a.authorize(r, name, artifactkit.ActionDelete) {
 			a.challenge(w, name, artifactkit.ActionDelete)
@@ -352,8 +367,8 @@ func (a *Adapter) manifest(w http.ResponseWriter, r *http.Request, name, ref str
 }
 
 func (a *Adapter) getManifest(w http.ResponseWriter, r *http.Request, name, ref string, body bool) {
-	registry, repo := splitRegistry(name)
-	art, err := a.state.Registry.Meta.Get(r.Context(), "oci", repo, ref)
+	registry := artifactkit.RegistryHostFrom(r.Context())
+	art, err := a.state.Registry.Meta.Get(r.Context(), "oci", name, ref)
 	if err == nil && len(art.Proprietary) > 0 {
 		dgst := art.Digest
 		if dgst == "" {
@@ -365,16 +380,16 @@ func (a *Adapter) getManifest(w http.ResponseWriter, r *http.Request, name, ref 
 	// Pull-through.
 	up := a.upstreamForRegistry(registry)
 	if up != nil {
-		if mbody, ct, err := up.GetManifest(repo, ref); err == nil {
+		if mbody, ct, err := up.GetManifest(name, ref); err == nil {
 			dgst := "sha256:" + hexDigest(mbody)
 			blobs := extractBlobs(mbody)
 			// Store both the reference and the digest as versions.
 			artifactkit.LogMetaErr("oci pull cache", a.state.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
-				Format: "oci", Repository: repo, Version: ref,
+				Format: "oci", Repository: name, Version: ref,
 				MediaType: ct, Proprietary: mbody, Digest: dgst, Blobs: blobs, Source: "pull",
 			}))
 			artifactkit.LogMetaErr("oci pull cache", a.state.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
-				Format: "oci", Repository: repo, Version: dgst,
+				Format: "oci", Repository: name, Version: dgst,
 				MediaType: ct, Proprietary: mbody, Digest: dgst, Blobs: blobs, Source: "pull",
 			}))
 			writeManifest(w, mbody, ct, dgst, body)
@@ -384,7 +399,7 @@ func (a *Adapter) getManifest(w http.ResponseWriter, r *http.Request, name, ref 
 	writeJSON(w, http.StatusNotFound, ociError("MANIFEST_UNKNOWN", "manifest unknown"))
 }
 
-func (a *Adapter) putManifest(w http.ResponseWriter, r *http.Request, name, ref, registry string) {
+func (a *Adapter) putManifest(w http.ResponseWriter, r *http.Request, name, ref string) {
 	artifactkit.LimitBody(w, r)
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
@@ -491,13 +506,13 @@ func (a *Adapter) getBlob(w http.ResponseWriter, r *http.Request, name, digest s
 		return
 	}
 	// Pull-through: stream from upstream, caching locally while verifying.
-	registry, repo := splitRegistry(name)
+	registry := artifactkit.RegistryHostFrom(r.Context())
 	up := a.upstreamForRegistry(registry)
 	if up == nil {
 		writeJSON(w, http.StatusNotFound, ociError("BLOB_UNKNOWN", "blob unknown to registry"))
 		return
 	}
-	resp, _, err := up.GetBlob(repo, digest)
+	resp, _, err := up.GetBlob(name, digest)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, ociError("UPSTREAM_ERROR", err.Error()))
 		return

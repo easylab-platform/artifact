@@ -172,8 +172,7 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if len(data) == 0 && q != "" {
-		if base := s.Registry.Upstreams.Sub("nuget", "search"); base != "" {
-			remote := s.Registry.RemoteAt(base)
+		if remote, err := s.Registry.RemoteForSub(r.Context(), "nuget", "search"); err == nil {
 			if body, err := remote.GetBytes(r.Context(), "/query?q="+artifactkit.URLencode(q)+"&prerelease=false"); err == nil {
 				artifactkit.JSON(w, http.StatusOK, json.RawMessage(s.rewriteReg(body)))
 				return
@@ -189,8 +188,7 @@ func (s *State) registrationIndex(w http.ResponseWriter, r *http.Request, id str
 	lid := lower(id)
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "nuget", id)
 	if len(versions) == 0 {
-		if base := s.Registry.Upstreams.Sub("nuget", "registration"); base != "" {
-			remote := s.Registry.RemoteAt(base)
+		if remote, err := s.Registry.RemoteForSub(r.Context(), "nuget", "registration"); err == nil {
 			if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/v3/registration5-semver1/"+lid+"/index.json"); err == nil {
 				artifactkit.Text(w, http.StatusOK, s.rewriteReg([]byte(body)), "application/json")
 				return
@@ -256,8 +254,7 @@ func (s *State) flatIndex(w http.ResponseWriter, r *http.Request, id string) {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"versions": versions})
 		return
 	}
-	if base := s.Registry.Upstreams.Sub("nuget", "registration"); base != "" {
-		remote := s.Registry.RemoteAt(base)
+	if remote, err := s.Registry.RemoteForSub(r.Context(), "nuget", "registration"); err == nil {
 		if data, err := remote.GetBytes(r.Context(), "/v3-flatcontainer/"+lid+"/index.json"); err == nil {
 			artifactkit.JSON(w, http.StatusOK, json.RawMessage(data))
 			return
@@ -274,8 +271,7 @@ func (s *State) flatFile(w http.ResponseWriter, r *http.Request, id, ver, filena
 			}
 		}
 	}
-	if base := s.Registry.Upstreams.Sub("nuget", "registration"); base != "" {
-		remote := s.Registry.RemoteAt(base)
+	if remote, err := s.Registry.RemoteForSub(r.Context(), "nuget", "registration"); err == nil {
 		lid := lower(id)
 		if data, err := remote.GetBytes(r.Context(), "/v3-flatcontainer/"+lid+"/"+ver+"/"+filename); err == nil {
 			storeVersionSource(s.Registry, id, ver, filename, data, "pull", r.Context())

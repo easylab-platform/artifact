@@ -361,6 +361,11 @@ func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, d
 		// place to back up).
 		cfg["upload_dir"] = filepath.Join(dataDir, "oci-uploads")
 	}
+	if name == "git" {
+		// Bare mirrors live under the data dir: the second clone of a
+		// repository is served from local objects.
+		cfg["dir"] = filepath.Join(dataDir, "git")
+	}
 	return cfg
 }
 

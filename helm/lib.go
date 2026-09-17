@@ -93,8 +93,7 @@ func (s *State) indexYaml(w http.ResponseWriter, r *http.Request) bool {
 		}
 	}
 	// Merge upstream index so public charts pull through.
-	if base := s.Registry.Upstreams.Get("helm"); base != "" {
-		remote := s.Registry.RemoteAt(base)
+	if remote, err := s.Registry.RemoteCtx(r.Context(), "helm"); err == nil {
 		if body, err := remote.GetBytes(r.Context(), "/index.yaml"); err == nil {
 			text := string(body)
 			if idx := strings.Index(text, "entries:"); idx >= 0 {
@@ -127,7 +126,7 @@ func (s *State) chart(w http.ResponseWriter, r *http.Request, filename string) {
 		}
 	}
 	// Pull-through.
-	remote, _ := s.Registry.Remote("helm", "")
+	remote, _ := s.Registry.RemoteCtx(r.Context(), "helm")
 	if remote != nil {
 		if body, err := remote.GetBytes(r.Context(), "/packages/"+filename); err == nil {
 			artifactkit.ServeData(w, r, s.Registry, r.Context(), body, "application/octet-stream", filename)

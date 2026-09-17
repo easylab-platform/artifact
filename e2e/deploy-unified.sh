@@ -9,7 +9,7 @@ IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:latest}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 NAME="${NAME:-artifact-unified}"
 # Protocol list mirrors run.sh's default matrix.
-PROTOCOLS="${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci}"
+PROTOCOLS="${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy system}"
 
 # Upstream origins (must match rules.sh proto_row hostnames).
 proto_origin() {
@@ -35,6 +35,8 @@ proto_origin() {
     apk)         echo "http://dl-cdn.alpinelinux.org" ;;
     rpm)         echo "https://dl.fedoraproject.org" ;;
     oci)         echo "https://registry-1.docker.io" ;;
+    git)         echo "https://github.com" ;;
+    ivy)         echo "https://repo.scala-sbt.org" ;;
     *)           echo "" ;;
   esac
 }
@@ -42,12 +44,14 @@ proto_origin() {
 map=""
 list=""
 for p in $PROTOCOLS; do
+  # Every protocol is mounted; only those with a public upstream get a
+  # self-base-map entry (the admin `system` protocol has none).
+  [ -n "$list" ] && list="${list},"
+  list="${list}${p}"
   o="$(proto_origin "$p")"
   [ -n "$o" ] || continue
   [ -n "$map" ] && map="${map},"
   map="${map}${p}=${o}"
-  [ -n "$list" ] && list="${list},"
-  list="${list}${p}"
 done
 
 # The Fedora client baseurl is .../pub/fedora/...; the rpm adapter treats the

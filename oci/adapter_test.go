@@ -104,6 +104,34 @@ func TestSplitRegistry(t *testing.T) {
 	}
 }
 
+// TestCanonicalRegistryHost verifies the registry host derivation used by the
+// /v2 scope middleware: the Host header (where a container client puts the
+// registry) is canonicalised, and a gateway/cluster host yields no namespace.
+func TestCanonicalRegistryHost(t *testing.T) {
+	cases := []struct{ host, want string }{
+		{"ghcr.io", "ghcr.io"},
+		{"registry-1.docker.io", "docker.io"},
+		{"index.docker.io", "docker.io"},
+		{"docker.io", "docker.io"},
+		{"quay.io", "quay.io"},
+		{"REGISTRY.K8S.IO", "registry.k8s.io"},
+		{"easylab.temp.svc.cluster.local", ""},
+		{"172.18.199.215", ""},
+	}
+	for _, c := range cases {
+		h := artifactkit.CanonicalHost(c.host)
+		if artifactkit.IsRegistryHost(c.host) {
+			if h != c.want {
+				t.Errorf("host %q -> %q want %q", c.host, h, c.want)
+			}
+			continue
+		}
+		if c.want != "" {
+			t.Errorf("host %q not recognized as a registry", c.host)
+		}
+	}
+}
+
 func TestExtractBlobs(t *testing.T) {
 	body := []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"digest":"sha256:c1","size":1},"layers":[{"digest":"sha256:l1","size":2}]}`)
 	blobs := extractBlobs(body)

@@ -263,11 +263,10 @@ func (s *State) metadataXML(w http.ResponseWriter, r *http.Request, p string) {
 // (used when this mirror has no local versions for the GA, so Maven can still
 // enumerate versions — e.g. that of a plugin it needs to resolve).
 func (s *State) fetchUpstreamMetadata(r *http.Request, rel string) (string, error) {
-	base := s.Registry.Upstreams.Get("maven")
-	if base == "" {
+	remote, err := s.Registry.RemoteCtx(r.Context(), "maven")
+	if err != nil {
 		return "", errNoUpstream
 	}
-	remote := s.Registry.RemoteAt(base)
 	body, err := remote.GetBytes(r.Context(), "/"+strings.Trim(rel, "/")+"/maven-metadata.xml")
 	if err != nil {
 		return "", err

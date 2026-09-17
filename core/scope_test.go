@@ -4,24 +4,23 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"testing"
 )
 
 func TestResolveScopeMaven(t *testing.T) {
-	u, _ := url.Parse("/pkgs/maven/org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.pom")
-	sc, path, ok := resolveScope("/pkgs", u)
+	rq := httptest.NewRequest(http.MethodGet, "/pkgs/maven/org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.pom", nil)
+	sc, path, ok := resolveScope("/pkgs", rq)
 	if !ok || sc.Format != "maven" || sc.Namespace != "org.slf4j" || sc.Name != "slf4j-api" {
 		t.Fatalf("scope=%+v path=%q ok=%v", sc, path, ok)
 	}
-	if path != u.Path {
+	if path != "/pkgs/maven/org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.pom" {
 		t.Fatalf("path changed: %q", path)
 	}
 }
 
 func TestResolveScopeExplicit(t *testing.T) {
-	u, _ := url.Parse("/pkgs/maven/-/internal/org/acme/lib/1.0/lib-1.0.pom")
-	sc, path, ok := resolveScope("/pkgs", u)
+	rq := httptest.NewRequest(http.MethodGet, "/pkgs/maven/-/internal/org/acme/lib/1.0/lib-1.0.pom", nil)
+	sc, path, ok := resolveScope("/pkgs", rq)
 	if !ok || sc.Namespace != "internal" || !sc.Explicit {
 		t.Fatalf("scope=%+v ok=%v", sc, ok)
 	}
@@ -32,8 +31,8 @@ func TestResolveScopeExplicit(t *testing.T) {
 
 func TestResolveScopeNpmDashNotExplicit(t *testing.T) {
 	// npm reserves /-/ for its own endpoints; it must not be read as a repo.
-	u, _ := url.Parse("/pkgs/npm/-/v1/search")
-	sc, path, ok := resolveScope("/pkgs", u)
+	rq := httptest.NewRequest(http.MethodGet, "/pkgs/npm/-/v1/search", nil)
+	sc, path, ok := resolveScope("/pkgs", rq)
 	if !ok || sc.Explicit {
 		t.Fatalf("npm dash misread as explicit: %+v", sc)
 	}
@@ -43,9 +42,10 @@ func TestResolveScopeNpmDashNotExplicit(t *testing.T) {
 }
 
 func TestResolveScopeOCIHost(t *testing.T) {
-	u, _ := url.Parse("/v2/ghcr.io/acme/app/manifests/latest")
-	sc, _, ok := resolveScopeForFormat("oci", "/v2", u)
-	if !ok || sc.Namespace != "ghcr.io" || sc.Name != "acme/app" {
+	rq := httptest.NewRequest(http.MethodGet, "/v2/acme/app/manifests/latest", nil)
+	rq.Host = "ghcr.io"
+	sc, _, ok := resolveScopeForFormat("oci", "/v2", rq)
+	if !ok || sc.Namespace != "ghcr.io" || sc.Host != "ghcr.io" {
 		t.Fatalf("scope=%+v ok=%v", sc, ok)
 	}
 }

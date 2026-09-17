@@ -424,8 +424,7 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 	// Merge upstream results (pull-through) so public packages still appear,
 	// filtered by the same name pattern.
 	upstream := map[string]bool{}
-	if base := s.Registry.Upstreams.Get("conan"); base != "" {
-		remote := s.Registry.RemoteAt(base)
+	if remote, err := s.Registry.RemoteCtx(r.Context(), "conan"); err == nil {
 		if body, err := remote.GetBytes(r.Context(), "/v2/conans/search?q="+artifactkit.URLencode(q)); err == nil {
 			var m map[string]any
 			if json.Unmarshal(body, &m) == nil {
@@ -481,14 +480,9 @@ func (s *State) replyOrProxy(w http.ResponseWriter, r *http.Request, local any, 
 		artifactkit.JSON(w, http.StatusOK, local)
 		return
 	}
-	base := s.Registry.Upstreams.Get("conan")
-	proxy := base
-	// ConanCenter center sub-endpoint.
-	if c := s.Registry.Upstreams.Sub("conan", "center"); c != "" {
-		proxy = c
-	}
-	if proxy != "" {
-		remote := s.Registry.RemoteAt(proxy)
+	// The center sub-endpoint lives on center2.conan.io; host-driven
+	// resolution picks whichever the client actually dialed.
+	if remote, err := s.Registry.RemoteForSub(r.Context(), "conan", "center"); err == nil {
 		if body, err := remote.GetBytes(r.Context(), upstreamPath); err == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -515,15 +509,11 @@ func (s *State) proxyRecipe(w http.ResponseWriter, r *http.Request, path string)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	base := s.Registry.Upstreams.Get("conan")
-	if c := s.Registry.Upstreams.Sub("conan", "center"); c != "" {
-		base = c
-	}
-	if base == "" {
+	remote, err := s.Registry.RemoteForSub(r.Context(), "conan", "center")
+	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
-	remote := s.Registry.RemoteAt(base)
 	if body, err := remote.GetBytes(r.Context(), "/v2/"+strings.TrimLeft(path, "/")); err == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -734,14 +724,10 @@ func (s *State) recipeKnown(ctx context.Context, name, ver string) bool {
 // fetchUpstreamFile pulls a conans/... path's bytes through from center2 so
 // package/recipe files are cached server-side on first access.
 func (s *State) fetchUpstreamFile(r *http.Request, path string) ([]byte, bool) {
-	base := s.Registry.Upstreams.Get("conan")
-	if c := s.Registry.Upstreams.Sub("conan", "center"); c != "" {
-		base = c
-	}
-	if base == "" {
+	remote, err := s.Registry.RemoteForSub(r.Context(), "conan", "center")
+	if err != nil {
 		return nil, false
 	}
-	remote := s.Registry.RemoteAt(base)
 	body, err := remote.GetBytes(r.Context(), "/v2/"+strings.TrimLeft(path, "/"))
 	if err != nil {
 		return nil, false

@@ -166,7 +166,7 @@ func (s *State) simpleProject(w http.ResponseWriter, r *http.Request, name strin
 // document was served. When the upstream is unreachable, returns false so the
 // caller falls back to local-only.
 func (s *State) mergeSimpleProject(w http.ResponseWriter, r *http.Request, name string, versions []string) bool {
-	remote, err := s.Registry.Remote("pypi", "")
+	remote, err := s.Registry.RemoteCtx(r.Context(), "pypi")
 	if err != nil {
 		return false
 	}
@@ -317,7 +317,15 @@ func (s *State) simpleFile(w http.ResponseWriter, r *http.Request, project, file
 		}
 	}
 	// Pull-through: resolve from the upstream /simple/ page.
-	base := s.Registry.Upstreams.Get("pypi")
+	base := ""
+	if sc := artifactkit.RepoScopeFrom(r.Context()); sc.Host != "" {
+		if b, ok := s.Registry.Upstreams.HostBase(sc.Proto, sc.Host, sc.Prefix); ok {
+			base = b
+		}
+	}
+	if base == "" {
+		base = s.Registry.Upstreams.Get("pypi")
+	}
 	if base == "" {
 		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
@@ -439,6 +447,11 @@ func (s *State) metadataFile(w http.ResponseWriter, r *http.Request, project, fi
 	// /simple/ page and fetch "<url>.metadata". This preserves the upstream
 	// hash pip expects; only synthesize when there is no upstream at all.
 	base := s.Registry.Upstreams.Get("pypi")
+	if sc := artifactkit.RepoScopeFrom(r.Context()); sc.Host != "" {
+		if b, ok := s.Registry.Upstreams.HostBase(sc.Proto, sc.Host, sc.Prefix); ok {
+			base = b
+		}
+	}
 	if base != "" {
 		pagePath := "/simple/" + artifactkit.URLencode(project) + "/"
 		remote := s.Registry.RemoteAt(base)

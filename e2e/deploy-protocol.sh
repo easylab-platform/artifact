@@ -6,7 +6,7 @@ set -euo pipefail
 NS="${NS:-temp}"
 IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:v0.1.16}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
-PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci})
+PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy system})
 
 # ORIGIN=1 mounts each adapter in "upstream origin" mode (--self-base-raw):
 # self URLs take the upstream shape (registry.npmjs.org/left-pad/-/x.tgz,
@@ -35,6 +35,8 @@ proto_origin() {
     apk)         echo "http://dl-cdn.alpinelinux.org" ;;
     rpm)         echo "https://dl.fedoraproject.org" ;;
     oci)         echo "https://registry-1.docker.io" ;;
+    git)         echo "https://github.com" ;;
+    ivy)         echo "https://repo.scala-sbt.org" ;;
     *)           echo "" ;;
   esac
 }

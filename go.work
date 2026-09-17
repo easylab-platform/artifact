@@ -10,9 +10,11 @@ use (
 	./conan
 	./core
 	./generic
+	./git
 	./gitlfs
 	./go
 	./helm
+	./ivy
 	./huggingface
 	./hex
 	./maven

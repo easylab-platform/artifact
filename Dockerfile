@@ -31,7 +31,7 @@ RUN cd cmd && go build -mod=mod -trimpath -ldflags="-s -w" -o /out/artifact .
 
 # ---- runtime ----
 FROM ${REGISTRY}/alpine:${ALPINE}
-RUN apk add --no-cache ca-certificates curl
+RUN apk add --no-cache ca-certificates curl git
 # /data holds the sqlite metadata + CAS blobs (mount a PVC/hostPath there).
 COPY --from=build /out/artifact /usr/local/bin/artifact
 ENV EASYVCS_HOME=/data

@@ -214,7 +214,7 @@ func (s *State) sumdb(w http.ResponseWriter, r *http.Request, rest string) {
 		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
-	base := s.Registry.Upstreams.Sub("go", "sumdb")
+	base := ""
 	if base == "" {
 		base = "https://sum.golang.org"
 	}
@@ -230,7 +230,10 @@ func (s *State) sumdb(w http.ResponseWriter, r *http.Request, rest string) {
 	if q := r.URL.RawQuery; q != "" {
 		upURL += "?" + q
 	}
-	remote := s.Registry.RemoteAt(base)
+	remote, _ := s.Registry.RemoteForSub(r.Context(), "go", "sumdb")
+	if remote == nil {
+		remote, _ = s.Registry.RemoteCtx(r.Context(), "go")
+	}
 	body, err := remote.GetBytes(r.Context(), upURL)
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found")
@@ -249,7 +252,7 @@ func (s *State) sumdb(w http.ResponseWriter, r *http.Request, rest string) {
 }
 
 func (s *State) registryFetch(ctx context.Context, path string) ([]byte, error) {
-	remote, err := s.Registry.Remote("go", "")
+	remote, err := s.Registry.RemoteCtx(ctx, "go")
 	if err != nil {
 		return nil, err
 	}

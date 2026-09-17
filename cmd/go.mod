@@ -11,11 +11,13 @@ require (
 	github.com/easylab-platform/artifact/core v0.0.0
 	github.com/easylab-platform/artifact/debian v0.0.0
 	github.com/easylab-platform/artifact/generic v0.0.0
+	github.com/easylab-platform/artifact/git v0.0.0
 	github.com/easylab-platform/artifact/gitlfs v0.0.0
 	github.com/easylab-platform/artifact/go v0.0.0
 	github.com/easylab-platform/artifact/helm v0.0.0
 	github.com/easylab-platform/artifact/hex v0.0.0
 	github.com/easylab-platform/artifact/huggingface v0.0.0
+	github.com/easylab-platform/artifact/ivy v0.0.0
 	github.com/easylab-platform/artifact/maven v0.0.0
 	github.com/easylab-platform/artifact/nix v0.0.0
 	github.com/easylab-platform/artifact/npm v0.0.0
@@ -68,11 +70,13 @@ replace (
 	github.com/easylab-platform/artifact/core => ../core
 	github.com/easylab-platform/artifact/debian => ../debian
 	github.com/easylab-platform/artifact/generic => ../generic
+	github.com/easylab-platform/artifact/git => ../git
 	github.com/easylab-platform/artifact/gitlfs => ../gitlfs
 	github.com/easylab-platform/artifact/go => ../go
 	github.com/easylab-platform/artifact/helm => ../helm
 	github.com/easylab-platform/artifact/hex => ../hex
 	github.com/easylab-platform/artifact/huggingface => ../huggingface
+	github.com/easylab-platform/artifact/ivy => ../ivy
 	github.com/easylab-platform/artifact/maven => ../maven
 	github.com/easylab-platform/artifact/nix => ../nix
 	github.com/easylab-platform/artifact/npm => ../npm

@@ -27,7 +27,7 @@ UPSTREAM_DNS="${UPSTREAM_DNS:-172.18.0.10}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 # Each protocol uses its dedicated client image (toolchain/e2e: one image per
 # protocol, built from official/prebuilt tarballs under /opt).
-PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci})
+PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy})
 KEEP="${KEEP:-0}"
 
 source "${HERE}/rules.sh"
@@ -46,6 +46,10 @@ declare -a RESULTS
 cas_count() {
   local dep="deploy/artifact-$1"
   [ -n "${UNIFIED_SVC:-}" ] && dep="deploy/${UNIFIED_SVC}"
+  # `system` has no upstream and therefore no CAS growth assertion; other
+  # protocols count blobs (the git mirror keeps its objects on disk, not in
+  # the CAS, so it is excluded too).
+  case "$1" in system|git) echo 0; return ;; esac
   kubectl exec -n "$NS" "$dep" -- sh -c 'ls /data/blobs/sha256/*/* 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]'
 }
 
@@ -60,6 +64,14 @@ rewrite_count() {
 # connection closes, and clients that keep sockets alive (apt, cargo, maven, …)
 # may close them slightly after the client command returns — so a single read
 # races. max_wait/interval are seconds.
+# git_mirror_count counts the bare mirrors the git protocol has stored; it is
+# the git analogue of cas_count.
+git_mirror_count() {
+  local dep="deploy/artifact-$1"
+  [ -n "${UNIFIED_SVC:-}" ] && dep="deploy/${UNIFIED_SVC}"
+  kubectl exec -n "$NS" "$dep" -- sh -c 'find /data/git -name HEAD 2>/dev/null | wc -l' 2>/dev/null | tr -d '[:space:]'
+}
+
 await_rewrites() {
   local name="$1" max_wait="${2:-20}" interval="${3:-1}" waited=0 n=0
   while [ "$waited" -lt "$max_wait" ]; do
@@ -140,8 +152,9 @@ YAML
 }
 
 run_one() {
-  local p="$1" name="pull-$1" before after growth out rc rewrites
+  local p="$1" name="pull-$1" before after growth out rc rewrites before_git
   before="$(cas_count "$p")"
+  before_git="$(git_mirror_count "$p" 0 2>/dev/null || echo 0)"
   write_rules_cm pull "$p"
   write_script_cm "$p"
   kubectl delete pod -n "$NS" "$name" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1
@@ -157,6 +170,10 @@ run_one() {
   # for it (bounded) rather than racing a single read.
   rewrites="$(await_rewrites "$name" 20 1 || true)"
   after="$(cas_count "$p")"; growth=$(( ${after:-0} - ${before:-0} ))
+  if [ "$p" = "git" ]; then
+    # git stores a bare mirror on disk rather than in the CAS.
+    growth="$(git_mirror_count "$p" "$before_git")"
+  fi
   if [ "$rc" -eq 0 ] && [ "${rewrites:-0}" -gt 0 ]; then
     echo "PASS $p  ($rewrites rewrite conns, CAS +$growth)"; pass=$((pass+1)); RESULTS+=("PASS $p ($rewrites conns, CAS +$growth)")
   elif [ "$rc" -eq 0 ]; then

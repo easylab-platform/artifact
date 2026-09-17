@@ -201,7 +201,7 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 		seen[repo] = true
 	}
 	// Merge the upstream search so uncached public packages are discoverable.
-	if remote, _ := s.Registry.Remote("npm", ""); remote != nil {
+	if remote, _ := s.Registry.RemoteCtx(r.Context(), "npm"); remote != nil {
 		p := "/-/v1/search"
 		if raw := r.URL.RawQuery; raw != "" {
 			p += "?" + raw
@@ -436,7 +436,7 @@ func (s *State) metadata(w http.ResponseWriter, r *http.Request, name string) {
 		artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
 		return
 	}
-	remote, err := s.Registry.Remote("npm", "")
+	remote, err := s.Registry.RemoteCtx(r.Context(), "npm")
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "package not found")
 		return
@@ -460,7 +460,7 @@ func (s *State) aggregateMetadata(r *http.Request, name string) string {
 	// version list to satisfy ranges (e.g. is-even -> is-odd@^0.1.2 while only
 	// 3.0.1 is cached). Overlay upstream versions (tarballs rewritten to self)
 	// beneath them, then re-apply local metadata over the same version.
-	if remote, err := s.Registry.Remote("npm", ""); err == nil {
+	if remote, err := s.Registry.RemoteCtx(r.Context(), "npm"); err == nil {
 		if body, err := remote.GetCached(ctx, artifactkit.SharedIndexCache(), "/"+encodeName(name)); err == nil {
 			var up map[string]any
 			if json.Unmarshal([]byte(body), &up) == nil {
@@ -571,7 +571,7 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, name, file strin
 			}
 		}
 	}
-	remote, err := s.Registry.Remote("npm", "")
+	remote, err := s.Registry.RemoteCtx(r.Context(), "npm")
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "tarball not found")
 		return

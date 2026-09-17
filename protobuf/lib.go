@@ -83,6 +83,11 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	base := s.Registry.Upstreams.Get("protobuf")
+	if sc := artifactkit.RepoScopeFrom(r.Context()); sc.Host != "" {
+		if b, ok := s.Registry.Upstreams.HostBase(sc.Proto, sc.Host, sc.Prefix); ok {
+			base = b
+		}
+	}
 	if base == "" {
 		artifactkit.Error(w, http.StatusNotFound, "protobuf upstream disabled (air-gap)")
 		return

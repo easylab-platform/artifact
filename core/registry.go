@@ -103,6 +103,11 @@ type Upstreams struct {
 	// "format/repo" (e.g. "npm/@acme", "maven/org.apache", "go/github.com/acme")
 	// and match the LONGEST repository prefix, so one entry covers a subtree.
 	Repos map[string]RepoUpstream
+	// AllowedHosts are extra upstream hosts that may be reached through the
+	// X-Forwarded-Host path even though they are not in Defaults (container
+	// registries a client addresses by name: ghcr.io, quay.io, ...). Empty
+	// values ("host" or "scheme://host") default to https.
+	AllowedHosts []string
 	// AirGap, when true, returns no upstreams at all (local-only registry).
 	AirGap bool
 }

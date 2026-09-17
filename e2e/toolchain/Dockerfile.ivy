@@ -1,0 +1,7 @@
+# Protocol-client image: ivy. The e2e script drives the Ivy layout over HTTP
+# (wget against the descriptor and its jar), which is exactly what sbt's
+# resolver does at the wire level; the base image already ships wget and the
+# CA plumbing, so nothing else is layered on.
+ARG BASE_IMAGE=forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:trixie
+FROM ${BASE_IMAGE}
+RUN wget --version | head -1

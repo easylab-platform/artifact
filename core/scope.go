@@ -5,20 +5,34 @@ import (
 	"strings"
 )
 
-// RepoScope is the repository a request targets, resolved from its path. It
-// is carried in the request context so the storage and upstream layers can
-// isolate content and choose a remote WITHOUT every adapter threading the
-// namespace through its calls.
+// RepoScope is the repository a request targets, resolved once at the mount
+// boundary. It is carried in the request context so the storage and upstream
+// layers can isolate content and choose a remote WITHOUT every adapter
+// threading the namespace through its calls.
 //
-// Resolution order for Namespace:
-//  1. an explicit "/-/<repo>/" marker in the path (any protocol), else
-//  2. the format's registered NamespaceResolver (npm scope, OCI host, maven
-//     groupId, go module prefix, ...), else
+// Namespace resolution order:
+//  1. an explicit "/-/<repo>/" marker in the path, else
+//  2. the format's NamespaceResolver (npm scope, maven groupId, go module
+//     prefix, apk/debian/rpm/conda first segment, OCI registry host), else
 //  3. DefaultNamespace.
+//
+// Host is the request's original Host header. It matters for OCI: a docker
+// client puts the registry in SNI/Host, never in the path, so the host is the
+// only place the registry can be learned. The OCI resolver reads it from here.
+//
+// Proto and Prefix describe the origin the CLIENT reached us by, when the
+// request came through the egress proxy (which sets X-Forwarded-Proto and
+// X-Forwarded-Prefix next to preserving the Host). Together with Host they let
+// the upstream be reconstructed without a per-ecosystem table:
+//
+//	<proto>://<host><prefix><format-relative-path>
 type RepoScope struct {
 	Format    string
 	Namespace string
 	Name      string
+	Host      string
+	Proto     string
+	Prefix    string
 	// Explicit is true when the request used the "/-/<repo>/" marker.
 	Explicit bool
 }
@@ -64,5 +78,5 @@ func (s RepoScope) UnscopedName(key string) string {
 	if strings.HasPrefix(key, ns+"/") {
 		return key[len(ns)+1:]
 	}
-	return ""
+	return key
 }

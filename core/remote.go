@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -118,6 +119,27 @@ func (r *Remote) WithHeader(k, v string) *Remote {
 // URL joins a path onto the base.
 func (r *Remote) URL(path string) string { return r.Base + path }
 
+// Do issues an arbitrary request against the remote root. body may be nil; a
+// non-empty contentType is set as the request Content-Type. It is the general
+// escape hatch for protocols (git smart-HTTP) whose verbs are not plain GET.
+func (r *Remote) Do(ctx context.Context, method, path string, body io.Reader, contentType, accept string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, r.URL(path), body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", UserAgent)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	for k, v := range r.headers {
+		req.Header.Set(k, v)
+	}
+	return r.client.Do(req)
+}
+
 // Get issues GET and returns the raw response (non-2xx returned as-is).
 func (r *Remote) Get(ctx context.Context, path string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL(path), nil)
@@ -222,6 +244,12 @@ func (e *UpstreamStatusError) Error() string {
 // callers can decide how to handle it instead of silently downloading the
 // whole target server-side.
 func (r *Registry) Fetch(ctx context.Context, format, upstreamBase, path string) (Fetched, error) {
+	if upstreamBase == "" {
+		// No explicit base: resolve by the full priority and restore the
+		// client's stripped prefix (maven's /maven2, helm's /stable) so the
+		// upstream sees the path it published.
+		return r.FetchPath(ctx, format, path)
+	}
 	remote, err := r.remote(ctx, format, upstreamBase)
 	if err != nil {
 		return Fetched{}, err
@@ -236,6 +264,26 @@ func (r *Registry) FetchFor(ctx context.Context, format, repo, upstreamBase, pat
 	remote, err := r.remoteFor(ctx, format, repo, upstreamBase)
 	if err != nil {
 		return Fetched{}, err
+	}
+	return r.fetchWith(ctx, remote, path)
+}
+
+// FetchPath pulls a format-relative path using the request's full upstream
+// priority (per-repo override → client origin → table default), prepending the
+// client's stripped prefix so the upstream sees the original path. Adapters
+// call this instead of assembling a base themselves.
+func (r *Registry) FetchPath(ctx context.Context, format, path string) (Fetched, error) {
+	sc := RepoScopeFrom(ctx)
+	repo := sc.Namespace
+	if repo == "" {
+		repo = sc.Name
+	}
+	remote, err := r.remoteFor(ctx, format, repo, "")
+	if err != nil {
+		return Fetched{}, err
+	}
+	if sc.Prefix != "" && strings.HasPrefix(sc.Prefix, "/") {
+		path = strings.TrimSuffix(sc.Prefix, "/") + path
 	}
 	return r.fetchWith(ctx, remote, path)
 }
@@ -359,26 +407,77 @@ func proxyPtr(u *Upstreams, key string) *string {
 	return &v
 }
 
+// remote resolves the upstream for a format. The priority is:
+//
+//  1. an explicit per-repository override (operator intent), else
+//  2. the origin the client reached us by (X-Forwarded-Host/Proto/Prefix,
+//     applied only for hosts the table already knows), else
+//  3. the table default for the format's repository.
+//
+// An explicitly supplied base is honored verbatim (adapters that must fetch
+// from a URL they already resolved).
 func (r *Registry) remote(ctx context.Context, format, upstreamBase string) (*Remote, error) {
-	// An explicitly supplied base is honored verbatim; otherwise the request's
-	// repository scope decides which upstream to use (longest-prefix override
-	// over the format default). This is what lets any adapter get per-namespace
-	// upstreams without changing its call sites.
-	if upstreamBase == "" {
-		if sc := RepoScopeFrom(ctx); sc.Format != "" {
-			repo := sc.Namespace
-			if repo == "" {
-				repo = sc.Name
-			}
-			return r.RemoteFor(format, repo, "")
-		}
+	if upstreamBase != "" {
+		return r.Remote(format, upstreamBase)
 	}
-	return r.Remote(format, upstreamBase)
+	sc := RepoScopeFrom(ctx)
+	repo := sc.Namespace
+	if repo == "" {
+		repo = sc.Name
+	}
+	return r.remoteFor(ctx, format, repo, "")
 }
 
-// remoteFor is the repository-aware variant of remote.
-func (r *Registry) remoteFor(_ context.Context, format, repo, upstreamBase string) (*Remote, error) {
-	return r.RemoteFor(format, repo, upstreamBase)
+// resolveBase applies the upstream priority above and returns the base plus
+// its proxy policy. ok is false when no upstream is configured (air-gap).
+func (r *Registry) resolveBase(ctx context.Context, format, repo string) (string, *string, bool) {
+	u := r.Upstreams
+	if u == nil || u.AirGap {
+		return "", nil, false
+	}
+	// 1. explicit per-repository override.
+	if e, ok := u.RepoOverride(format, repo); ok {
+		var pp *string
+		if e.Proxy != "" {
+			pp = &e.Proxy
+		} else if p, has := u.ProxyURL(format); has {
+			pp = &p
+		}
+		return e.Base, pp, true
+	}
+	// 2. origin the client used (host-driven; allow-listed by the table).
+	if sc := RepoScopeFrom(ctx); sc.Host != "" {
+		if base, ok := u.HostBase(sc.Proto, sc.Host, sc.Prefix); ok {
+			var pp *string
+			if p, has := u.ProxyURL(format); has {
+				pp = &p
+			}
+			return base, pp, true
+		}
+	}
+	// 3. table default.
+	if base := u.Repo(format, repo); base != "" {
+		proxy, has := u.RepoProxy(format, repo)
+		var pp *string
+		if has {
+			pp = &proxy
+		}
+		return base, pp, true
+	}
+	return "", nil, false
+}
+
+// remoteFor resolves a Remote for one repository using resolveBase.
+func (r *Registry) remoteFor(ctx context.Context, format, repo, upstreamBase string) (*Remote, error) {
+	if upstreamBase != "" {
+		return r.RemoteFor(format, repo, upstreamBase)
+	}
+	base, proxy, ok := r.resolveBase(ctx, format, repo)
+	if !ok {
+		return nil, fmt.Errorf("no upstream for %s/%s", format, repo)
+	}
+	factory := NewClientFactory()
+	return NewRemote(factory, base, proxy), nil
 }
 
 func (r *Registry) finishFetch(ctx context.Context, data []byte) (Fetched, error) {
@@ -387,4 +486,139 @@ func (r *Registry) finishFetch(ctx context.Context, data []byte) (Fetched, error
 		return Fetched{}, err
 	}
 	return Fetched{Data: data, Hashes: stored.Hashes, Size: stored.Size, Digest: stored.Digest}, nil
+}
+
+// ResolveUpstream exposes the upstream priority (per-repo override → client
+// origin → table default) plus the client's stripped path prefix, for adapters
+// that need to build their own request (metadata overlays, HEAD probes) rather
+// than use Fetch.
+func (r *Registry) ResolveUpstream(ctx context.Context, format, repo string) (base, prefix string, ok bool) {
+	base, _, ok = r.resolveBase(ctx, format, repo)
+	if !ok {
+		return "", "", false
+	}
+	if sc := RepoScopeFrom(ctx); strings.HasPrefix(sc.Prefix, "/") {
+		prefix = strings.TrimSuffix(sc.Prefix, "/")
+	}
+	return base, prefix, true
+}
+
+// RemoteCtx resolves the upstream for a format using the request context's
+// host/repository priority (per-repo override → client origin → table
+// default). Adapters should prefer it over Remote so a client's original
+// hostname (recorded by the egress proxy) selects the upstream without a
+// per-ecosystem table.
+func (r *Registry) RemoteCtx(ctx context.Context, format string) (*Remote, error) {
+	remote, err := r.remote(ctx, format, "")
+	if err != nil {
+		return nil, err
+	}
+	return remote.withPrefix(scopePrefix(ctx)), nil
+}
+
+// RemoteUpstream resolves the upstream for a format using the request context
+// (host-driven) and falls back to explicitBase when the table has nothing (a
+// sub-endpoint the caller knows about). It returns nil when neither exists.
+func (r *Registry) RemoteUpstream(ctx context.Context, format, explicitBase string) *Remote {
+	if m, err := r.remote(ctx, format, ""); err == nil {
+		return m.withPrefix(scopePrefix(ctx))
+	}
+	if explicitBase == "" {
+		return nil
+	}
+	return r.remoteAtBase(explicitBase)
+}
+
+// remoteAtBase is the ctx-free absolute-base constructor.
+func (r *Registry) remoteAtBase(base string) *Remote {
+	factory := NewClientFactory()
+	return NewRemote(factory, base, proxyPtr(r.Upstreams, "generic"))
+}
+
+// scopePrefix returns the client's stripped path prefix ("/maven2").
+func scopePrefix(ctx context.Context) string {
+	p := RepoScopeFrom(ctx).Prefix
+	if strings.HasPrefix(p, "/") {
+		return strings.TrimSuffix(p, "/")
+	}
+	return ""
+}
+
+// withPrefix returns a copy whose base carries path, so sub-path requests hit
+// the upstream's original layout.
+func (r *Remote) withPrefix(prefix string) *Remote {
+	if prefix == "" {
+		return r
+	}
+	cp := *r
+	cp.Base = r.Base + prefix
+	return &cp
+}
+
+// RemoteForSub resolves a sub-endpoint of a format (cargo's index/static,
+// nuget's search/registration, hex's api, ...). Priority: the request's
+// client origin (host-driven, so the sidecar needs no per-sub table), then the
+// sub-endpoint's configured base, then the format default.
+func (r *Registry) RemoteForSub(ctx context.Context, format, sub string) (*Remote, error) {
+	u := r.Upstreams
+	if u == nil {
+		return nil, fmt.Errorf("no upstream for %s.%s", format, sub)
+	}
+	if sc := RepoScopeFrom(ctx); sc.Host != "" {
+		if base, ok := u.HostBase(sc.Proto, sc.Host, sc.Prefix); ok {
+			return r.remoteAtBase(base), nil
+		}
+	}
+	if base := u.Sub(format, sub); base != "" {
+		return r.remoteAtBase(base).withPrefix(scopePrefix(ctx)), nil
+	}
+	if base := u.Get(format); base != "" {
+		return r.remoteAtBase(base).withPrefix(scopePrefix(ctx)), nil
+	}
+	return nil, fmt.Errorf("no upstream for %s.%s", format, sub)
+}
+
+// RemoteHost resolves a Remote for an upstream identified by its hostname
+// (the git/ivy mirrors address servers directly). Priority: a per-host
+// repository override, then the upstream table, then any syntactically valid
+// public host (source mirrors treat the requested host as the source).
+func (r *Registry) RemoteHost(format, host string) (*Remote, bool) {
+	if r.Upstreams == nil {
+		return nil, false
+	}
+	if e, ok := r.Upstreams.RepoOverride(format, host); ok {
+		return r.remoteAtBase(e.Base), true
+	}
+	if base, ok := r.Upstreams.HostBase("", host, ""); ok {
+		return r.remoteAtBase(base), true
+	}
+	if scheme, ok := r.Upstreams.AllowedSource(host); ok {
+		return r.remoteAtBase(scheme + "://" + host), true
+	}
+	return nil, false
+}
+
+// GetBytesFollow is GetBytes but follows redirects (up to the default policy).
+// Ivy servers redirect to their artifact store (repo.scala-sbt.org →
+// scala.jfrog.io) and the redirected body is what must be cached.
+func (r *Remote) GetBytesFollow(ctx context.Context, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL(path), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", UserAgent)
+	for k, v := range r.headers {
+		req.Header.Set(k, v)
+	}
+	// The proxy policy is baked into r.client; reuse its transport.
+	client := &http.Client{Transport: r.client.Transport}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, &UpstreamStatusError{Path: path, Status: resp.StatusCode}
+	}
+	return io.ReadAll(resp.Body)
 }

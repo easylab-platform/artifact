@@ -9,9 +9,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VARIANT="${VARIANT:-bookworm}"
 
 if [ "$VARIANT" = "trixie" ]; then
-  PROTOS="${*:-npm pypi huggingface conan go cargo maven nuget rubygems composer hex pub helm protobuf conda oci swift debian}"
+  PROTOS="${*:-npm pypi huggingface conan go cargo maven nuget rubygems composer hex pub helm protobuf conda oci swift debian git ivy}"
 else
-  PROTOS="${*:-npm pypi huggingface conan go cargo maven nuget rubygems composer hex pub helm protobuf conda oci swift debian rpm apk nix}"
+  PROTOS="${*:-npm pypi huggingface conan go cargo maven nuget rubygems composer hex pub helm protobuf conda oci swift debian git ivy rpm apk nix}"
 fi
 
 fail=0

@@ -77,7 +77,6 @@ func init() {
 	RegisterNamespace("npm", ScopeNamespace)
 	RegisterNamespace("maven", MavenNamespace)
 	RegisterNamespace("go", GoModuleNamespace)
-	RegisterNamespace("oci", OCIHostNamespace)
 	RegisterNamespace("apk", FirstSegNamespace)
 	RegisterNamespace("debian", FirstSegNamespace)
 	RegisterNamespace("rpm", FirstSegNamespace)

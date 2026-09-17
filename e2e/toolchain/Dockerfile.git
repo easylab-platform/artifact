@@ -1,0 +1,5 @@
+# Protocol-client image: git. The base already ships git and the CA utilities;
+# nothing else is needed because the smart-HTTP client is git itself.
+ARG BASE_IMAGE=forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:trixie
+FROM ${BASE_IMAGE}
+RUN git --version

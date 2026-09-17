@@ -124,8 +124,7 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 		seen[name] = true
 	}
 	// Merge crates.io's search so uncached public crates are discoverable.
-	if base := s.Registry.Upstreams.Get("cargo"); base != "" {
-		remote := s.Registry.RemoteAt(base)
+	if remote, err := s.Registry.RemoteCtx(r.Context(), "cargo"); err == nil {
 		p := "/api/v1/crates"
 		if raw := r.URL.RawQuery; raw != "" {
 			p += "?" + raw
@@ -153,7 +152,7 @@ func (s *State) apiFallback(w http.ResponseWriter, r *http.Request, name string)
 	name = strings.Trim(name, "/")
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "cargo", name)
 	if len(versions) == 0 {
-		remote, err := s.Registry.Remote("cargo", "")
+		remote, err := s.Registry.RemoteCtx(r.Context(), "cargo")
 		if err == nil {
 			if body, err := remote.GetBytes(r.Context(), "/api/v1/crates/"+artifactkit.URLencode(name)); err == nil {
 				artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
@@ -184,7 +183,7 @@ func (s *State) sparseIndex(w http.ResponseWriter, r *http.Request, rel string) 
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "cargo", name)
 	artifactkit.SortSemver(versions)
 
-	upstreamBody := s.fetchSparseIndex(rel)
+	upstreamBody := s.fetchSparseIndex(r.Context(), rel)
 	if len(versions) == 0 {
 		if upstreamBody != "" {
 			artifactkit.Text(w, http.StatusOK, upstreamBody, "text/plain")
@@ -229,8 +228,8 @@ func (s *State) sparseIndex(w http.ResponseWriter, r *http.Request, rel string) 
 	artifactkit.Text(w, http.StatusOK, out+"\n", "text/plain")
 }
 
-func (s *State) fetchSparseIndex(rel string) string {
-	remote, err := s.registrySubRemote("cargo", "index")
+func (s *State) fetchSparseIndex(ctx context.Context, rel string) string {
+	remote, err := s.registrySubRemote(ctx, "cargo", "index")
 	if err != nil {
 		return ""
 	}
@@ -273,7 +272,7 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, name, version s
 			}
 		}
 	}
-	remote, err := s.registrySubRemote("cargo", "static")
+	remote, err := s.registrySubRemote(r.Context(), "cargo", "static")
 	if err == nil {
 		nameEnc := artifactkit.URLencode(name)
 		cratePath := "/" + nameEnc + "/" + name + "-" + version + ".crate"
@@ -414,15 +413,8 @@ func (s *State) saveMeta(ctx context.Context, name string, m meta) {
 	artifactkit.LogMetaErr("meta put", s.Registry.Meta.Put(ctx, artifactkit.Artifact{Format: "cargo", Repository: name, Version: "", Proprietary: b}))
 }
 
-func (s *State) registrySubRemote(format, sub string) (*artifactkit.Remote, error) {
-	base := s.Registry.Upstreams.Sub(format, sub)
-	if base == "" {
-		base = s.Registry.Upstreams.Get(format)
-	}
-	if base == "" {
-		return nil, errNoUpstream
-	}
-	return s.Registry.RemoteAt(base), nil
+func (s *State) registrySubRemote(ctx context.Context, format, sub string) (*artifactkit.Remote, error) {
+	return s.Registry.RemoteForSub(ctx, format, sub)
 }
 
 // parsePublishBody parses cargo's binary framing:

@@ -51,8 +51,8 @@ func TestBlobFollowsRedirect(t *testing.T) {
 	a := New(&OciState{Registry: reg})
 
 	regHost := strings.TrimPrefix(registrySrv.URL, "http://") // 127.0.0.1:port
-	name := regHost + "/team/app"
-	req := httptest.NewRequest(http.MethodGet, "/v2/"+name+"/blobs/"+digest, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/team/app/blobs/"+digest, nil)
+	req.Host = regHost // the registry travels in Host, not the path
 	rec := httptest.NewRecorder()
 	a.ServeHTTP(rec, req)
 
@@ -94,7 +94,8 @@ func TestBlobRedirectDigestMismatch(t *testing.T) {
 
 	digest := "sha256:" + hexDigest([]byte("the-real-bytes"))
 	regHost := strings.TrimPrefix(registrySrv.URL, "http://")
-	req := httptest.NewRequest(http.MethodGet, "/v2/"+regHost+"/team/app/blobs/"+digest, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/team/app/blobs/"+digest, nil)
+	req.Host = regHost
 	rec := httptest.NewRecorder()
 	a.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadGateway {

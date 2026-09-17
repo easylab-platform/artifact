@@ -31,7 +31,9 @@ proto_row() {
     debian)      echo '["deb.debian.org", "security.debian.org", "archive.ubuntu.com", "security.ubuntu.com"]||/pkgs/debian' ;;
     apk)         echo '["dl-cdn.alpinelinux.org"]||/pkgs/apk' ;;
     rpm)         echo '["dl.fedoraproject.org"]||/pkgs/rpm' ;;
-    oci)         echo '["registry-1.docker.io", "docker.io", "production.cloudflare.docker.com"]||' ;;
+    oci)         echo '["registry-1.docker.io", "docker.io", "index.docker.io", "ghcr.io", "quay.io"]||' ;;
+    git)         echo '["github.com"]||/pkgs/git' ;;
+    ivy)         echo '["repo.scala-sbt.org"]||/pkgs/ivy' ;;
     *)           echo "" ;;
   esac
 }
