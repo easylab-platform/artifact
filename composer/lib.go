@@ -274,7 +274,7 @@ func (s *State) dist(w http.ResponseWriter, r *http.Request, rest string) {
 }
 
 func (s *State) upload(w http.ResponseWriter, r *http.Request) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "composer") {
 		return
 	}
 	artifactkit.LimitBody(w, r)
@@ -295,7 +295,7 @@ func (s *State) upload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) deletePackage(w http.ResponseWriter, r *http.Request, rest string) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "composer") {
 		return
 	}
 	full := strings.Trim(rest, "/")

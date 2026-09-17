@@ -39,12 +39,14 @@ func main() {
 		airGap        = flag.Bool("air-gap", false, "disable all upstream pull-through")
 		blobBackend   = flag.String("blob-backend", "filesystem", "blob backend: filesystem | s3")
 		upstreamSet   = flag.String("upstreams", "", "override upstream base for a format, `format=url` pairs comma separated (e.g. go=http://proxy.golang.org)")
+		repoUpstreams = flag.String("repo-upstreams", "", "per-repository upstream overrides, `format/repo=url` pairs comma separated; the longest matching repo prefix wins (e.g. maven/org.apache=https://mirror.example/m2,npm/@acme=https://npm.example)")
 		upstreamProxy = flag.String("upstream-proxy", "", "HTTP proxy URL for upstream fetches (empty = follow env, \"none\" = direct)")
 	)
 	flag.Parse()
 
 	upstreams := defaultUpstreams(*airGap)
 	applyUpstreamOverrides(upstreams, *upstreamSet, *upstreamProxy)
+	applyRepoUpstreams(upstreams, *repoUpstreams)
 
 	// Open the metadata store (SQLite) always; blob backend is chosen below.
 	idxPath := filepath.Join(*dataDir, "pkglab.db")
@@ -78,7 +80,7 @@ func main() {
 		log.Fatalf("open blob store: %v", err)
 	}
 
-	reg := &artifactkit.Registry{Blobs: blobs, Meta: meta, Upstreams: upstreams}
+	reg := &artifactkit.Registry{Blobs: blobs, Meta: artifactkit.NewScopedStore(meta), Upstreams: upstreams}
 
 	// Determine which protocols to mount.
 	names := *protocols
@@ -99,6 +101,10 @@ func main() {
 			log.Fatalf("build protocol %q: %v", name, err)
 		}
 		// OCI is spec-fixed at /v2; everything else under /pkgs/<name>.
+		// Every mount is wrapped in the scope middleware, which resolves the
+		// request's repository (namespace) once and stashes it in the context;
+		// the scoped metadata store and Fetch then honor it for every adapter
+		// without their involvement.
 		if name == "oci" {
 			// Wire the /token auth endpoint the OCI challenges reference.
 			// easylab serves it under /v2/token (the /v2 mount), so expose both.
@@ -109,11 +115,18 @@ func main() {
 				mux.Handle("/v2/token", tokenH)
 				mux.Handle("/token", tokenH)
 			}
-			mux.Handle("/v2", handler)
-			mux.Handle("/v2/", handler)
+			scoped := artifactkit.ScopeMiddlewareForFormat("oci", "/v2", handler)
+			mux.Handle("/v2", scoped)
+			mux.Handle("/v2/", scoped)
 		} else {
-			mux.Handle("/pkgs/"+name+"/", handler)
-			mux.Handle("/pkgs/"+name, handler)
+			// The explicit-repository form "/pkgs/<fmt>/-/<repo>/..." is an
+			// ADMIN (write-path) affordance: it lets a publisher or operator
+			// target a repository unambiguously. It is never advertised in
+			// generated URLs (self-base keeps the native shape), so clients
+			// reach namespaces through their protocol-native addressing.
+			scoped := artifactkit.ScopeMiddleware("/pkgs", handler)
+			mux.Handle("/pkgs/"+name+"/", scoped)
+			mux.Handle("/pkgs/"+name, scoped)
 		}
 		mounted++
 	}
@@ -475,4 +488,27 @@ func seedTokens(meta *store.Store, spec string) error {
 		log.Printf("auth: seeded credential (level %s)", level)
 	}
 	return nil
+}
+
+// applyRepoUpstreams installs per-repository upstream overrides from
+// "format/repo=url" pairs. The repository part may be a namespace prefix
+// (maven/org.apache, npm/@acme, go/github.com/acme); the longest matching
+// prefix wins at request time, so one entry covers a whole subtree.
+func applyRepoUpstreams(u *artifactkit.Upstreams, pairs string) {
+	for _, pair := range strings.Split(pairs, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(pair, "=")
+		if !ok {
+			continue
+		}
+		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+		format, repo, ok := strings.Cut(k, "/")
+		if !ok || format == "" || repo == "" || v == "" {
+			continue
+		}
+		u.SetRepo(format, repo, v, "")
+	}
 }

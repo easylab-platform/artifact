@@ -138,7 +138,7 @@ func (s *State) chart(w http.ResponseWriter, r *http.Request, filename string) {
 }
 
 func (s *State) upload(w http.ResponseWriter, r *http.Request) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "helm") {
 		return
 	}
 	artifactkit.LimitBody(w, r)
@@ -185,7 +185,7 @@ func (s *State) deleteChart(w http.ResponseWriter, r *http.Request, rest string)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "helm") {
 		return
 	}
 	parts := strings.Split(rest, "/")

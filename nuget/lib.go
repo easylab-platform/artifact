@@ -287,7 +287,7 @@ func (s *State) flatFile(w http.ResponseWriter, r *http.Request, id, ver, filena
 }
 
 func (s *State) deletePkg(w http.ResponseWriter, r *http.Request, id, ver string) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "nuget") {
 		return
 	}
 	// IDs are stored lowercased (see push); NuGet IDs are case-insensitive and
@@ -303,7 +303,7 @@ func (s *State) deletePkg(w http.ResponseWriter, r *http.Request, id, ver string
 }
 
 func (s *State) push(w http.ResponseWriter, r *http.Request) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "nuget") {
 		return
 	}
 	artifactkit.LimitBody(w, r)

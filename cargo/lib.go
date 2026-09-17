@@ -292,7 +292,7 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, name, version s
 }
 
 func (s *State) publish(w http.ResponseWriter, r *http.Request) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "cargo") {
 		return
 	}
 	artifactkit.LimitBody(w, r)
@@ -324,7 +324,7 @@ func (s *State) publish(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) yank(w http.ResponseWriter, r *http.Request, name, version string, yanked bool) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "cargo") {
 		return
 	}
 	if _, err := s.Registry.Meta.Get(r.Context(), "cargo", name, version); err != nil {
@@ -346,7 +346,7 @@ func (s *State) owners(w http.ResponseWriter, r *http.Request, path string) {
 	name := parts[0]
 	// PUT/DELETE mutate the owner set; GET lists it.
 	if (r.Method == http.MethodPut || r.Method == http.MethodDelete) && len(parts) >= 2 && parts[1] == "owners" {
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "cargo") {
 			return
 		}
 		artifactkit.LimitBody(w, r)

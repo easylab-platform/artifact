@@ -189,7 +189,9 @@ func (h *HostedHandler) Get(w http.ResponseWriter, r *http.Request, repo, name s
 
 // Put stores an uploaded file into repo.
 func (h *HostedHandler) Put(w http.ResponseWriter, r *http.Request, repo, name string) {
-	if !AuthorizeWrite(w, r, h.Auth) {
+	// The repo is the namespace for the hosted formats (apk/debian/rpm/conda):
+	// scope-aware authorization keeps a repo's contents under one owner.
+	if !AuthorizeWriteFor(w, r, h.Auth, h.Store.Registry, h.Format, name) {
 		return
 	}
 	if _, _, err := h.Store.HostedUpload(r.Context(), h.Format, repo, name, r.Body); err != nil {
@@ -201,7 +203,7 @@ func (h *HostedHandler) Put(w http.ResponseWriter, r *http.Request, repo, name s
 
 // Delete removes a hosted file from repo.
 func (h *HostedHandler) Delete(w http.ResponseWriter, r *http.Request, repo, name string) {
-	if !AuthorizeWrite(w, r, h.Auth) {
+	if !AuthorizeWriteFor(w, r, h.Auth, h.Store.Registry, h.Format, name) {
 		return
 	}
 	if err := h.Store.HostedDelete(r.Context(), h.Format, repo, name); err != nil {

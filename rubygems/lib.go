@@ -369,7 +369,7 @@ func (s *State) dependencies(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) upload(w http.ResponseWriter, r *http.Request) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "rubygems") {
 		return
 	}
 	artifactkit.LimitBody(w, r)
@@ -395,7 +395,7 @@ func (s *State) yank(w http.ResponseWriter, r *http.Request, name, version strin
 		artifactkit.Error(w, http.StatusNotFound, "missing gem_name")
 		return
 	}
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "rubygems") {
 		return
 	}
 	if version == "" {

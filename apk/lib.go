@@ -53,7 +53,12 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	return s, nil
 }
 
-func init() { artifactkit.Register("apk", NewHandler) }
+func init() {
+	artifactkit.Register("apk", NewHandler)
+	// The first path segment is the repository (its upstream may be
+	// overridden per repo via -repo-upstreams / the system API).
+	artifactkit.RegisterNamespace("apk", artifactkit.FirstSegNamespace)
+}
 
 // ServeHTTP dispatches one repo key: a proxied repository (v<ver>/<component>
 // /<arch>) or a self-published hosted repo. Hosted content wins for the key;
@@ -95,7 +100,7 @@ func (s *State) fetch(w http.ResponseWriter, r *http.Request, repoPath string) {
 			return
 		}
 	}
-	base := s.Registry.Upstreams.Get("apk")
+	base := s.Registry.Upstreams.Repo("apk", repo)
 	if base == "" {
 		artifactkit.Error(w, http.StatusNotFound, "apk upstream disabled (air-gap)")
 		return

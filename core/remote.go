@@ -226,6 +226,22 @@ func (r *Registry) Fetch(ctx context.Context, format, upstreamBase, path string)
 	if err != nil {
 		return Fetched{}, err
 	}
+	return r.fetchWith(ctx, remote, path)
+}
+
+// FetchFor is Fetch for one repository of a format: the repository's upstream
+// override (longest prefix match) and proxy policy decide where the request
+// goes. An empty upstreamBase means "resolve from the repository policy".
+func (r *Registry) FetchFor(ctx context.Context, format, repo, upstreamBase, path string) (Fetched, error) {
+	remote, err := r.remoteFor(ctx, format, repo, upstreamBase)
+	if err != nil {
+		return Fetched{}, err
+	}
+	return r.fetchWith(ctx, remote, path)
+}
+
+// fetchWith issues one GET against a resolved upstream and caches the bytes.
+func (r *Registry) fetchWith(ctx context.Context, remote *Remote, path string) (Fetched, error) {
 	resp, err := remote.getStable(ctx, path)
 	if err != nil {
 		return Fetched{}, fmt.Errorf("http: %w", err)
@@ -305,6 +321,26 @@ func (r *Registry) Remote(format, upstreamBase string) (*Remote, error) {
 	return NewRemote(factory, base, proxyPtr(r.Upstreams, format)), nil
 }
 
+// RemoteFor returns a proxy-aware upstream handle for one repository of a
+// format: the repository override wins over the format default, and the
+// repository's own proxy policy wins over the format's.
+func (r *Registry) RemoteFor(format, repo, upstreamBase string) (*Remote, error) {
+	base := upstreamBase
+	if base == "" {
+		base = r.Upstreams.Repo(format, repo)
+		if base == "" {
+			return nil, fmt.Errorf("no upstream for %s/%s", format, repo)
+		}
+	}
+	factory := NewClientFactory()
+	proxy, ok := r.Upstreams.RepoProxy(format, repo)
+	var pp *string
+	if ok {
+		pp = &proxy
+	}
+	return NewRemote(factory, base, pp), nil
+}
+
 // RemoteAt returns a remote against an arbitrary absolute base using the
 // format's proxy policy.
 func (r *Registry) RemoteAt(base string) *Remote {
@@ -324,7 +360,25 @@ func proxyPtr(u *Upstreams, key string) *string {
 }
 
 func (r *Registry) remote(ctx context.Context, format, upstreamBase string) (*Remote, error) {
+	// An explicitly supplied base is honored verbatim; otherwise the request's
+	// repository scope decides which upstream to use (longest-prefix override
+	// over the format default). This is what lets any adapter get per-namespace
+	// upstreams without changing its call sites.
+	if upstreamBase == "" {
+		if sc := RepoScopeFrom(ctx); sc.Format != "" {
+			repo := sc.Namespace
+			if repo == "" {
+				repo = sc.Name
+			}
+			return r.RemoteFor(format, repo, "")
+		}
+	}
 	return r.Remote(format, upstreamBase)
+}
+
+// remoteFor is the repository-aware variant of remote.
+func (r *Registry) remoteFor(_ context.Context, format, repo, upstreamBase string) (*Remote, error) {
+	return r.RemoteFor(format, repo, upstreamBase)
 }
 
 func (r *Registry) finishFetch(ctx context.Context, data []byte) (Fetched, error) {

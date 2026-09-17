@@ -69,7 +69,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Version", "1")
 		w.WriteHeader(http.StatusOK)
 	case method == http.MethodPut:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "swiftpm") {
 			return
 		}
 		s.putPath(w, r, path)
@@ -77,7 +77,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// DELETE /{scope}/{name}/{version} — remove a release. The registry
 		// spec does not standardize deletion; the client-facing flow only
 		// needs the release to stop resolving afterwards.
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "swiftpm") {
 			return
 		}
 		parts := strings.Split(path, "/")

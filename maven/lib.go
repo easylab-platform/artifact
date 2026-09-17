@@ -27,7 +27,10 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	return s, nil
 }
 
-func init() { artifactkit.Register("maven", NewHandler) }
+func init() {
+	artifactkit.Register("maven", NewHandler)
+	artifactkit.RegisterNamespace("maven", artifactkit.MavenNamespace)
+}
 
 type coords struct {
 	artifactID string
@@ -88,7 +91,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case http.MethodGet:
 			s.getPath(w, r, path, c)
 		case http.MethodDelete:
-			if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+			if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "maven") {
 				return
 			}
 			s.deletePath(w, r, path, c)
@@ -138,7 +141,7 @@ func (s *State) headPath(w http.ResponseWriter, r *http.Request, p string, c coo
 }
 
 func (s *State) putPath(w http.ResponseWriter, r *http.Request, p string, c coords) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "maven") {
 		return
 	}
 	filename := pathLast(p)

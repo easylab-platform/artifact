@@ -50,7 +50,12 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	return s, nil
 }
 
-func init() { artifactkit.Register("conda", NewHandler) }
+func init() {
+	artifactkit.Register("conda", NewHandler)
+	// The first path segment is the repository (its upstream may be
+	// overridden per repo via -repo-upstreams / the system API).
+	artifactkit.RegisterNamespace("conda", artifactkit.FirstSegNamespace)
+}
 
 // ServeHTTP dispatches one repo key: a proxied channel (pkgs/main,
 // conda-forge, ...) or a self-published hosted channel. Hosted content wins
@@ -98,7 +103,7 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, path, channel, res
 			return
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "conda", base, "/"+path)
+	fetched, err := s.Registry.FetchFor(r.Context(), "conda", channel, base, "/"+path)
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
@@ -110,15 +115,16 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, path, channel, res
 	artifactkit.OctetResponse(w, r, fetched.Data)
 }
 
-// upstreamFor resolves the upstream base for a channel key.
+// upstreamFor resolves the upstream base for a channel key: a per-channel
+// explicit override (the legacy config map, then -repo-upstreams) wins, else
+// the format default.
 func (s *State) upstreamFor(channel string) string {
 	if s.ChannelUpstreams != nil {
 		if b, ok := s.ChannelUpstreams[channel]; ok {
 			return b
 		}
-		return ""
 	}
-	return s.Registry.Upstreams.Get("conda")
+	return s.Registry.Upstreams.Repo("conda", channel)
 }
 
 // subdirOf extracts the conda subdir for cache grouping ("linux-64",

@@ -28,7 +28,10 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	return s, nil
 }
 
-func init() { artifactkit.Register("go", NewHandler) }
+func init() {
+	artifactkit.Register("go", NewHandler)
+	artifactkit.RegisterNamespace("go", artifactkit.GoModuleNamespace)
+}
 
 // EncodeModulePath escapes uppercase letters as !lower per the Go proxy spec.
 func EncodeModulePath(m string) string {
@@ -258,7 +261,7 @@ func (s *State) jsonOk(w http.ResponseWriter, v any) {
 }
 
 func (s *State) upload(w http.ResponseWriter, r *http.Request) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "go") {
 		return
 	}
 	name, version := r.URL.Query().Get("name"), r.URL.Query().Get("version")
@@ -291,7 +294,7 @@ func (s *State) upload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) deleteModule(w http.ResponseWriter, r *http.Request) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "go") {
 		return
 	}
 	module := r.URL.Query().Get("name")

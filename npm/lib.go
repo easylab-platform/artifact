@@ -40,7 +40,10 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	return s, nil
 }
 
-func init() { artifactkit.Register("npm", NewHandler) }
+func init() {
+	artifactkit.Register("npm", NewHandler)
+	artifactkit.RegisterNamespace("npm", artifactkit.ScopeNamespace)
+}
 
 func (s *State) base() string {
 	if s.SelfBase == "" {
@@ -429,7 +432,7 @@ func (s *State) metadata(w http.ResponseWriter, r *http.Request, name string) {
 	if !artifactkit.AuthorizeReadFor(w, r, s.Auth, s.Registry, "npm", name) {
 		return
 	}
-	if body := s.aggregateMetadata(r.Context(), name); body != "" {
+	if body := s.aggregateMetadata(r, name); body != "" {
 		artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
 		return
 	}
@@ -443,10 +446,11 @@ func (s *State) metadata(w http.ResponseWriter, r *http.Request, name string) {
 		artifactkit.Error(w, http.StatusNotFound, "package not found")
 		return
 	}
-	artifactkit.JSON(w, http.StatusOK, json.RawMessage(s.rewriteTarballURLs(body, name)))
+	artifactkit.JSON(w, http.StatusOK, json.RawMessage(s.rewriteTarballURLs(r, body, name)))
 }
 
-func (s *State) aggregateMetadata(ctx context.Context, name string) string {
+func (s *State) aggregateMetadata(r *http.Request, name string) string {
+	ctx := r.Context()
 	versions, _ := s.Registry.Meta.ListVersions(ctx, "npm", name)
 	if len(versions) == 0 {
 		return ""
@@ -467,7 +471,7 @@ func (s *State) aggregateMetadata(ctx context.Context, name string) string {
 						}
 						if m, ok := info.(map[string]any); ok {
 							if dist, ok := m["dist"].(map[string]any); ok {
-								dist["tarball"] = s.tarballURL(name, ver)
+								dist["tarball"] = s.tarballURLCtx(r, name, ver)
 							}
 							vmap[ver] = m
 						}
@@ -490,7 +494,7 @@ func (s *State) aggregateMetadata(ctx context.Context, name string) string {
 		if _, ok := pj["version"]; !ok {
 			pj["version"] = v
 		}
-		dist := map[string]any{"tarball": s.tarballURL(name, v)}
+		dist := map[string]any{"tarball": s.tarballURLCtx(r, name, v)}
 		for _, b := range art.Blobs {
 			if b.Digest == "" {
 				continue
@@ -521,11 +525,19 @@ func (s *State) aggregateMetadata(ctx context.Context, name string) string {
 	return string(b)
 }
 
-func (s *State) tarballURL(name, version string) string {
-	return s.base() + "/" + encodeName(name) + "/-/" + tarballFilename(name, version)
+// tarballURL builds the dist.tarball for one version. When the request targets
+// an explicit repository (the /-/<repo>/ admin form), the URL carries that
+// repository so the client's download lands in the same namespace; a native
+// request keeps the plain shape the client already uses.
+func (s *State) tarballURLCtx(r *http.Request, name, version string) string {
+	base := s.base()
+	if sc := artifactkit.RepoScopeFrom(r.Context()); sc.Explicit && sc.Namespace != "" {
+		base += "/-/" + sc.Namespace
+	}
+	return base + "/" + encodeName(name) + "/-/" + tarballFilename(name, version)
 }
 
-func (s *State) rewriteTarballURLs(packument, name string) string {
+func (s *State) rewriteTarballURLs(r *http.Request, packument, name string) string {
 	var doc map[string]any
 	if json.Unmarshal([]byte(packument), &doc) != nil {
 		return packument
@@ -534,7 +546,7 @@ func (s *State) rewriteTarballURLs(packument, name string) string {
 		for ver, info := range versions {
 			if m, ok := info.(map[string]any); ok {
 				if dist, ok := m["dist"].(map[string]any); ok {
-					dist["tarball"] = s.tarballURL(name, ver)
+					dist["tarball"] = s.tarballURLCtx(r, name, ver)
 				}
 			}
 		}

@@ -230,7 +230,7 @@ func (s *State) releaseInfo(w http.ResponseWriter, r *http.Request, trimmed stri
 	if len(parts) >= 3 && parts[1] == "releases" {
 		name, version := parts[0], parts[2]
 		if r.Method == http.MethodDelete {
-			if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+			if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "hex") {
 				return
 			}
 			if _, err := s.Registry.Meta.Get(r.Context(), "hex", name, version); err != nil {
@@ -248,7 +248,7 @@ func (s *State) releaseInfo(w http.ResponseWriter, r *http.Request, trimmed stri
 }
 
 func (s *State) publish(w http.ResponseWriter, r *http.Request) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "hex") {
 		return
 	}
 	name, version := r.URL.Query().Get("name"), r.URL.Query().Get("version")
@@ -278,7 +278,7 @@ func (s *State) publish(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) createRelease(w http.ResponseWriter, r *http.Request, trimmed string) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "hex") {
 		return
 	}
 	rest := strings.TrimSuffix(strings.TrimPrefix(trimmed, "packages/"), "/releases")

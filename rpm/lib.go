@@ -51,7 +51,12 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	return s, nil
 }
 
-func init() { artifactkit.Register("rpm", NewHandler) }
+func init() {
+	artifactkit.Register("rpm", NewHandler)
+	// The first path segment is the repository (its upstream may be
+	// overridden per repo via -repo-upstreams / the system API).
+	artifactkit.RegisterNamespace("rpm", artifactkit.FirstSegNamespace)
+}
 
 // ServeHTTP dispatches one repo key: a proxied mirror (fedora, a repo
 // override key, ...) or a self-published hosted repo. Hosted content wins for
@@ -92,7 +97,7 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, repo, rest string)
 			return
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "rpm", base, "/"+rest)
+	fetched, err := s.Registry.FetchFor(r.Context(), "rpm", repo, base, "/"+rest)
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
@@ -104,15 +109,16 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, repo, rest string)
 	artifactkit.OctetResponse(w, r, fetched.Data)
 }
 
-// upstreamFor resolves the upstream base for a repository key.
+// upstreamFor resolves the upstream base for a repository key: an explicit
+// override (legacy config map, then -repo-upstreams) wins, else the format
+// default.
 func (s *State) upstreamFor(repo string) string {
 	if s.RepoUpstreams != nil {
 		if b, ok := s.RepoUpstreams[repo]; ok {
 			return b
 		}
-		return ""
 	}
-	return s.Registry.Upstreams.Get("rpm")
+	return s.Registry.Upstreams.Repo("rpm", repo)
 }
 
 // storeCache persists a fetched path into the CAS + index (best-effort).

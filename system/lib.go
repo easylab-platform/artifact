@@ -46,6 +46,10 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.proxyKey(w, r, key)
 	case path == "/packages" || path == "/packages/":
 		s.packages(w, r)
+	case path == "/repos" || path == "/repos/":
+		s.repos(w, r)
+	case len(path) > len("/repos/") && strings.HasPrefix(path, "/repos/"):
+		s.repoKey(w, r, stringsTrimPrefix(path, "/repos/"))
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
@@ -198,4 +202,62 @@ func indexByte(s string, b byte) int {
 		}
 	}
 	return -1
+}
+
+// repos lists every repository override (format/repo -> upstream + proxy) and
+// every format's effective default, so an operator can see how a request for
+// a given namespace will be routed.
+func (s *State) repos(w http.ResponseWriter, r *http.Request) {
+	artifactkit.JSON(w, http.StatusOK, map[string]any{
+		"repos":   s.Registry.Upstreams.RepoStates(),
+		"formats": s.Registry.Upstreams.All(),
+	})
+}
+
+// repoKey gets or sets one repository override. The key is "format/repo"
+// (repo may be a namespace prefix: maven/org.apache, npm/@acme).
+func (s *State) repoKey(w http.ResponseWriter, r *http.Request, key string) {
+	format, repo, ok := stringsCut(key, "/")
+	if !ok || format == "" || repo == "" {
+		artifactkit.JSON(w, http.StatusBadRequest, map[string]any{"error": "key must be format/repo"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if e, ok := s.Registry.Upstreams.RepoOverride(format, repo); ok {
+			artifactkit.JSON(w, http.StatusOK, map[string]any{"format": format, "repo": repo, "base": e.Base, "proxy": e.Proxy})
+			return
+		}
+		artifactkit.JSON(w, http.StatusNotFound, map[string]any{"error": "no override for " + key})
+	case http.MethodPut:
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+			return
+		}
+		var body struct {
+			Base  string `json:"base"`
+			Proxy string `json:"proxy"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Base == "" {
+			artifactkit.JSON(w, http.StatusBadRequest, map[string]any{"error": "missing base"})
+			return
+		}
+		s.Registry.Upstreams.SetRepo(format, repo, body.Base, body.Proxy)
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"format": format, "repo": repo, "base": body.Base})
+	case http.MethodDelete:
+		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+			return
+		}
+		s.Registry.Upstreams.ResetRepo(format, repo)
+		artifactkit.JSON(w, http.StatusOK, map[string]any{"format": format, "repo": repo, "reset": true})
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func stringsCut(s, sep string) (string, string, bool) {
+	if i := indexByte(s, sep[0]); i >= 0 {
+		return s[:i], s[i+len(sep):], true
+	}
+	return s, "", false
 }

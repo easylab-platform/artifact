@@ -139,6 +139,30 @@ func URLencode(s string) string {
 	return b.String()
 }
 
+// AuthorizeWrite gives the universal publish gate for adapters that do not
+// track package names: it is AuthorizeWriteFor driven entirely by the
+// request's RepoScope. The /pkgs middleware resolves (namespace, name) for
+// every format, so an adapter can call this one function and get full
+// namespace-aware ownership without knowing its own naming rules.
+func AuthorizeWriteScoped(w http.ResponseWriter, r *http.Request, auth Auth, reg *Registry, format string) bool {
+	sc := RepoScopeFrom(r.Context())
+	name := sc.Name
+	if name == "" {
+		name = sc.Namespace
+	}
+	return AuthorizeWriteFor(w, r, auth, reg, format, name)
+}
+
+// AuthorizeReadScoped is the read-side counterpart of AuthorizeWriteScoped.
+func AuthorizeReadScoped(w http.ResponseWriter, r *http.Request, auth Auth, reg *Registry, format string) bool {
+	sc := RepoScopeFrom(r.Context())
+	name := sc.Name
+	if name == "" {
+		name = sc.Namespace
+	}
+	return AuthorizeReadFor(w, r, auth, reg, format, name)
+}
+
 // AuthorizeWrite gates a write operation on an optional Auth, requiring a
 // WRITE-level credential (a read-level token is not enough to publish).
 // On success it returns true; on failure it writes a 401/403 challenge and
@@ -150,6 +174,12 @@ func URLencode(s string) string {
 // caller's tenant and enforces publish rights for (format, repository):
 // unclaimed names are claimed by the caller's tenant, claimed names must
 // match it. The error text is protocol-neutral JSON, like AuthorizeWrite.
+//
+// When the request carries a RepoScope (the /pkgs gate installs one for every
+// format), the ownership check is made against the (namespace, name) pair, so
+// a namespace — npm scope, OCI host, maven groupId — is a boundary in its own
+// right. The repository argument is qualified with the scope for the flat
+// fallback path.
 func AuthorizeWriteFor(w http.ResponseWriter, r *http.Request, auth Auth, reg *Registry, format, repository string) bool {
 	if !AuthorizeWrite(w, r, auth) {
 		return false
@@ -158,7 +188,18 @@ func AuthorizeWriteFor(w http.ResponseWriter, r *http.Request, auth Auth, reg *R
 		return true
 	}
 	tid := TenantOfRequest(r.Context(), auth, r)
-	if err := reg.Owners.AuthorizePublish(r.Context(), format, repository, tid); err != nil {
+	sc := RepoScopeFrom(r.Context())
+	// The adapter knows the package name; if it matches the scope's name the
+	// scope already tells us the namespace. Otherwise (a name the adapter
+	// derived, e.g. a tarball path) qualify it under the same namespace.
+	name := repository
+	if sc.Namespace != "" {
+		name = sc.UnscopedName(repository)
+		if name == "" {
+			name = repository
+		}
+	}
+	if err := AuthorizePublish(r.Context(), reg.Owners, format, sc.Namespace, name, tid); err != nil {
 		JSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": err.Error()})
 		return false
 	}
@@ -191,12 +232,22 @@ type TenantResolver interface {
 // registry carries no Ownership layer the read is allowed. It writes a 404 on
 // denial (not 403: a hidden name must not reveal its existence) and returns
 // false so the caller stops.
+//
+// Like the write path, the check is made against the request's RepoScope when
+// one is present, so a private namespace is hidden in one step.
 func AuthorizeReadFor(w http.ResponseWriter, r *http.Request, auth Auth, reg *Registry, format, repository string) bool {
 	if reg == nil || reg.Owners == nil {
 		return true
 	}
 	uid := TenantOfRequest(r.Context(), auth, r)
-	if reg.Owners.CanRead(r.Context(), format, repository, uid) {
+	sc := RepoScopeFrom(r.Context())
+	name := repository
+	if sc.Namespace != "" {
+		if n := sc.UnscopedName(repository); n != "" {
+			name = n
+		}
+	}
+	if CanRead(r.Context(), reg.Owners, format, sc.Namespace, name, uid) {
 		return true
 	}
 	JSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "not found"})

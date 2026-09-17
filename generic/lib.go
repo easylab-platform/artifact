@@ -38,7 +38,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		name := strings.TrimSuffix(path, ".version")
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "generic") {
 			return
 		}
 		vs, _ := s.Registry.Meta.ListVersions(r.Context(), "generic", name)
@@ -73,7 +73,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		artifactkit.Error(w, http.StatusNotFound, "not found")
 	case http.MethodPut:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "generic") {
 			return
 		}
 		artifactkit.LimitBody(w, r)

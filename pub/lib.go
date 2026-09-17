@@ -90,7 +90,7 @@ func (s *State) versionsNew(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) newUpload(w http.ResponseWriter, r *http.Request) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "pub") {
 		return
 	}
 	artifactkit.LimitBody(w, r)
@@ -129,7 +129,7 @@ func (s *State) newUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) finish(w http.ResponseWriter, r *http.Request) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "pub") {
 		return
 	}
 	artifactkit.JSON(w, http.StatusOK, map[string]any{"success": map[string]any{"message": "Successfully uploaded package."}})
@@ -283,7 +283,7 @@ func (s *State) archive(w http.ResponseWriter, r *http.Request, rest string) {
 }
 
 func (s *State) retract(w http.ResponseWriter, r *http.Request, name string) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "pub") {
 		return
 	}
 	name = strings.Trim(name, "/")

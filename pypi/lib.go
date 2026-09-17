@@ -486,7 +486,7 @@ func extractWheelMetadata(data []byte) string {
 }
 
 func (s *State) upload(w http.ResponseWriter, r *http.Request) {
-	if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+	if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "pypi") {
 		return
 	}
 	artifactkit.LimitBody(w, r)
@@ -525,7 +525,7 @@ func (s *State) projectAPI(w http.ResponseWriter, r *http.Request, path string) 
 	// /api/projects/{name}
 	name := NormalizeName(strings.Trim(strings.TrimPrefix(path, "/api/projects/"), "/"))
 	if r.Method == http.MethodDelete {
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "pypi") {
 			return
 		}
 		vs, _ := s.Registry.Meta.ListVersions(r.Context(), "pypi", name)

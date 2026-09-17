@@ -137,6 +137,17 @@ func (a *Adapter) tokenRealm() string {
 // ("" = default upstream; docker hub aliases -> default).
 func (a *Adapter) upstreamForRegistry(host string) *Upstream {
 	host = strings.ToLower(strings.TrimSpace(host))
+	// An explicit repository override (-repo-upstreams oci/ghcr.io=...) wins
+	// over the derived https://<host> default.
+	if a.state.Registry != nil && a.state.Registry.Upstreams != nil {
+		if e, ok := a.state.Registry.Upstreams.RepoOverride("oci", host); ok {
+			var p *string
+			if e.Proxy != "" {
+				p = &e.Proxy
+			}
+			return NewUpstream(a.state.Registry.Upstreams.ProxyFactory(), e.Base, p)
+		}
+	}
 	switch host {
 	case "", "docker.io", "index.docker.io", "registry-1.docker.io":
 		return NewUpstream(

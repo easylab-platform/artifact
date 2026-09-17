@@ -47,7 +47,12 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	return s, nil
 }
 
-func init() { artifactkit.Register("debian", NewHandler) }
+func init() {
+	artifactkit.Register("debian", NewHandler)
+	// The first path segment is the repository (its upstream may be
+	// overridden per repo via -repo-upstreams / the system API).
+	artifactkit.RegisterNamespace("debian", artifactkit.FirstSegNamespace)
+}
 
 // ServeHTTP dispatches one repo key: a proxied archive (debian,
 // debian-security, ubuntu) or a self-published hosted repo. Hosted content
@@ -82,6 +87,9 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *State) proxy(w http.ResponseWriter, r *http.Request, archive, rest string) {
 	path := archive + "/" + rest
 	base := upstreamFor(archive, rest)
+	if b := s.Registry.Upstreams.Repo("debian", archive); b != "" && base == "" {
+		base = b
+	}
 	if base == "" {
 		artifactkit.Error(w, http.StatusNotFound, "unknown archive: "+archive)
 		return
@@ -95,7 +103,7 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, archive, rest stri
 			return
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "debian", base, "/"+path)
+	fetched, err := s.Registry.FetchFor(r.Context(), "debian", archive, base, "/"+path)
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return

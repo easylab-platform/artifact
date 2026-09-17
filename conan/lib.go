@@ -105,7 +105,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 	if parts[4] == "revisions" {
 		// DELETE /revisions/{rev} — remove the whole recipe.
 		if r.Method == http.MethodDelete {
-			if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+			if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "conan") {
 				return
 			}
 			vs, _ := s.Registry.Meta.ListVersions(r.Context(), "conan", name)
@@ -168,7 +168,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 					}
 				}
 				if r.Method == http.MethodPut {
-					if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+					if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "conan") {
 						return
 					}
 					artifactkit.LimitBody(w, r)
@@ -228,7 +228,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 				return
 			}
 			if r.Method == http.MethodPut {
-				if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+				if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "conan") {
 					return
 				}
 				artifactkit.LimitBody(w, r)
@@ -296,7 +296,7 @@ func (s *State) conans(w http.ResponseWriter, r *http.Request, path string) {
 	switch {
 	case len(parts) == 5 || sub == "latest":
 		if r.Method == http.MethodDelete {
-			if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+			if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "conan") {
 				return
 			}
 			// Remove the recipe + all its recorded files/package slots.
@@ -352,7 +352,7 @@ func (s *State) fileGet(w http.ResponseWriter, r *http.Request, name, ver, sub s
 	}
 	filename := sub[idx+len("/files/"):]
 	if r.Method == http.MethodPut {
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "conan") {
 			return
 		}
 		artifactkit.LimitBody(w, r)
@@ -465,7 +465,7 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 func (s *State) files(w http.ResponseWriter, r *http.Request, rest string) {
 	// /files/{name}/{ver}/{user}/{channel}/{rev}/recipe/{filename}
 	if r.Method == http.MethodPut {
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "conan") {
 			return
 		}
 	}

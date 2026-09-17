@@ -80,7 +80,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(path, "/info/lfs/objects/batch") && r.Method == http.MethodPost:
 		repo := strings.TrimSuffix(path, "/info/lfs/objects/batch")
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) && r.URL.Query().Get("op") != "download" {
+		if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "gitlfs") && r.URL.Query().Get("op") != "download" {
 			return
 		}
 		s.batch(w, r, repo)
@@ -130,7 +130,7 @@ func (s *State) serveObject(w http.ResponseWriter, r *http.Request, repo, oid st
 			artifactkit.Error(w, http.StatusNotFound, "object not found")
 		}
 	case http.MethodPut:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
+		if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "gitlfs") {
 			return
 		}
 		if _, err := s.Registry.Blobs.PutIfAbsent(r.Context(), digest, r.Body); err != nil {
