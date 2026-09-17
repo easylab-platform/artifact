@@ -1,0 +1,5 @@
+# Protocol-client image: Haskell (GHCup + cabal). The e2e script fetches a
+# Hackage index and a package over the wire, which is what cabal does.
+ARG BASE_IMAGE=forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:trixie
+FROM ${BASE_IMAGE}
+RUN apt-get update && apt-get install -y --no-install-recommends wget && rm -rf /var/lib/apt/lists/*

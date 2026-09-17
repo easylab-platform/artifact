@@ -3,9 +3,12 @@ package artifactkit
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -617,4 +620,54 @@ func (r *Registry) FetchPathFollow(ctx context.Context, format, path string) (Fe
 		return Fetched{}, err
 	}
 	return r.finishFetch(ctx, data)
+}
+
+// FetchToBlob streams a remote object into the CAS and returns its digest and
+// size. Unlike Fetch it never buffers the whole body in memory, so it is the
+// right call for the large, range-addressable files of the plain-HTTP trees
+// (Hackage's 100MB+ index) and for anything a client may request a Range of.
+// Redirects are followed (a tree root may point at a regional mirror).
+func (r *Registry) FetchToBlob(ctx context.Context, format, path string) (string, int64, bool) {
+	sc := RepoScopeFrom(ctx)
+	repo := sc.Namespace
+	if repo == "" {
+		repo = sc.Name
+	}
+	remote, err := r.remoteFor(ctx, format, repo, "")
+	if err != nil {
+		return "", 0, false
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, remote.URL(path), nil)
+	if err != nil {
+		return "", 0, false
+	}
+	req.Header.Set("User-Agent", UserAgent)
+	client := &http.Client{Transport: remote.client.Transport}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return "", 0, false
+	}
+	tmp, err := os.CreateTemp("", "artifact-fetch-*")
+	if err != nil {
+		return "", 0, false
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	defer func() { _ = tmp.Close() }()
+	h := sha256.New()
+	n, err := io.Copy(io.MultiWriter(tmp, h), resp.Body)
+	if err != nil {
+		return "", 0, false
+	}
+	digest := "sha256:" + hex.EncodeToString(h.Sum(nil))
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return "", 0, false
+	}
+	if _, err := r.Blobs.PutIfAbsent(ctx, digest, tmp); err != nil {
+		return "", 0, false
+	}
+	return digest, n, true
 }

@@ -9,7 +9,7 @@ IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:latest}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 NAME="${NAME:-artifact-unified}"
 # Protocol list mirrors run.sh's default matrix.
-PROTOCOLS="${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy system}"
+PROTOCOLS="${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg system}"
 
 # Upstream origins (must match rules.sh proto_row hostnames).
 proto_origin() {
@@ -36,6 +36,11 @@ proto_origin() {
     rpm)         echo "https://dl.fedoraproject.org" ;;
     oci)         echo "https://registry-1.docker.io" ;;
     git)         echo "https://github.com" ;;
+    hackage)     echo "https://hackage.haskell.org" ;;
+    cran)        echo "https://cran.r-project.org" ;;
+    cpan)        echo "https://cpan.metacpan.org" ;;
+    luarocks)    echo "https://luarocks.org" ;;
+    juliapkg)    echo "https://pkg.julialang.org" ;;
     ivy)         echo "https://repo.scala-sbt.org" ;;
     *)           echo "" ;;
   esac

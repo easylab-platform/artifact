@@ -27,7 +27,7 @@ UPSTREAM_DNS="${UPSTREAM_DNS:-172.18.0.10}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 # Each protocol uses its dedicated client image (toolchain/e2e: one image per
 # protocol, built from official/prebuilt tarballs under /opt).
-PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy})
+PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg})
 KEEP="${KEEP:-0}"
 
 source "${HERE}/rules.sh"

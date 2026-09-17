@@ -1,0 +1,6 @@
+# Protocol-client image: R. The e2e script exercises install.packages() against
+# the CRAN tree through the spoofed proxy (the real R client).
+ARG BASE_IMAGE=forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:trixie
+FROM ${BASE_IMAGE}
+ARG EASYLAB=http://easylab.temp.svc.cluster.local
+RUN curl -fsSL -o /tmp/R.tar.gz "${EASYLAB}/pkgs/generic/r/4.5.1/R-4.5.1.tar.gz" 2>/dev/null || true

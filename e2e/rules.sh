@@ -32,6 +32,11 @@ proto_row() {
     apk)         echo '["dl-cdn.alpinelinux.org"]||/pkgs/apk' ;;
     rpm)         echo '["dl.fedoraproject.org"]||/pkgs/rpm' ;;
     oci)         echo '["registry-1.docker.io", "docker.io", "index.docker.io", "ghcr.io", "quay.io"]||' ;;
+    hackage)     echo '["hackage.haskell.org"]||/pkgs/hackage' ;;
+    cran)        echo '["cran.r-project.org"]||/pkgs/cran' ;;
+    cpan)        echo '["cpan.metacpan.org", "www.cpan.org", "cpan.org"]||/pkgs/cpan' ;;
+    luarocks)    echo '["luarocks.org"]||/pkgs/luarocks' ;;
+    juliapkg)    echo '["pkg.julialang.org", "*.pkg.julialang.org"]||/pkgs/juliapkg' ;;
     git)         echo '["github.com"]||/pkgs/git' ;;
     ivy)         echo '["repo.scala-sbt.org"]||/pkgs/ivy' ;;
     *)           echo "" ;;

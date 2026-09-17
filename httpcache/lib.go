@@ -29,7 +29,6 @@
 package httpcache
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
@@ -88,33 +87,25 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Pull-through: the host-driven origin (when the request arrived through
-	// the egress proxy) or the table default. Redirects are followed because
-	// a tree root may point at a regional mirror (pkg.julialang.org).
-	fetched, err := s.Registry.FetchPathFollow(r.Context(), s.Tree, "/"+path)
-	if err != nil {
+	// the egress proxy) or the table default. The body is streamed into the
+	// CAS (these trees carry 100MB+ index files) and served FROM the store, so
+	// a client's Range request is satisfied locally after the first fetch.
+	digest, size, ok := s.Registry.FetchToBlob(r.Context(), s.Tree, "/"+path)
+	if !ok {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
 	ct := mediaTypeOf(path)
-	if digest := storeCache(s, r.Context(), path, fetched.Data, ct); digest != "" &&
-		artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), digest, ct, pathBase(path)) {
-		return
-	}
-	artifactkit.OctetResponse(w, r, fetched.Data)
-}
-
-func storeCache(s *State, ctx context.Context, path string, data []byte, mediaType string) string {
-	stored, err := s.Registry.StoreAndHash(ctx, data)
-	if err != nil {
-		return ""
-	}
-	artifactkit.LogMetaErr(s.Tree+" cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
+	artifactkit.LogMetaErr(s.Tree+" cache", s.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
 		Format: s.Tree, Repository: "tree", Version: path,
-		MediaType: mediaType, Digest: stored.Digest,
-		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: pathBase(path)}},
+		MediaType: ct, Digest: digest,
+		Blobs:  []artifactkit.Descriptor{{Digest: digest, Size: size, Name: pathBase(path)}},
 		Source: "pull",
 	}))
-	return stored.Digest
+	if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), digest, ct, pathBase(path)) {
+		return
+	}
+	artifactkit.Error(w, http.StatusBadGateway, "cache error")
 }
 
 func pathBase(p string) string {
