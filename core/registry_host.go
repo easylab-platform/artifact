@@ -159,12 +159,16 @@ func (u *Upstreams) knownHosts() map[string]string {
 	return out
 }
 
-// HostBase reconstructs an upstream base from the origin a client reached us
-// by (the egress proxy records the original host/scheme/prefix as
-// X-Forwarded-Host/Proto/Prefix). It succeeds only when host is one the table
-// already knows, so a hostile client cannot aim the mirror at an arbitrary
-// origin. The stored scheme is the fallback; an http/https X-Forwarded-Proto
-// wins (deb.debian.org is reached over http).
+// HostBase reconstructs an upstream base (scheme://host) from the origin a
+// client reached us by (the egress proxy records the original host/scheme as
+// X-Forwarded-Host/Proto). It succeeds only when host is one the table already
+// knows, so a hostile client cannot aim the mirror at an arbitrary origin. The
+// stored scheme is the fallback; an http/https X-Forwarded-Proto wins
+// (deb.debian.org is reached over http).
+//
+// The client's stripped path prefix (/maven2, /stable) is restored here
+// because it belongs to the origin the client dialed; every other upstream
+// base comes from the table and needs none.
 func (u *Upstreams) HostBase(proto, host, prefix string) (string, bool) {
 	if u == nil || u.AirGap {
 		return "", false

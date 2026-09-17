@@ -282,9 +282,6 @@ func (r *Registry) FetchPath(ctx context.Context, format, path string) (Fetched,
 	if err != nil {
 		return Fetched{}, err
 	}
-	if sc.Prefix != "" && strings.HasPrefix(sc.Prefix, "/") {
-		path = strings.TrimSuffix(sc.Prefix, "/") + path
-	}
 	return r.fetchWith(ctx, remote, path)
 }
 
@@ -509,11 +506,7 @@ func (r *Registry) ResolveUpstream(ctx context.Context, format, repo string) (ba
 // hostname (recorded by the egress proxy) selects the upstream without a
 // per-ecosystem table.
 func (r *Registry) RemoteCtx(ctx context.Context, format string) (*Remote, error) {
-	remote, err := r.remote(ctx, format, "")
-	if err != nil {
-		return nil, err
-	}
-	return remote.withPrefix(scopePrefix(ctx)), nil
+	return r.remote(ctx, format, "")
 }
 
 // RemoteUpstream resolves the upstream for a format using the request context
@@ -521,7 +514,7 @@ func (r *Registry) RemoteCtx(ctx context.Context, format string) (*Remote, error
 // sub-endpoint the caller knows about). It returns nil when neither exists.
 func (r *Registry) RemoteUpstream(ctx context.Context, format, explicitBase string) *Remote {
 	if m, err := r.remote(ctx, format, ""); err == nil {
-		return m.withPrefix(scopePrefix(ctx))
+		return m
 	}
 	if explicitBase == "" {
 		return nil
@@ -535,45 +528,27 @@ func (r *Registry) remoteAtBase(base string) *Remote {
 	return NewRemote(factory, base, proxyPtr(r.Upstreams, "generic"))
 }
 
-// scopePrefix returns the client's stripped path prefix ("/maven2").
-func scopePrefix(ctx context.Context) string {
-	p := RepoScopeFrom(ctx).Prefix
-	if strings.HasPrefix(p, "/") {
-		return strings.TrimSuffix(p, "/")
-	}
-	return ""
-}
-
-// withPrefix returns a copy whose base carries path, so sub-path requests hit
-// the upstream's original layout.
-func (r *Remote) withPrefix(prefix string) *Remote {
-	if prefix == "" {
-		return r
-	}
-	cp := *r
-	cp.Base = r.Base + prefix
-	return &cp
-}
-
 // RemoteForSub resolves a sub-endpoint of a format (cargo's index/static,
-// nuget's search/registration, hex's api, ...). Priority: the request's
-// client origin (host-driven, so the sidecar needs no per-sub table), then the
-// sub-endpoint's configured base, then the format default.
+// nuget's search/registration, hex's api, ...). The configured sub-endpoint
+// base is authoritative: a sub-endpoint lives on a host of its own, and the
+// host the client happened to dial for the parent request (index.crates.io)
+// must not redirect a static download. A per-repository override still wins,
+// and the format default is the last resort.
 func (r *Registry) RemoteForSub(ctx context.Context, format, sub string) (*Remote, error) {
 	u := r.Upstreams
 	if u == nil {
 		return nil, fmt.Errorf("no upstream for %s.%s", format, sub)
+	}
+	if base := u.Sub(format, sub); base != "" {
+		return r.remoteAtBase(base), nil
 	}
 	if sc := RepoScopeFrom(ctx); sc.Host != "" {
 		if base, ok := u.HostBase(sc.Proto, sc.Host, sc.Prefix); ok {
 			return r.remoteAtBase(base), nil
 		}
 	}
-	if base := u.Sub(format, sub); base != "" {
-		return r.remoteAtBase(base).withPrefix(scopePrefix(ctx)), nil
-	}
 	if base := u.Get(format); base != "" {
-		return r.remoteAtBase(base).withPrefix(scopePrefix(ctx)), nil
+		return r.remoteAtBase(base), nil
 	}
 	return nil, fmt.Errorf("no upstream for %s.%s", format, sub)
 }
