@@ -16,6 +16,7 @@ use (
 	./helm
 	./ivy
 	./huggingface
+	./httpcache
 	./hex
 	./maven
 	./nix

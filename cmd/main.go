@@ -250,9 +250,16 @@ func defaultUpstreams(airGap bool) *artifactkit.Upstreams {
 			// AI/ML, functional, LFS, schema registries.
 			"conda":       "https://repo.anaconda.com",
 			"huggingface": "https://huggingface.co",
-			"nix":         "https://cache.nixos.org",
-			"protobuf":    "https://buf.build",
-			"gitlfs":      "",
+			// Plain-HTTP package trees (no protocol of their own).
+			"hackage":  "https://hackage.haskell.org",
+			"cran":     "https://cran.r-project.org",
+			"cpan":     "https://cpan.metacpan.org",
+			"luarocks": "https://luarocks.org",
+			// Julia's package server is the same shape (path tree).
+			"juliapkg": "https://pkg.julialang.org",
+			"nix":      "https://cache.nixos.org",
+			"protobuf": "https://buf.build",
+			"gitlfs":   "",
 			// Sub-endpoints that live on a different host than the format's
 			// primary upstream (crates.io: index + static downloads are
 			// served from index.crates.io / static.crates.io).

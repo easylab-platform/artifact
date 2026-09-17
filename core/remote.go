@@ -597,3 +597,24 @@ func (r *Remote) GetBytesFollow(ctx context.Context, path string) ([]byte, error
 	}
 	return io.ReadAll(resp.Body)
 }
+
+// FetchPathFollow is FetchPath but follows redirects, caching the final body.
+// It is for the plain-HTTP trees whose roots redirect to a regional mirror
+// (pkg.julialang.org → in.pkg.julialang.org) and for registries that redirect
+// to an artifact store the mirror should read through (Ivy).
+func (r *Registry) FetchPathFollow(ctx context.Context, format, path string) (Fetched, error) {
+	sc := RepoScopeFrom(ctx)
+	repo := sc.Namespace
+	if repo == "" {
+		repo = sc.Name
+	}
+	remote, err := r.remoteFor(ctx, format, repo, "")
+	if err != nil {
+		return Fetched{}, err
+	}
+	data, err := remote.GetBytesFollow(ctx, path)
+	if err != nil {
+		return Fetched{}, err
+	}
+	return r.finishFetch(ctx, data)
+}

@@ -17,6 +17,7 @@ require (
 	github.com/easylab-platform/artifact/helm v0.0.0
 	github.com/easylab-platform/artifact/hex v0.0.0
 	github.com/easylab-platform/artifact/huggingface v0.0.0
+	github.com/easylab-platform/artifact/httpcache v0.0.0
 	github.com/easylab-platform/artifact/ivy v0.0.0
 	github.com/easylab-platform/artifact/maven v0.0.0
 	github.com/easylab-platform/artifact/nix v0.0.0
@@ -76,6 +77,7 @@ replace (
 	github.com/easylab-platform/artifact/helm => ../helm
 	github.com/easylab-platform/artifact/hex => ../hex
 	github.com/easylab-platform/artifact/huggingface => ../huggingface
+	github.com/easylab-platform/artifact/httpcache => ../httpcache
 	github.com/easylab-platform/artifact/ivy => ../ivy
 	github.com/easylab-platform/artifact/maven => ../maven
 	github.com/easylab-platform/artifact/nix => ../nix
