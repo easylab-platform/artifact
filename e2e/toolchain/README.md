@@ -21,7 +21,7 @@ toolchain, rather than one giant all-in-one image.
   - `nix` → `root/nix:2.35.2` (native Nix + /nix store)
 - `manifest.txt` — every toolchain artifact (name|version|file|url-or-LOCAL).
 - `mirror.sh` — fetch each artifact (once, via the dev-box proxy) and PUT it
-  into easylab `/pkgs/generic/<name>/<ver>/<file>`; idempotent.
+  into easylab `/artifacts/generic/<name>/<ver>/<file>`; idempotent.
 - `build-one.sh <proto|base> [tag]` — buildkit → skopeo → forgejo for one image.
 - `build-all.sh` — builds every protocol image in sequence (base must exist).
 

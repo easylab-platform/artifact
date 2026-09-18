@@ -68,7 +68,7 @@ func TestPullThroughNarinfoAndNar(t *testing.T) {
 	}}
 
 	// Cache root info is static.
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/nix/nix-cache-info", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/nix/nix-cache-info", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "StoreDir: /nix/store") {
@@ -76,7 +76,7 @@ func TestPullThroughNarinfoAndNar(t *testing.T) {
 	}
 
 	// narinfo pull-through.
-	req2 := httptest.NewRequest(http.MethodGet, "/pkgs/nix/"+testHash+".narinfo", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/artifacts/nix/"+testHash+".narinfo", nil)
 	rec2 := httptest.NewRecorder()
 	s.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK || !strings.Contains(rec2.Body.String(), "NarHash") {
@@ -84,7 +84,7 @@ func TestPullThroughNarinfoAndNar(t *testing.T) {
 	}
 
 	// nar pull-through + cache.
-	req3 := httptest.NewRequest(http.MethodGet, "/pkgs/nix/nar/"+testHash+".nar.xz", nil)
+	req3 := httptest.NewRequest(http.MethodGet, "/artifacts/nix/nar/"+testHash+".nar.xz", nil)
 	rec3 := httptest.NewRecorder()
 	s.ServeHTTP(rec3, req3)
 	if rec3.Code != http.StatusOK || !strings.Contains(rec3.Body.String(), "fake-nar") {

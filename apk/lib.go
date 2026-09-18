@@ -11,7 +11,7 @@
 // Repository layout served here (the "repository root" is the repository
 // name — a fixed "main" repo backed by the upstream suite/component):
 //
-//	/pkgs/apk/<repo>/...  where <repo> encodes suite/component, e.g. "main"
+//	/artifacts/apk/<repo>/...  where <repo> encodes suite/component, e.g. "main"
 package apk
 
 import (
@@ -32,7 +32,7 @@ type State struct {
 	// client fetches package files relative to the index URL, so no rewrite
 	// is needed; SelfBase is reserved for future hosted-repo support).
 	SelfBase string
-	// Hosted serves /pkgs/apk/hosted/<repo>/... (self-published packages).
+	// Hosted serves /artifacts/apk/hosted/<repo>/... (self-published packages).
 	Hosted *artifactkit.HostedHandler
 }
 
@@ -64,7 +64,7 @@ func init() {
 // /<arch>) or a self-published hosted repo. Hosted content wins for the key;
 // otherwise the request is proxied upstream.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	sub := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/pkgs/apk/"), "apk/"), "/")
+	sub := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/artifacts/apk/"), "apk/"), "/")
 	repo, rest, ok := artifactkit.SplitRepo(sub)
 	if !ok {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})

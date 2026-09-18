@@ -71,10 +71,10 @@ type href struct {
 	Header map[string]string `json:"header,omitempty"`
 }
 
-// ServeHTTP dispatches POST /pkgs/gitlfs/{repo}/info/lfs/objects/batch and
-// GET/PUT /pkgs/gitlfs/{repo}/objects/{oid}.
+// ServeHTTP dispatches POST /artifacts/gitlfs/{repo}/info/lfs/objects/batch and
+// GET/PUT /artifacts/gitlfs/{repo}/objects/{oid}.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/gitlfs/")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/gitlfs/")
 	path = strings.TrimPrefix(path, "gitlfs/")
 	path = strings.Trim(path, "/")
 	switch {
@@ -108,9 +108,9 @@ func (s *State) batch(w http.ResponseWriter, r *http.Request, repo string) {
 		entry := batchObjOut{Oid: o.Oid, Size: o.Size, Authenticated: true}
 		switch req.Operation {
 		case "download":
-			entry.Actions = map[string]href{"download": {Href: base + "/pkgs/gitlfs/" + repo + "/objects/" + o.Oid}}
+			entry.Actions = map[string]href{"download": {Href: base + "/artifacts/gitlfs/" + repo + "/objects/" + o.Oid}}
 		case "upload":
-			entry.Actions = map[string]href{"upload": {Href: base + "/pkgs/gitlfs/" + repo + "/objects/" + o.Oid}}
+			entry.Actions = map[string]href{"upload": {Href: base + "/artifacts/gitlfs/" + repo + "/objects/" + o.Oid}}
 		}
 		out.Objects = append(out.Objects, entry)
 	}

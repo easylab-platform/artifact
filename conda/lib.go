@@ -12,7 +12,7 @@
 //
 // Repository layout served here:
 //
-//	/pkgs/conda/{channel}/{path}   channel = repo key ("main", "conda-forge", ...)
+//	/artifacts/conda/{channel}/{path}   channel = repo key ("main", "conda-forge", ...)
 package conda
 
 import (
@@ -29,7 +29,7 @@ type State struct {
 	// ChannelUpstreams maps channel keys to upstream bases; nil uses the
 	// single "conda" upstream default.
 	ChannelUpstreams map[string]string
-	// Hosted serves /pkgs/conda/hosted/<channel>/... (self-published).
+	// Hosted serves /artifacts/conda/hosted/<channel>/... (self-published).
 	Hosted *artifactkit.HostedHandler
 }
 
@@ -61,7 +61,7 @@ func init() {
 // conda-forge, ...) or a self-published hosted channel. Hosted content wins
 // for the key; otherwise the request is proxied upstream.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	sub := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/pkgs/conda/"), "conda/"), "/")
+	sub := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/artifacts/conda/"), "conda/"), "/")
 	repo, rest, ok := artifactkit.SplitRepo(sub)
 	if !ok {
 		artifactkit.Error(w, http.StatusNotFound, "path required")

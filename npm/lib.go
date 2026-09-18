@@ -47,7 +47,7 @@ func init() {
 
 func (s *State) base() string {
 	if s.SelfBase == "" {
-		return "http://localhost:8080/pkgs/npm"
+		return "http://localhost:8080/artifacts/npm"
 	}
 	return strings.TrimSuffix(s.SelfBase, "/")
 }
@@ -70,7 +70,7 @@ func unescapeName(name string) string {
 func encodeName(name string) string { return strings.ReplaceAll(name, "/", "%2F") }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/npm")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/npm")
 	path = strings.TrimPrefix(path, "/npm")
 	path = strings.Trim(path, "/")
 	method := r.Method

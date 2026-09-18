@@ -1,4 +1,4 @@
 - match: ["pypi.org", "files.pythonhosted.org"]
   action: rewrite
   target: "artifact-pypi.temp.svc.cluster.local:80"
-  add_prefix: "/pkgs/pypi"
+  add_prefix: "/artifacts/pypi"

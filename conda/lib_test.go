@@ -46,13 +46,13 @@ func TestPullThroughRepodataAndPkg(t *testing.T) {
 		ChannelUpstreams: map[string]string{"main": upstream.URL},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/conda/main/linux-64/repodata.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/conda/main/linux-64/repodata.json", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "subdir") {
 		t.Fatalf("repodata: %d %s", rec.Code, rec.Body.String())
 	}
-	req2 := httptest.NewRequest(http.MethodGet, "/pkgs/conda/main/linux-64/numpy-1.0.0.conda", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/artifacts/conda/main/linux-64/numpy-1.0.0.conda", nil)
 	rec2 := httptest.NewRecorder()
 	s.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK || !strings.Contains(rec2.Body.String(), "fake-conda") {
@@ -64,7 +64,7 @@ func TestPullThroughRepodataAndPkg(t *testing.T) {
 	}
 
 	// Unknown channel fails closed.
-	req3 := httptest.NewRequest(http.MethodGet, "/pkgs/conda/other/linux-64/repodata.json", nil)
+	req3 := httptest.NewRequest(http.MethodGet, "/artifacts/conda/other/linux-64/repodata.json", nil)
 	rec3 := httptest.NewRecorder()
 	s.ServeHTTP(rec3, req3)
 	if rec3.Code != http.StatusNotFound {

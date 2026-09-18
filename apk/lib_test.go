@@ -75,7 +75,7 @@ func TestPullThroughIndexAndPackage(t *testing.T) {
 	s := &State{Registry: reg}
 
 	// Fetch the index through the adapter.
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/apk/v3.21/main/x86_64/APKINDEX.tar.gz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/apk/v3.21/main/x86_64/APKINDEX.tar.gz", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -89,7 +89,7 @@ func TestPullThroughIndexAndPackage(t *testing.T) {
 	}
 
 	// Fetch a package.
-	req2 := httptest.NewRequest(http.MethodGet, "/pkgs/apk/v3.21/main/x86_64/busybox-1.0.0-r0.apk", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/artifacts/apk/v3.21/main/x86_64/busybox-1.0.0-r0.apk", nil)
 	rec2 := httptest.NewRecorder()
 	s.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK || !bytes.Equal(rec2.Body.Bytes(), pkg) {
@@ -97,7 +97,7 @@ func TestPullThroughIndexAndPackage(t *testing.T) {
 	}
 
 	// Second fetch served from the cache (upstream counter stays at 2).
-	req3 := httptest.NewRequest(http.MethodGet, "/pkgs/apk/v3.21/main/x86_64/busybox-1.0.0-r0.apk", nil)
+	req3 := httptest.NewRequest(http.MethodGet, "/artifacts/apk/v3.21/main/x86_64/busybox-1.0.0-r0.apk", nil)
 	rec3 := httptest.NewRecorder()
 	s.ServeHTTP(rec3, req3)
 	if rec3.Code != http.StatusOK || !bytes.Equal(rec3.Body.Bytes(), pkg) {
@@ -122,7 +122,7 @@ func TestAirGapDisabled(t *testing.T) {
 		Blobs: blobs, Meta: meta,
 		Upstreams: &artifactkit.Upstreams{Defaults: map[string]string{}, Overrides: map[string]string{}, Proxy: map[string]string{}, AirGap: true},
 	}}
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/apk/v3.21/main/x86_64/APKINDEX.tar.gz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/apk/v3.21/main/x86_64/APKINDEX.tar.gz", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {

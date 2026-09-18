@@ -85,7 +85,7 @@ the protocol's REAL client, through the same spoofed sidecar. A and B are
 separate processes with isolated HOMEs/caches in one pod.
 
 - Hosted families (**debian/apk/rpm/conda**) publish into a self-published
-  repo served by the adapter itself (`/pkgs/<format>/<repo>/...`, no `/hosted`
+  repo served by the adapter itself (`/artifacts/<format>/<repo>/...`, no `/hosted`
   segment) and install it with apt/apk/dnf/conda.
 - **cargo**, **rubygems**, **pub** treat delete as yank/retract (no
   unpublish in the client).

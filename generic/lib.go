@@ -28,7 +28,7 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 func init() { artifactkit.Register("generic", NewHandler) }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/generic/")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/generic/")
 	path = strings.TrimPrefix(path, "generic/")
 	path = strings.Trim(path, "/")
 

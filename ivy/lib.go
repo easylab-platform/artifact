@@ -12,7 +12,7 @@
 //
 // Repository layout served here:
 //
-//	/pkgs/ivy/<host>/<path>     e.g. /pkgs/ivy/repo.scala-sbt.org/scalasbt/sbt-plugin-releases/...
+//	/artifacts/ivy/<host>/<path>     e.g. /artifacts/ivy/repo.scala-sbt.org/scalasbt/sbt-plugin-releases/...
 //
 // The host is the first path segment, so one instance mirrors any Ivy server
 // and the host is the repository namespace (isolation + per-host upstreams).
@@ -58,10 +58,10 @@ func init() {
 // ServeHTTP serves one upstream's Ivy tree. The host comes from the origin the
 // client used (X-Forwarded-Host via the repo scope) when it names a real
 // server, else from an explicit leading path segment, so both the rewritten
-// (repo.scala-sbt.org/...) and explicit (/pkgs/ivy/repo.scala-sbt.org/...)
+// (repo.scala-sbt.org/...) and explicit (/artifacts/ivy/repo.scala-sbt.org/...)
 // forms work.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/pkgs/ivy/"), "/")
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/artifacts/ivy/"), "/")
 	path = strings.TrimPrefix(path, "ivy/")
 
 	host := artifactkit.CanonicalHost(artifactkit.RepoScopeFrom(r.Context()).Host)

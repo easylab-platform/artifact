@@ -1,5 +1,5 @@
 #!/bin/sh
-# debian lifecycle: build+PUT a .deb into a hosted flat repo /pkgs/debian/
+# debian lifecycle: build+PUT a .deb into a hosted flat repo /artifacts/debian/
 # <repo>, then apt-get install it from that repo (public+private+upgrade), and
 # delete via DELETE.
 set -e
@@ -41,7 +41,7 @@ X
 publish_deb() { # $1 = version
   build_deb "$1"
   # Upload through the SAME spoofed origin the client uses, so the sidecar
-  # maps deb.debian.org/<repo>/... onto /pkgs/debian/<repo>/... (hosted repo
+  # maps deb.debian.org/<repo>/... onto /artifacts/debian/<repo>/... (hosted repo
   # "easylab"). This keeps the URL shape identical to the pull-through path.
   code="$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
     --data-binary "@$WORK/${PKGDIR}_$1_${ARCH}.deb" \

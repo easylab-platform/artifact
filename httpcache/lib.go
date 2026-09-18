@@ -21,10 +21,10 @@
 //
 // Repository layout served here:
 //
-//	/pkgs/<tree>/<path>    e.g. /pkgs/cran/src/contrib/PACKAGES.gz
+//	/artifacts/<tree>/<path>    e.g. /artifacts/cran/src/contrib/PACKAGES.gz
 //
 // Host-driven mode works too: the egress proxy rewrites
-// https://cran.r-project.org/... onto /pkgs/cran/... with the original Host
+// https://cran.r-project.org/... onto /artifacts/cran/... with the original Host
 // preserved, so the mirror is transparent to an unmodified client.
 package httpcache
 
@@ -79,7 +79,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/"+s.Tree)
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/"+s.Tree)
 	path = strings.TrimPrefix(path, "/"+s.Tree)
 	path = strings.Trim(path, "/")
 	if path == "" {

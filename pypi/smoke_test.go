@@ -75,7 +75,7 @@ func TestSimpleRootJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/pypi/simple/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/pypi/simple/", nil)
 	req.Header.Set("Accept", "application/vnd.pypi.simple.v1+json")
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)

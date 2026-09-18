@@ -10,7 +10,7 @@
 //	/<hash>.narinfo                        (text metadata: URL, NarHash, NarSize, Sig, ...)
 //	/nar/<hash>.nar[.xz|zst]               (the archive itself)
 //
-// Repository layout served here: everything under /pkgs/nix/ maps 1:1 onto
+// Repository layout served here: everything under /artifacts/nix/ maps 1:1 onto
 // the upstream cache root (the binary cache is one global namespace).
 package nix
 
@@ -37,13 +37,13 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 
 func init() { artifactkit.Register("nix", NewHandler) }
 
-// ServeHTTP maps /pkgs/nix/<path> onto the upstream cache root.
+// ServeHTTP maps /artifacts/nix/<path> onto the upstream cache root.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/nix/")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/nix/")
 	path = strings.TrimPrefix(path, "nix/")
 	path = strings.Trim(path, "/")
 	if path == "" || path == "nix-cache-info" {

@@ -94,7 +94,7 @@ func TestPullThroughReleaseAndDeb(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/debian/ubuntu/dists/noble/Release", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/debian/ubuntu/dists/noble/Release", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

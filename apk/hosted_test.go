@@ -42,14 +42,14 @@ func TestHostedAPKINDEX(t *testing.T) {
 	apkBytes := buildApk(t, "mytool", "1.2.3-r0")
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/pkgs/apk/myrepo/x86_64/mytool-1.2.3-r0.apk", bytes.NewReader(apkBytes))
+	req := httptest.NewRequest(http.MethodPut, "/artifacts/apk/myrepo/x86_64/mytool-1.2.3-r0.apk", bytes.NewReader(apkBytes))
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("upload: %d %s", rec.Code, rec.Body.String())
 	}
 
 	rec2 := httptest.NewRecorder()
-	s.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/pkgs/apk/myrepo/x86_64/APKINDEX.tar.gz", nil))
+	s.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/artifacts/apk/myrepo/x86_64/APKINDEX.tar.gz", nil))
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("index: %d", rec2.Code)
 	}
@@ -74,7 +74,7 @@ func TestHostedAPKINDEX(t *testing.T) {
 
 	// Package download byte-for-byte.
 	rec3 := httptest.NewRecorder()
-	s.ServeHTTP(rec3, httptest.NewRequest(http.MethodGet, "/pkgs/apk/myrepo/x86_64/mytool-1.2.3-r0.apk", nil))
+	s.ServeHTTP(rec3, httptest.NewRequest(http.MethodGet, "/artifacts/apk/myrepo/x86_64/mytool-1.2.3-r0.apk", nil))
 	if rec3.Code != http.StatusOK || !bytes.Equal(rec3.Body.Bytes(), apkBytes) {
 		t.Fatalf("download: %d", rec3.Code)
 	}

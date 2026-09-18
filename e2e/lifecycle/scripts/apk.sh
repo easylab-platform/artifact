@@ -1,6 +1,6 @@
 #!/bin/sh
 # apk lifecycle: abuild a real package + PUT it into a hosted repo
-# /pkgs/apk/<repo>/<arch>/, then `apk add` it (public+private+upgrade) and
+# /artifacts/apk/<repo>/<arch>/, then `apk add` it (public+private+upgrade) and
 # delete via DELETE.
 set -e
 export HOME="/tmp/lc-home-${STAGE}"
@@ -28,7 +28,7 @@ ensure_tools() {
 }
 
 build_pkg() { # $1 = version
-  rm -rf "$WORK/pkg" "$WORK/pkgs"
+  rm -rf "$WORK/pkg" "$WORK/artifacts"
   mkdir -p "$WORK/pkg"
   cd "$WORK/pkg"
   cat > APKBUILD <<X
@@ -49,14 +49,14 @@ X
   # our own signing key as UNTRUSTED (we install with --allow-untrusted) and
   # makes abuild exit non-zero even though the .apk itself built fine. Only
   # the package matters here.
-  abuild -F -P "$WORK/pkgs" >/dev/null 2>&1 || true
-  find "$WORK/pkgs" -name "${PKG}-$1-r0.apk" | grep -q . || { echo "apk: abuild failed"; exit 1; }
+  abuild -F -P "$WORK/artifacts" >/dev/null 2>&1 || true
+  find "$WORK/artifacts" -name "${PKG}-$1-r0.apk" | grep -q . || { echo "apk: abuild failed"; exit 1; }
 }
 
 publish_pkg() { # $1 = version
   build_pkg "$1"
-  apk="$WORK/pkgs/${PKG}/${ARCH}/${PKG}-$1-r0.apk"
-  [ -f "$apk" ] || apk="$(find "$WORK/pkgs" -name "${PKG}-$1-r0.apk" | head -1)"
+  apk="$WORK/artifacts/${PKG}/${ARCH}/${PKG}-$1-r0.apk"
+  [ -f "$apk" ] || apk="$(find "$WORK/artifacts" -name "${PKG}-$1-r0.apk" | head -1)"
   [ -f "$apk" ] || { echo "apk: built package not found"; exit 1; }
   code="$($CURL -o /dev/null -w '%{http_code}' -X PUT --data-binary "@$apk" \
     "${CDN}/${REPO}/${ARCH}/${PKG}-$1-r0.apk")"

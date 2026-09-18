@@ -47,7 +47,7 @@ func TestPullThroughModuleResolve(t *testing.T) {
 	s2 := newFixture(t, upstream.URL)
 	meta := s2.Registry.Meta
 	s2.BSRToken = "bsr-token"
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/protobuf/acme/weather/v1/modules/acme/weather/ref/main", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/protobuf/acme/weather/v1/modules/acme/weather/ref/main", nil)
 	rec := httptest.NewRecorder()
 	s2.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -72,7 +72,7 @@ func TestPullThroughModuleResolve(t *testing.T) {
 		Blobs: s2.Registry.Blobs, Meta: meta,
 		Upstreams: &artifactkit.Upstreams{Defaults: map[string]string{}, Overrides: map[string]string{}, Proxy: map[string]string{}, AirGap: true},
 	}}
-	req4 := httptest.NewRequest(http.MethodGet, "/pkgs/protobuf/acme/other/v1/modules/acme/other/ref/main", nil)
+	req4 := httptest.NewRequest(http.MethodGet, "/artifacts/protobuf/acme/other/v1/modules/acme/other/ref/main", nil)
 	rec4 := httptest.NewRecorder()
 	s3.ServeHTTP(rec4, req4)
 	if rec4.Code != http.StatusNotFound {
@@ -84,8 +84,8 @@ func TestPullThroughModuleResolve(t *testing.T) {
 func TestModulePathValidation(t *testing.T) {
 	s := newFixture(t, "http://127.0.0.1:1")
 	cases := []string{
-		"/pkgs/protobuf/acme",                  // too short
-		"/pkgs/protobuf/acme/name/extra/notv1", // no /v1/ marker
+		"/artifacts/protobuf/acme",                  // too short
+		"/artifacts/protobuf/acme/name/extra/notv1", // no /v1/ marker
 	}
 	for _, c := range cases {
 		req := httptest.NewRequest(http.MethodGet, c, nil)

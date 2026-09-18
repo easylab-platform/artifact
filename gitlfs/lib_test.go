@@ -39,7 +39,7 @@ func TestBatchNegotiation(t *testing.T) {
 	s := newFixture(t)
 	oid := strings.Repeat("ab", 32)
 	body, _ := json.Marshal(batchRequest{Operation: "download", Objects: []batchObjIn{{Oid: oid, Size: 10}}})
-	req := httptest.NewRequest(http.MethodPost, "/pkgs/gitlfs/team/repo/info/lfs/objects/batch", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/gitlfs/team/repo/info/lfs/objects/batch", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -66,7 +66,7 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 	oid := hex.EncodeToString(sum[:])
 
 	// PUT.
-	req := httptest.NewRequest(http.MethodPut, "/pkgs/gitlfs/team/repo/objects/"+oid, bytes.NewReader(content))
+	req := httptest.NewRequest(http.MethodPut, "/artifacts/gitlfs/team/repo/objects/"+oid, bytes.NewReader(content))
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -74,7 +74,7 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 	}
 
 	// GET.
-	req2 := httptest.NewRequest(http.MethodGet, "/pkgs/gitlfs/team/repo/objects/"+oid, nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/artifacts/gitlfs/team/repo/objects/"+oid, nil)
 	rec2 := httptest.NewRecorder()
 	s.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK || !bytes.Equal(rec2.Body.Bytes(), content) {
@@ -84,13 +84,13 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 	// Content-addressed semantics: a PUT whose bytes don't match the oid
 	// cannot overwrite (dedup short-circuits on the existing digest path);
 	// the stored object must still be the ORIGINAL content.
-	req3 := httptest.NewRequest(http.MethodPut, "/pkgs/gitlfs/team/repo/objects/"+oid, bytes.NewReader([]byte("other bytes")))
+	req3 := httptest.NewRequest(http.MethodPut, "/artifacts/gitlfs/team/repo/objects/"+oid, bytes.NewReader([]byte("other bytes")))
 	rec3 := httptest.NewRecorder()
 	s.ServeHTTP(rec3, req3)
 	if rec3.Code != http.StatusOK {
 		t.Fatalf("dedup PUT = %d", rec3.Code)
 	}
-	req5 := httptest.NewRequest(http.MethodGet, "/pkgs/gitlfs/team/repo/objects/"+oid, nil)
+	req5 := httptest.NewRequest(http.MethodGet, "/artifacts/gitlfs/team/repo/objects/"+oid, nil)
 	rec5 := httptest.NewRecorder()
 	s.ServeHTTP(rec5, req5)
 	if !bytes.Equal(rec5.Body.Bytes(), content) {
@@ -98,7 +98,7 @@ func TestUploadDownloadRoundtrip(t *testing.T) {
 	}
 
 	// Invalid oid.
-	req4 := httptest.NewRequest(http.MethodGet, "/pkgs/gitlfs/team/repo/objects/nothex", nil)
+	req4 := httptest.NewRequest(http.MethodGet, "/artifacts/gitlfs/team/repo/objects/nothex", nil)
 	rec4 := httptest.NewRecorder()
 	s.ServeHTTP(rec4, req4)
 	if rec4.Code != http.StatusBadRequest {
@@ -121,7 +121,7 @@ func TestSelfBaseOverridesHost(t *testing.T) {
 	s.SelfBase = "https://easylab.internal:8443"
 	oid := strings.Repeat("cd", 32)
 	body, _ := json.Marshal(batchRequest{Operation: "upload", Objects: []batchObjIn{{Oid: oid, Size: 1}}})
-	req := httptest.NewRequest(http.MethodPost, "/pkgs/gitlfs/team/repo/info/lfs/objects/batch", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/gitlfs/team/repo/info/lfs/objects/batch", bytes.NewReader(body))
 	req.Host = "github.com" // simulating the rewritten upstream Host
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
@@ -130,7 +130,7 @@ func TestSelfBaseOverridesHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	href := out.Objects[0].Actions["upload"].Href
-	if !strings.HasPrefix(href, "https://easylab.internal:8443/pkgs/gitlfs/team/repo/objects/") {
+	if !strings.HasPrefix(href, "https://easylab.internal:8443/artifacts/gitlfs/team/repo/objects/") {
 		t.Fatalf("href = %q", href)
 	}
 }

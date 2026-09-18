@@ -4,7 +4,7 @@
 # time). Run from a host that can reach easylab and the public internet (the
 # dev box uses mihomo).
 #
-# Each artifact is cached at /pkgs/generic/<name>/<version>/<filename>; the
+# Each artifact is cached at /artifacts/generic/<name>/<version>/<filename>; the
 # mirror is idempotent (skips artifacts already present with the same size).
 set -euo pipefail
 
@@ -19,7 +19,7 @@ ok=0; skip=0; fail=0
 
 while IFS='|' read -r name ver file url; do
   [ -z "$name" ] && continue
-  dest="${EASYLAB}/pkgs/generic/${name}/${ver}/${file}"
+  dest="${EASYLAB}/artifacts/generic/${name}/${ver}/${file}"
   # Already mirrored? (HEAD returns 200 when the blob is present.)
   if curl -fsS -o /dev/null -I "${auth[@]}" "$dest" 2>/dev/null; then
     echo "skip  ${name}/${ver}/${file}"

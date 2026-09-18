@@ -13,7 +13,7 @@
 //
 // Repository layout served here:
 //
-//	/pkgs/debian/<distro>/dists/...   distro is the host key ("debian",
+//	/artifacts/debian/<distro>/dists/...   distro is the host key ("debian",
 //	"ubuntu", ...) so multiple upstreams can coexist.
 package debian
 
@@ -59,10 +59,10 @@ func init() {
 // for the key wins; otherwise the request is proxied upstream.
 //
 // The egress proxy preserves the original host path, so an apt source of
-// "http://deb.debian.org/debian" arrives as /pkgs/debian/debian/dists/... —
+// "http://deb.debian.org/debian" arrives as /artifacts/debian/debian/dists/... —
 // the first segment is the repository key.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	sub := strings.Trim(strings.TrimPrefix(r.URL.Path, "/pkgs/debian/"), "/")
+	sub := strings.Trim(strings.TrimPrefix(r.URL.Path, "/artifacts/debian/"), "/")
 	repo, rest, ok := artifactkit.SplitRepo(sub)
 	if !ok {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})

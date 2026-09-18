@@ -3,7 +3,7 @@
 # populates the local bare mirror; the second must be served from local objects
 # (asserted by timing + a clean working tree). Run through the spoofed proxy,
 # so github.com resolves to the sidecar and the request is rewritten to
-# /pkgs/git/github.com/....
+# /artifacts/git/github.com/....
 set -e
 export GIT_TERMINAL_PROMPT=0
 REPO=https://github.com/octocat/Hello-World.git

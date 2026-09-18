@@ -25,7 +25,7 @@ func TestMetadataXMLOverlay(t *testing.T) {
 		Upstreams: &artifactkit.Upstreams{Defaults: map[string]string{"maven": "https://repo.maven.apache.org/maven2"},
 			Overrides: map[string]string{}, Proxy: map[string]string{}}}}
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/pkgs/maven/org/slf4j/slf4j-api/maven-metadata.xml", nil))
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/artifacts/maven/org/slf4j/slf4j-api/maven-metadata.xml", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
 	}

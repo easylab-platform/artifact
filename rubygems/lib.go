@@ -39,7 +39,7 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 func init() { artifactkit.Register("rubygems", NewHandler) }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/rubygems")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/rubygems")
 	path = strings.TrimPrefix(path, "/rubygems")
 	path = strings.Trim(path, "/")
 

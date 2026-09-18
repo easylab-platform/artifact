@@ -39,7 +39,7 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 func init() { artifactkit.Register("hex", NewHandler) }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/hex")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/hex")
 	path = strings.TrimPrefix(path, "/hex")
 	path = strings.Trim(path, "/")
 

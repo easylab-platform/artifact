@@ -60,13 +60,13 @@ func wantsJSON(r *http.Request) bool {
 
 func (s *State) base() string {
 	if s.SelfBase == "" {
-		return "http://localhost:8080/pkgs/pypi"
+		return "http://localhost:8080/artifacts/pypi"
 	}
 	return strings.TrimSuffix(s.SelfBase, "/")
 }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/pypi")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/pypi")
 	path = strings.TrimPrefix(path, "/pypi")
 
 	switch {

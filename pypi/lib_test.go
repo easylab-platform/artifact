@@ -62,7 +62,7 @@ func TestMetadataFileFromCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/pkgs/pypi/simple/six/six-1.17.0-py2.py3-none-any.whl.metadata", nil))
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/artifacts/pypi/simple/six/six-1.17.0-py2.py3-none-any.whl.metadata", nil))
 	if rec.Code != http.StatusOK || rec.Body.String() != meta {
 		t.Fatalf("metadata: %d %q", rec.Code, rec.Body.String())
 	}

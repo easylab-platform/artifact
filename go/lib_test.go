@@ -41,14 +41,14 @@ func TestServeHTTPPrefixRouting(t *testing.T) {
 	s := newTestState(t, up.URL)
 
 	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/pkgs/go/golang.org/x/text/@v/v0.14.0.info", nil))
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/artifacts/go/golang.org/x/text/@v/v0.14.0.info", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "v0.14.0") {
 		t.Fatalf("info: %d %q", rec.Code, rec.Body.String())
 	}
 
 	// @v/list and @latest route without a version split.
 	rec = httptest.NewRecorder()
-	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/pkgs/go/golang.org/x/text/@v/list", nil))
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/artifacts/go/golang.org/x/text/@v/list", nil))
 	if rec.Code != http.StatusNotFound {
 		// upstream fake only serves .info; 404 is the expected passthrough.
 		t.Fatalf("list status %d", rec.Code)

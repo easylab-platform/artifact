@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 # Point conan at the REAL ConanCenter host; the spoofed proxy intercepts it
-# (MITM + add_prefix /pkgs/conan) and steers it to artifact-conan.
+# (MITM + add_prefix /artifacts/conan) and steers it to artifact-conan.
 export CONAN_HOME=/tmp/conanhome
 mkdir -p "$CONAN_HOME"
 conan profile detect --force >/dev/null 2>&1

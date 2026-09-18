@@ -11,7 +11,7 @@
 //
 // Repository layout served here:
 //
-//	/pkgs/protobuf/{module}/{path}   module = "<org>/<name>" or "<org>/<name>/<plugin>"
+//	/artifacts/protobuf/{module}/{path}   module = "<org>/<name>" or "<org>/<name>/<plugin>"
 package protobuf
 
 import (
@@ -44,14 +44,14 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 
 func init() { artifactkit.Register("protobuf", NewHandler) }
 
-// ServeHTTP dispatches /pkgs/protobuf/{module}/{path} where module is
+// ServeHTTP dispatches /artifacts/protobuf/{module}/{path} where module is
 // "<org>/<name>[/<plugin>]" and path is the BSR API face.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/protobuf/")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/protobuf/")
 	path = strings.TrimPrefix(path, "protobuf/")
 	path = strings.Trim(path, "/")
 	parts := strings.Split(path, "/")

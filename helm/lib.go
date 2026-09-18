@@ -37,13 +37,13 @@ func init() { artifactkit.Register("helm", NewHandler) }
 
 func (s *State) base() string {
 	if s.SelfBase == "" {
-		return "http://localhost:8080/pkgs/helm"
+		return "http://localhost:8080/artifacts/helm"
 	}
 	return strings.TrimSuffix(s.SelfBase, "/")
 }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/helm")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/helm")
 	path = strings.TrimPrefix(path, "/helm")
 	path = strings.Trim(path, "/")
 

@@ -48,14 +48,14 @@ func TestPullThroughRepodataAndRpm(t *testing.T) {
 		RepoUpstreams: map[string]string{"fedora41": upstream.URL},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/rpm/fedora41/repodata/repomd.xml", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/rpm/fedora41/repodata/repomd.xml", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "repomd") {
 		t.Fatalf("repomd: %d %s", rec.Code, rec.Body.String())
 	}
 
-	req2 := httptest.NewRequest(http.MethodGet, "/pkgs/rpm/fedora41/packages/b/bash.rpm", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/artifacts/rpm/fedora41/packages/b/bash.rpm", nil)
 	rec2 := httptest.NewRecorder()
 	s.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK || !strings.Contains(rec2.Body.String(), "fake-rpm") {
@@ -69,7 +69,7 @@ func TestPullThroughRepodataAndRpm(t *testing.T) {
 	}
 
 	// Unknown repo fails closed.
-	req3 := httptest.NewRequest(http.MethodGet, "/pkgs/rpm/unknown/repodata/repomd.xml", nil)
+	req3 := httptest.NewRequest(http.MethodGet, "/artifacts/rpm/unknown/repodata/repomd.xml", nil)
 	rec3 := httptest.NewRecorder()
 	s.ServeHTTP(rec3, req3)
 	if rec3.Code != http.StatusNotFound {

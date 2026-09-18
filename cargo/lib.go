@@ -43,13 +43,13 @@ type meta struct {
 
 func (s *State) base() string {
 	if s.SelfBase == "" {
-		return "http://localhost:8080/pkgs/cargo"
+		return "http://localhost:8080/artifacts/cargo"
 	}
 	return strings.TrimSuffix(s.SelfBase, "/")
 }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/cargo")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/cargo")
 	path = strings.TrimPrefix(path, "/cargo")
 	path = strings.Trim(path, "/")
 

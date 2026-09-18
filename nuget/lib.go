@@ -38,7 +38,7 @@ func init() { artifactkit.Register("nuget", NewHandler) }
 
 func (s *State) base() string {
 	if s.SelfBase == "" {
-		return "http://localhost:8080/pkgs/nuget"
+		return "http://localhost:8080/artifacts/nuget"
 	}
 	return strings.TrimSuffix(s.SelfBase, "/")
 }
@@ -47,7 +47,7 @@ func lower(s string) string      { return strings.ToLower(s) }
 func isPrerelease(v string) bool { return strings.Contains(v, "-") }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/nuget")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/nuget")
 	path = strings.TrimPrefix(path, "/nuget")
 
 	switch {

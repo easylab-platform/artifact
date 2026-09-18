@@ -6,7 +6,7 @@
 //
 // Repository layout served here:
 //
-//	/pkgs/git/<host>/<path>            e.g. /pkgs/git/github.com/julialang/general
+//	/artifacts/git/<host>/<path>            e.g. /artifacts/git/github.com/julialang/general
 //
 // The host is the first path segment (github.com, gitlab.com, ...), so one
 // instance mirrors any number of git servers and the host is the repository
@@ -109,9 +109,9 @@ func (s *State) timeout() time.Duration {
 // makes both shapes work:
 //
 //	git clone https://github.com/me/repo            (rewritten: host is origin)
-//	git clone http://gateway/pkgs/git/github.com/me/repo   (host in the path)
+//	git clone http://gateway/artifacts/git/github.com/me/repo   (host in the path)
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/pkgs/git/"), "/")
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/artifacts/git/"), "/")
 	path = strings.TrimPrefix(path, "git/")
 
 	host := artifactkit.CanonicalHost(artifactkit.RepoScopeFrom(r.Context()).Host)
@@ -562,13 +562,13 @@ func (s *State) rewriteLFSBatch(r *http.Request, host, repoPath string, body []b
 	// exist: with a raw self-base the adapter emits the upstream origin
 	// (https://github.com/<repo>/...) and the egress proxy maps it back; with a
 	// mount self-base it emits the gateway path, which carries the host segment
-	// (/pkgs/git/<host>/<repo>/...).
+	// (/artifacts/git/<host>/<repo>/...).
 	repo := strings.Trim(repoPath, "/")
 	var prefix string
 	switch base := strings.TrimSuffix(s.SelfBase, "/"); {
 	case base == "":
-		prefix = s.selfBase(r) + "/pkgs/git/" + host + "/" + repo
-	case strings.Contains(base, "/pkgs/"):
+		prefix = s.selfBase(r) + "/artifacts/git/" + host + "/" + repo
+	case strings.Contains(base, "/artifacts/"):
 		prefix = base + "/" + host + "/" + repo
 	default:
 		prefix = base + "/" + repo

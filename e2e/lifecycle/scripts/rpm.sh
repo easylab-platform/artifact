@@ -1,6 +1,6 @@
 #!/bin/sh
 # rpm lifecycle: rpmbuild a real .rpm + PUT it into a hosted repo
-# /pkgs/rpm/<repo>/<arch>/, then `dnf install` it (public+private+upgrade) and
+# /artifacts/rpm/<repo>/<arch>/, then `dnf install` it (public+private+upgrade) and
 # delete via DELETE.
 set -e
 export HOME="/tmp/lc-home-${STAGE}"

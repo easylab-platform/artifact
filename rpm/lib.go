@@ -11,7 +11,7 @@
 //
 // Repository layout served here:
 //
-//	/pkgs/rpm/<repo>/<path>   where <repo> is a user-chosen repository key
+//	/artifacts/rpm/<repo>/<path>   where <repo> is a user-chosen repository key
 //	(e.g. "fedorarelease41"); the upstream base for each repo key is resolved
 //	from the upstream table by repo name.
 package rpm
@@ -30,7 +30,7 @@ type State struct {
 	// RepoUpstreams maps repository keys to upstream bases. When nil, the
 	// single "rpm" upstream from the registry table is used for every repo.
 	RepoUpstreams map[string]string
-	// Hosted serves /pkgs/rpm/hosted/<repo>/... (self-published packages).
+	// Hosted serves /artifacts/rpm/hosted/<repo>/... (self-published packages).
 	Hosted *artifactkit.HostedHandler
 }
 
@@ -62,7 +62,7 @@ func init() {
 // override key, ...) or a self-published hosted repo. Hosted content wins for
 // the key; otherwise the request is proxied upstream.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	sub := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/pkgs/rpm/"), "rpm/"), "/")
+	sub := strings.Trim(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/artifacts/rpm/"), "rpm/"), "/")
 	repo, rest, ok := artifactkit.SplitRepo(sub)
 	if !ok {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"ok": true})

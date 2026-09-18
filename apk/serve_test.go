@@ -35,7 +35,7 @@ func TestServeBlobRangeAndHead(t *testing.T) {
 
 	// Full fetch.
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/apk/v3.21/main/x86_64/busybox-1.0.0-r0.apk", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/apk/v3.21/main/x86_64/busybox-1.0.0-r0.apk", nil)
 	_ = req
 	// Pre-cache the artifact record so the adapter serves it.
 	if err := meta.Put(context.Background(), artifactkit.Artifact{
@@ -56,7 +56,7 @@ func TestServeBlobRangeAndHead(t *testing.T) {
 
 	// HEAD: no body.
 	recH := httptest.NewRecorder()
-	s.ServeHTTP(recH, httptest.NewRequest(http.MethodHead, "/pkgs/apk/v3.21/main/x86_64/busybox-1.0.0-r0.apk", nil))
+	s.ServeHTTP(recH, httptest.NewRequest(http.MethodHead, "/artifacts/apk/v3.21/main/x86_64/busybox-1.0.0-r0.apk", nil))
 	if recH.Code != http.StatusOK || recH.Body.Len() != 0 {
 		t.Fatalf("HEAD: %d body=%d", recH.Code, recH.Body.Len())
 	}
@@ -66,7 +66,7 @@ func TestServeBlobRangeAndHead(t *testing.T) {
 
 	// Range: 206 partial.
 	recR := httptest.NewRecorder()
-	reqR := httptest.NewRequest(http.MethodGet, "/pkgs/apk/v3.21/main/x86_64/busybox-1.0.0-r0.apk", nil)
+	reqR := httptest.NewRequest(http.MethodGet, "/artifacts/apk/v3.21/main/x86_64/busybox-1.0.0-r0.apk", nil)
 	reqR.Header.Set("Range", "bytes=4-7")
 	s.ServeHTTP(recR, reqR)
 	if recR.Code != http.StatusPartialContent {

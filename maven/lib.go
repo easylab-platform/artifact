@@ -49,7 +49,7 @@ func parseMavenPath(p string) (coords, bool) {
 }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/maven")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/maven")
 	path = strings.TrimPrefix(path, "/maven")
 	path = strings.Trim(path, "/")
 

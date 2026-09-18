@@ -14,7 +14,7 @@
 //
 // Repository layout served here:
 //
-//	/pkgs/huggingface/{repo-type}/{namespace}/{name}/...
+//	/artifacts/huggingface/{repo-type}/{namespace}/{name}/...
 package huggingface
 
 import (
@@ -60,14 +60,14 @@ func (s *State) upstreamBase() string {
 // repoTypes recognized on the path.
 var repoTypes = map[string]bool{"models": true, "datasets": true, "spaces": true}
 
-// ServeHTTP dispatches /pkgs/huggingface/{repo-type}/{ns}/{name}/{rest} and
-// /pkgs/huggingface/api/{...} metadata calls.
+// ServeHTTP dispatches /artifacts/huggingface/{repo-type}/{ns}/{name}/{rest} and
+// /artifacts/huggingface/api/{...} metadata calls.
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/huggingface/")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/huggingface/")
 	path = strings.TrimPrefix(path, "huggingface/")
 	path = strings.Trim(path, "/")
 	if path == "" {

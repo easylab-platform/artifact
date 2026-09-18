@@ -38,7 +38,7 @@ func init() { artifactkit.Register("conan", NewHandler) }
 const capabilities = "json,rev2,revisions,checksums,upload_zip"
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pkgs/conan")
+	path := strings.TrimPrefix(r.URL.Path, "/artifacts/conan")
 	path = strings.TrimPrefix(path, "/conan")
 	path = strings.Trim(path, "/")
 
@@ -525,7 +525,7 @@ func (s *State) proxyRecipe(w http.ResponseWriter, r *http.Request, path string)
 
 func (s *State) base() string {
 	if s.SelfBase == "" {
-		return "http://localhost:8080/pkgs/conan"
+		return "http://localhost:8080/artifacts/conan"
 	}
 	return strings.TrimSuffix(s.SelfBase, "/")
 }

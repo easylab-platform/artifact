@@ -53,7 +53,7 @@ func TestPullThroughModelFile(t *testing.T) {
 	t.Cleanup(upstream.Close)
 
 	s := newFixture(t, upstream.URL, "hf-test-token")
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/huggingface/models/org/repo/resolve/main/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/huggingface/models/org/repo/resolve/main/config.json", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -79,13 +79,13 @@ func TestPullThroughModelFile(t *testing.T) {
 // TestRepoTypeValidation verifies unknown repo types and methods.
 func TestRepoTypeValidation(t *testing.T) {
 	s := newFixture(t, "http://127.0.0.1:1", "")
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/huggingface/bogus/ns/repo/resolve/main/x", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/huggingface/bogus/ns/repo/resolve/main/x", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("bad repo type = %d", rec.Code)
 	}
-	req2 := httptest.NewRequest(http.MethodPost, "/pkgs/huggingface/models/ns/repo/resolve/main/x", nil)
+	req2 := httptest.NewRequest(http.MethodPost, "/artifacts/huggingface/models/ns/repo/resolve/main/x", nil)
 	rec2 := httptest.NewRecorder()
 	s.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusMethodNotAllowed {
@@ -107,7 +107,7 @@ func TestAPIPassthrough(t *testing.T) {
 	t.Cleanup(upstream.Close)
 
 	s := newFixture(t, upstream.URL, "")
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/huggingface/api/models/org/repo", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/huggingface/api/models/org/repo", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "org/repo") {
@@ -124,7 +124,7 @@ func TestRedirectPassthrough(t *testing.T) {
 	t.Cleanup(upstream.Close)
 
 	s := newFixture(t, upstream.URL, "")
-	req := httptest.NewRequest(http.MethodGet, "/pkgs/huggingface/models/org/repo/resolve/main/weights.bin", nil)
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/huggingface/models/org/repo/resolve/main/weights.bin", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	if rec.Code != http.StatusFound {

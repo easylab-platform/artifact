@@ -1,6 +1,6 @@
 #!/bin/sh
 # conda lifecycle: build a real .tar.bz2 package + PUT it into a hosted
-# channel /pkgs/conda/<channel>/<subdir>/, then `conda create` an env with it
+# channel /artifacts/conda/<channel>/<subdir>/, then `conda create` an env with it
 # (public+private+upgrade) and delete via DELETE.
 set -e
 export HOME="/tmp/lc-home-${STAGE}"
