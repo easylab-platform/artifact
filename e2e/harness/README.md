@@ -22,6 +22,15 @@ hosts that are environment-sensitive).
   `fn` for each protocol with at most `JOBS` in flight, captures each worker's
   log to its own file, then prints them in protocol order and aggregates the
   PASS/FAIL/SKIP result files. `JOBS=1` reproduces serial execution.
+
+## Capture mode
+`CAPTURE=1 ./run.sh` exercises the privileged all-port face instead of
+DNS-spoof: an init container installs iptables rules redirecting every outbound
+TCP connection to the sidecar, which recovers the real destination with
+`SO_ORIGINAL_DST`. The same matrix passes both ways (28/28), proving the modes
+are transparent to clients. Capture needs `NET_ADMIN` on the sidecar and init
+container; `--capture-dns` also runs the spoof resolver + :443/:80 faces for
+rewrite hosts that do not resolve publicly.
 - `scripts/<p>.sh` — the client command per protocol, mounted at `/scripts`.
 - `scripts/<p>.rules.yaml` — optional extra rewrite rules for that protocol's
   pod (e.g. `conan.rules.yaml` routes its PyPI bootstrap through artifact-pypi).

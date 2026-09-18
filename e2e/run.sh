@@ -15,13 +15,14 @@
 #   ./run.sh                       # all protocols (default list)
 #   PROTOCOLS="nuget rubygems" ./run.sh
 #   KEEP=1 PROTOCOLS=helm ./run.sh # keep the pod for debugging
+#   CAPTURE=1 ./run.sh             # exercise the all-port capture mode
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NS="${NS:-temp}"
 TOOL_IMAGE_PREFIX="${TOOL_IMAGE_PREFIX:-forgejo.develop.10.199.64.20.nip.io/easylab/tool}"
 TOOL_TAG="${TOOL_TAG:-latest}"
-EASYSIDECAR_IMAGE="${EASYSIDECAR_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.6.0}"
+EASYSIDECAR_IMAGE="${EASYSIDECAR_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.7.1}"
 CA_SECRET="${CA_SECRET:-artifact-e2e-ca}"
 UPSTREAM_DNS="${UPSTREAM_DNS:-172.18.0.10}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
@@ -32,6 +33,9 @@ KEEP="${KEEP:-0}"
 # JOBS is the number of protocols exercised concurrently (each has its own
 # pod, so they are independent). JOBS=1 reproduces the old serial behavior.
 JOBS="${JOBS:-6}"
+# CAPTURE=1 runs the matrix through the privileged all-port capture mode
+# (iptables redirect + SO_ORIGINAL_DST) instead of DNS-spoof.
+CAPTURE="${CAPTURE:-0}"
 
 source "${HERE}/rules.sh"
 source "${HERE}/parallel.sh"
@@ -93,16 +97,67 @@ write_script_cm() {
 write_pod() {
   local p="$1" name="pull-$1"
   parse_row "$p"
-  cat <<YAML | kubectl apply -n "$NS" -f - >/dev/null
-apiVersion: v1
-kind: Pod
-metadata: { name: ${name}, labels: { app: pull } }
-spec:
+  # CAPTURE=1 exercises the privileged all-port capture mode: an init container
+  # redirects every outbound TCP connection to the sidecar (SO_ORIGINAL_DST
+  # recovers the destination), and DNS stays with the cluster. The tool env is
+  # otherwise identical, proving the two modes are transparent to clients.
+  local dns_block init_block sidecar_args sidecar_sec=""
+  if [ "${CAPTURE:-0}" = "1" ]; then
+    dns_block=$(cat <<YAML
   dnsPolicy: None
   dnsConfig:
     nameservers: ["127.0.0.1"]
     searches: ["${NS}.svc.cluster.local", "svc.cluster.local", "cluster.local"]
     options: [{ name: ndots, value: "5" }]
+YAML
+)
+    init_block=$(cat <<YAML
+  initContainers:
+  - name: easysidecar-capture-init
+    image: ${EASYSIDECAR_IMAGE}
+    args: ["--mode=capture","--capture-init","--capture-addr=0.0.0.0:15001"]
+    securityContext: { capabilities: { add: ["NET_ADMIN"] } }
+    resources:
+      requests: { cpu: 20m, memory: 32Mi }
+      limits:   { cpu: 200m, memory: 128Mi }
+YAML
+)
+    sidecar_args=$(cat <<YAML
+    - --mode=capture
+    - --capture-addr=0.0.0.0:15001
+    - --capture-dns
+    - --spoof-dns-addr=0.0.0.0:53
+    - --upstream-dns=${UPSTREAM_DNS}
+YAML
+)
+    sidecar_sec='    securityContext: { capabilities: { add: ["NET_ADMIN"] } }'
+  else
+    dns_block=$(cat <<YAML
+  dnsPolicy: None
+  dnsConfig:
+    nameservers: ["127.0.0.1"]
+    searches: ["${NS}.svc.cluster.local", "svc.cluster.local", "cluster.local"]
+    options: [{ name: ndots, value: "5" }]
+YAML
+)
+    init_block=""
+    sidecar_args=$(cat <<YAML
+    - --mode=proxy
+    - --spoof
+    - --spoof-dns-addr=0.0.0.0:53
+    - --spoof-tls-addr=0.0.0.0:443
+    - --spoof-http-addr=0.0.0.0:80
+    - --upstream-dns=${UPSTREAM_DNS}
+YAML
+)
+  fi
+  cat <<YAML | kubectl apply -n "$NS" -f - >/dev/null
+apiVersion: v1
+kind: Pod
+metadata: { name: ${name}, labels: { app: pull } }
+spec:
+${dns_block}
+${init_block}
   containers:
   - name: tool
     image: ${R_IMG}
@@ -125,17 +180,13 @@ spec:
     - { name: script, mountPath: /scripts, readOnly: true }
   - name: easysidecar
     image: ${EASYSIDECAR_IMAGE}
+${sidecar_sec}
     resources:
       requests: { cpu: 50m, memory: 64Mi }
       limits:   { cpu: 500m, memory: 256Mi }
     args:
-    - --mode=proxy
     - --rules=/etc/easysidecar/rules.yaml
-    - --spoof
-    - --spoof-dns-addr=0.0.0.0:53
-    - --spoof-tls-addr=0.0.0.0:443
-    - --spoof-http-addr=0.0.0.0:80
-    - --upstream-dns=${UPSTREAM_DNS}
+${sidecar_args}
     - --upstream-proxy=${UPSTREAM_PROXY}
     - --ca-cert=/etc/easysidecar/ca/ca.crt
     - --ca-key=/etc/easysidecar/ca/ca.key
