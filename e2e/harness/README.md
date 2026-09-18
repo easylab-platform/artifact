@@ -7,8 +7,11 @@ artifact Service. Success = the client's package manager installs/downloads a
 package through the proxy AND the sidecar logged >=1 `rewrite` connection
 (proving the request was not bypassed).
 
-Current status: **28/28 protocols PASS** (see the "Deviations" section for
-hosts that are environment-sensitive).
+Current status: **41/41 protocols PASS** (see the "Deviations" section for
+hosts that are environment-sensitive). The 13 new rows cover JVM/Android
+Maven mirrors (Google Maven, Gradle Plugin Portal, Clojars, Spring, JitPack),
+JSR (native + npm-compatibility), the opam/Stackage/PECL/Bazel/Jenkins trees
+and git-lfs.
 
 ## Layout
 - `deploy-protocol.sh` — one Deployment+Service per protocol (`artifact-<p>`);
@@ -31,7 +34,7 @@ real destination with `SO_ORIGINAL_DST`. The sidecar runs `--capture-dns`
 alongside, so rewrite hosts that do not resolve publicly still work (the
 resolver answers them with the Pod IP, served by the spoof :443/:80 faces).
 
-Verified with CAPTURE=1: pull 28/28, search 11/11, lifecycle 18/18 — the same
+Verified with CAPTURE=1: pull 41/41, search 11/11, lifecycle 18/18 — the same
 results as DNS-spoof, proving the modes are transparent to unmodified clients.
 Capture needs `NET_ADMIN` on the sidecar and init container.
 - `scripts/<p>.sh` — the client command per protocol, mounted at `/scripts`.
@@ -63,7 +66,7 @@ registry.npmjs.org,pypi=https://pypi.org,...`). Each adapter then emits its own
 upstream-shaped self URLs, so all sidecar rules point at the same Service and
 differ only by `add_prefix`. `UNIFIED_SVC=artifact-unified ./run.sh` and
 `UNIFIED_SVC=artifact-unified ../lifecycle/run.sh` prove the topology is
-transparent: 28/28 pull and 18/18 lifecycle pass against one instance.
+transparent: 41/41 pull and 18/18 lifecycle pass against one instance.
 
 ## Search/aux matrix
 `run-search.sh` drives each client's SEARCH (or other auxiliary) endpoint and

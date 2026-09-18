@@ -6,7 +6,7 @@ set -euo pipefail
 NS="${NS:-temp}"
 IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:v0.13.6}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
-PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg system google gradle clojars spring jitpack jsr jsrnpm opam stackage pecl bazel jenkins})
+PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg system google gradle clojars spring jitpack jsr jsrnpm opam stackage pecl bazel jenkins gitlfs})
 
 # proto_mount maps an e2e protocol row to the artifact protocol it mounts (the
 # maven-layout mirrors reuse the maven adapter; jsrnpm reuses npm).
