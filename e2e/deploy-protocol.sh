@@ -4,7 +4,7 @@
 # never traverse another protocol's sidecar). The Service name is artifact-<p>.
 set -euo pipefail
 NS="${NS:-temp}"
-IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:v0.14.0}"
+IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:v0.14.1}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg system google gradle clojars spring jitpack jsr jsrnpm opam stackage pecl bazel jenkins gitlfs})
 
