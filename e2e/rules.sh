@@ -38,7 +38,20 @@ proto_row() {
     luarocks)    echo '["luarocks.org"]||/pkgs/luarocks' ;;
     juliapkg)    echo '["pkg.julialang.org", "*.pkg.julialang.org"]||/pkgs/juliapkg' ;;
     git)         echo '["github.com"]||/pkgs/git' ;;
+    gitlfs)      echo '["github.com"]||/pkgs/git' ;;
     ivy)         echo '["repo.scala-sbt.org"]||/pkgs/ivy' ;;
+    google)      echo '["dl.google.com"]|/dl/android/maven2|/pkgs/maven' ;;
+    gradle)      echo '["plugins.gradle.org"]|/m2|/pkgs/maven' ;;
+    clojars)     echo '["repo.clojars.org"]||/pkgs/maven' ;;
+    spring)      echo '["repo.spring.io"]|/milestone|/pkgs/maven' ;;
+    jitpack)     echo '["jitpack.io"]||/pkgs/maven' ;;
+    jsr)         echo '["jsr.io"]||/pkgs/jsr' ;;
+    jsrnpm)      echo '["npm.jsr.io"]||/pkgs/npm' ;;
+    opam)        echo '["opam.ocaml.org"]||/pkgs/opam' ;;
+    stackage)    echo '["stackage.org"]||/pkgs/stackage' ;;
+    pecl)        echo '["pecl.php.net"]||/pkgs/pecl' ;;
+    bazel)       echo '["bcr.bazel.build"]||/pkgs/bazel' ;;
+    jenkins)     echo '["updates.jenkins.io"]||/pkgs/jenkins' ;;
     *)           echo "" ;;
   esac
 }
@@ -49,6 +62,13 @@ parse_row() { # sets R_IMG R_MATCH R_STRIP R_ADD
   # variant, so they always use the default tag.
   case "$1" in
     rpm|apk|nix) R_IMG="${TOOL_IMAGE_PREFIX}-$1:latest" ;;
+    # New mirrors reuse an existing client image: the maven-layout mirrors use
+    # the maven tool, the plain-HTTP trees the haskell/curl tool.
+    google|gradle|clojars|spring|jitpack) R_IMG="${TOOL_IMAGE_PREFIX}-maven:${TOOL_TAG}" ;;
+    jsrnpm)  R_IMG="${TOOL_IMAGE_PREFIX}-npm:${TOOL_TAG}" ;;
+    jsr)     R_IMG="${TOOL_IMAGE_PREFIX}-haskell:${TOOL_TAG}" ;;
+    gitlfs)  R_IMG="${TOOL_IMAGE_PREFIX}-gitlfs:${TOOL_TAG}" ;;
+    opam|stackage|pecl|bazel|jenkins) R_IMG="${TOOL_IMAGE_PREFIX}-haskell:${TOOL_TAG}" ;;
     *)           R_IMG="${TOOL_IMAGE_PREFIX}-$1:${TOOL_TAG}" ;;
   esac
 }

@@ -578,8 +578,15 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, name, file strin
 	}
 	data, err := remote.GetBytes(r.Context(), "/"+encodeName(name)+"/-/"+file)
 	if err != nil {
-		artifactkit.Error(w, http.StatusNotFound, "tarball not found")
-		return
+		// Some registries (JSR's npm-compatibility layer) do not serve the
+		// conventional "/<name>/-/<file>" path: the tarball lives at a
+		// registry-specific URL carried in the packument's dist.tarball.
+		// Fall back to that absolute URL before giving up.
+		data, err = s.tarballFromPackument(r.Context(), remote, name, file)
+		if err != nil {
+			artifactkit.Error(w, http.StatusNotFound, "tarball not found")
+			return
+		}
 	}
 	ver, pkgJSON := parseTarballPackageJSON(data)
 	if ver == "" {
@@ -588,6 +595,44 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, name, file strin
 	s.storeVersion(r.Context(), name, ver, data, pkgJSON, "pull")
 	artifactkit.ServeData(w, r, s.Registry, r.Context(), data, "application/octet-stream", file)
 }
+
+// tarballFromPackument resolves a tarball via the packument's dist.tarball
+// URLs. Some registries (JSR's npm-compatibility layer) do not serve the
+// conventional "/<name>/-/<file>" path: the tarball lives at a
+// registry-specific URL carried in the packument. We derive the version from
+// the requested filename and fetch that version's dist.tarball.
+func (s *State) tarballFromPackument(ctx context.Context, remote *artifactkit.Remote, name, file string) ([]byte, error) {
+	ver := versionFromTarballName(file, name)
+	if ver == "" {
+		return nil, errNoTarball
+	}
+	body, err := remote.GetBytes(ctx, "/"+encodeName(name))
+	if err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Versions map[string]struct {
+			Dist struct {
+				Tarball string `json:"tarball"`
+			} `json:"dist"`
+		} `json:"versions"`
+	}
+	if json.Unmarshal(body, &doc) != nil {
+		return nil, errNoTarball
+	}
+	v, ok := doc.Versions[ver]
+	if !ok || v.Dist.Tarball == "" {
+		return nil, errNoTarball
+	}
+	return s.Registry.FetchAbsoluteBytes(ctx, v.Dist.Tarball)
+}
+
+// errNoTarballType is a sentinel error for the packument fallback.
+type errNoTarballType string
+
+func (e errNoTarballType) Error() string { return string(e) }
+
+var errNoTarball = errNoTarballType("tarball not found")
 
 func versionFromTarballName(file, name string) string {
 	short := name

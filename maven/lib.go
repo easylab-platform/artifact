@@ -115,8 +115,14 @@ func (s *State) getPath(w http.ResponseWriter, r *http.Request, p string, c coor
 	}
 	fetched, err := s.Registry.Fetch(r.Context(), "maven", "", "/"+p)
 	if err != nil {
-		artifactkit.Error(w, http.StatusNotFound, "not found")
-		return
+		// JitPack 302s to the built version and the Gradle Plugin Portal 303s
+		// to Maven Central; both are content we want to mirror, so follow the
+		// redirect and cache the final body.
+		fetched, err = s.Registry.FetchPathFollow(r.Context(), "maven", "/"+p)
+		if err != nil {
+			artifactkit.Error(w, http.StatusNotFound, "not found")
+			return
+		}
 	}
 	storeVersionSource(s.Registry, c.artifactID, c.version, filename, fetched.Data, "pull", r.Context())
 	if fetched.Digest != "" && artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), fetched.Digest, "application/octet-stream", filename) {
@@ -207,8 +213,14 @@ func (s *State) hashFile(w http.ResponseWriter, r *http.Request, p string) {
 	}
 	fetched, err := s.Registry.Fetch(r.Context(), "maven", "", "/"+p)
 	if err != nil {
-		artifactkit.Error(w, http.StatusNotFound, "not found")
-		return
+		// JitPack 302s to the built version and the Gradle Plugin Portal 303s
+		// to Maven Central; both are content we want to mirror, so follow the
+		// redirect and cache the final body.
+		fetched, err = s.Registry.FetchPathFollow(r.Context(), "maven", "/"+p)
+		if err != nil {
+			artifactkit.Error(w, http.StatusNotFound, "not found")
+			return
+		}
 	}
 	artifactkit.Text(w, http.StatusOK, string(fetched.Data), "text/plain")
 }

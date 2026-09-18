@@ -38,7 +38,17 @@ import (
 // trees lists the formats this package serves. The value is only a hint for
 // documentation: the upstream comes from the registry's table (or the client's
 // Host), never from here.
-var trees = []string{"hackage", "cran", "cpan", "luarocks", "juliapkg"}
+//
+// Most are plain package trees; a few carry a JSON API on the same paths:
+//   - jsr     JSR's native registry API: /@scope/pkg/meta.json,
+//     /@scope/pkg/<ver>_meta.json and /@scope/pkg/<ver>/<path> modules.
+//   - bazel   Bazel Central Registry: /modules/<name>/<ver>/*.json + source.json.
+//   - jenkins Jenkins update center: /download/plugins/... and update-center.json.
+//   - opam    opam repository index + cache archives.
+var trees = []string{
+	"hackage", "cran", "cpan", "luarocks", "juliapkg",
+	"jsr", "opam", "stackage", "pecl", "bazel", "jenkins",
+}
 
 type State struct {
 	Registry *artifactkit.Registry
@@ -124,6 +134,16 @@ func mediaTypeOf(p string) string {
 		return "application/x-xz"
 	case strings.HasSuffix(p, ".json"):
 		return "application/json"
+	case strings.HasSuffix(p, ".ts"), strings.HasSuffix(p, ".mts"), strings.HasSuffix(p, ".cts"):
+		return "application/typescript"
+	case strings.HasSuffix(p, ".js"), strings.HasSuffix(p, ".mjs"), strings.HasSuffix(p, ".cjs"):
+		return "text/javascript"
+	case strings.HasSuffix(p, ".wasm"):
+		return "application/wasm"
+	case strings.HasSuffix(p, ".md"):
+		return "text/markdown"
+	case strings.HasSuffix(p, ".txt"):
+		return "text/plain; charset=utf-8"
 	default:
 		return "application/octet-stream"
 	}

@@ -260,6 +260,25 @@ func defaultUpstreams(airGap bool) *artifactkit.Upstreams {
 			"nix":      "https://cache.nixos.org",
 			"protobuf": "https://buf.build",
 			"gitlfs":   "",
+			// Additional plain-HTTP trees.
+			"jsr":      "https://jsr.io",
+			"opam":     "https://opam.ocaml.org",
+			"stackage": "https://stackage.org",
+			"pecl":     "https://pecl.php.net",
+			"bazel":    "https://bcr.bazel.build",
+			"jenkins":  "https://updates.jenkins.io",
+			// Maven-layout mirrors: the maven adapter serves them via the
+			// host-driven upstream (X-Forwarded-Host), so these entries exist
+			// to allow-list the host in knownHosts. The key's suffix names the
+			// mirror for readability and per-repo overrides.
+			"maven.google":  "https://dl.google.com/dl/android/maven2",
+			"maven.gradle":  "https://plugins.gradle.org/m2",
+			"maven.clojars": "https://repo.clojars.org",
+			"maven.spring":  "https://repo.spring.io/milestone",
+			"maven.jitpack": "https://jitpack.io",
+			// JSR's npm-compatibility registry (deno/bun/npm resolve @jsr/* from
+			// here); the npm adapter serves it host-driven.
+			"npm.jsr": "https://npm.jsr.io",
 			// Sub-endpoints that live on a different host than the format's
 			// primary upstream (crates.io: index + static downloads are
 			// served from index.crates.io / static.crates.io).

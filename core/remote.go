@@ -345,6 +345,42 @@ func (r *Registry) FetchAbsolute(ctx context.Context, url string) (Fetched, erro
 	return r.finishFetch(ctx, data)
 }
 
+// FetchAbsoluteBytes pulls a full URL verbatim and returns its bytes.
+func (r *Registry) FetchAbsoluteBytes(ctx context.Context, url string) ([]byte, error) {
+	fetched, err := r.FetchAbsolute(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	return fetched.Data, nil
+}
+
+// FetchAbsoluteToBlob streams an absolute URL into the CAS, verifying it
+// matches wantDigest (when non-empty) and following redirects. It is used for
+// presigned CDN hrefs (git LFS objects) that the caller learned out of band.
+func (r *Registry) FetchAbsoluteToBlob(ctx context.Context, url, wantDigest string) (int64, error) {
+	factory := NewClientFactory()
+	remote := NewRemote(factory, "", proxyPtr(r.Upstreams, "generic"))
+	resp, err := remote.Get(ctx, url)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return 0, &UpstreamStatusError{Path: url, Status: resp.StatusCode}
+	}
+	digest := wantDigest
+	if digest == "" {
+		digest = "sha256:unknown"
+	}
+	if _, err := r.Blobs.PutIfAbsent(ctx, digest, resp.Body); err != nil {
+		return 0, err
+	}
+	if sz, err := r.Blobs.Stat(ctx, digest); err == nil && sz != nil {
+		return *sz, nil
+	}
+	return 0, nil
+}
+
 // StoreAndHash writes into the blob store (dedup by sha256) and returns a summary.
 func (r *Registry) StoreAndHash(ctx context.Context, data []byte) (Stored, error) {
 	h, _ := ComputeHashesBytes(data)

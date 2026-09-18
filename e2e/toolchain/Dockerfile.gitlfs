@@ -1,0 +1,7 @@
+# Protocol-client image: git + git-lfs. The e2e script clones a small public
+# LFS repository through the mirror, so the client must smudge the LFS object.
+ARG BASE_IMAGE=forgejo.develop.10.199.64.20.nip.io/easylab/toolchain-base:trixie
+FROM ${BASE_IMAGE}
+RUN apt-get update && apt-get install -y --no-install-recommends git-lfs ca-certificates \
+ && git lfs install --system \
+ && rm -rf /var/lib/apt/lists/*

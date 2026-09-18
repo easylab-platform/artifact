@@ -25,11 +25,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -146,9 +148,146 @@ func (s *State) dispatch(w http.ResponseWriter, r *http.Request, host, repoPath 
 		s.service(w, r, host, strings.TrimSuffix(repoPath, "/git-upload-pack"), "upload-pack", false)
 	case strings.HasSuffix(repoPath, "/git-receive-pack"):
 		s.service(w, r, host, strings.TrimSuffix(repoPath, "/git-receive-pack"), "receive-pack", true)
+	// Git LFS: the batch negotiation is proxied (its action hrefs are rewritten
+	// to the mirror), and object transfers are served from the CAS, fetching
+	// through from the upstream's LFS object URL on a miss.
+	case strings.HasSuffix(repoPath, "/info/lfs/objects/batch") && r.Method == http.MethodPost:
+		s.lfsBatch(w, r, host, strings.TrimSuffix(repoPath, "/info/lfs/objects/batch"))
+	case strings.HasSuffix(repoPath, "/info/lfs/objects/batch") && r.Method == http.MethodGet:
+		s.proxy(w, r, host, repoPath)
+	case strings.Contains(repoPath, "/info/lfs/objects/"):
+		repo := repoPath[:strings.Index(repoPath, "/info/lfs/objects/")]
+		rest := repoPath[strings.Index(repoPath, "/info/lfs/objects/")+len("/info/lfs/objects/"):]
+		verb, oid, _ := strings.Cut(rest, "/")
+		s.lfsObject(w, r, host, repo, verb, oid)
 	default:
 		s.proxy(w, r, host, repoPath)
 	}
+}
+
+// lfsBatch proxies the LFS batch negotiation upstream and rewrites every
+// action href to the mirror, so object transfers come back to lfsObject.
+func (s *State) lfsBatch(w http.ResponseWriter, r *http.Request, host, repoPath string) {
+	artifactkit.LimitBody(w, r)
+	body, _ := io.ReadAll(io.LimitReader(r.Body, maxBody))
+	base, ok := s.Registry.Upstreams.HostBase("", host, "")
+	if !ok {
+		base = "https://" + host
+	}
+	remote := s.Registry.RemoteAt(base)
+	resp, err := remote.Do(r.Context(), http.MethodPost,
+		"/"+strings.Trim(repoPath, "/")+"/info/lfs/objects/batch",
+		bytes.NewReader(body), r.Header.Get("Content-Type"), r.Header.Get("Accept"))
+	if err != nil {
+		artifactkit.Error(w, http.StatusBadGateway, "lfs upstream: "+err.Error())
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	out, _ := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if resp.StatusCode == http.StatusOK {
+		out = s.rewriteLFSBatch(r, host, repoPath, out)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(out)
+}
+
+// lfsObject serves a download from the CAS, fetching it from the upstream on a
+// miss. The upstream object URL is a presigned, expiring CDN href that the
+// batch response carried, so on a miss we re-run the batch for this one oid and
+// fetch the href it returns. Uploads (PUT) store the object locally.
+func (s *State) lfsObject(w http.ResponseWriter, r *http.Request, host, repoPath, verb, oid string) {
+	if !validLFSObjectPath(verb, oid) {
+		artifactkit.Error(w, http.StatusNotFound, "not found")
+		return
+	}
+	digest := "sha256:" + oid
+	switch {
+	case r.Method == http.MethodGet && verb == "download":
+		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, "application/octet-stream") {
+			return
+		}
+		href, err := s.upstreamLFSHref(r.Context(), host, repoPath, oid, lfsSize(r))
+		if err != nil {
+			artifactkit.Error(w, http.StatusBadGateway, "lfs upstream: "+err.Error())
+			return
+		}
+		if _, err := s.Registry.FetchAbsoluteToBlob(r.Context(), href, digest); err != nil {
+			artifactkit.Error(w, http.StatusBadGateway, "lfs fetch: "+err.Error())
+			return
+		}
+		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, "application/octet-stream") {
+			return
+		}
+		artifactkit.Error(w, http.StatusBadGateway, "lfs cache error")
+	case r.Method == http.MethodPut && verb == "upload":
+		if !artifactkit.AuthorizeWriteFor(w, r, s.Auth, s.Registry, "git", repoPath) {
+			return
+		}
+		if _, err := s.Registry.Blobs.PutIfAbsent(r.Context(), digest, r.Body); err != nil {
+			artifactkit.Error(w, http.StatusBadRequest, "lfs digest mismatch: "+err.Error())
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	default:
+		artifactkit.Error(w, http.StatusNotFound, "not found")
+	}
+}
+
+// upstreamLFSHref asks the upstream LFS batch for one object's download href.
+func (s *State) upstreamLFSHref(ctx context.Context, host, repoPath, oid string, size int64) (string, error) {
+	base, ok := s.Registry.Upstreams.HostBase("", host, "")
+	if !ok {
+		base = "https://" + host
+	}
+	remote := s.Registry.RemoteAt(base)
+	reqBody := `{"operation":"download","transfers":["basic"],"objects":[{"oid":"` + oid + `","size":` + strconv.FormatInt(size, 10) + `}]}`
+	resp, err := remote.Do(ctx, http.MethodPost,
+		"/"+strings.Trim(repoPath, "/")+"/info/lfs/objects/batch",
+		strings.NewReader(reqBody), "application/vnd.git-lfs+json", "application/vnd.git-lfs+json")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var doc struct {
+		Objects []struct {
+			Actions map[string]struct {
+				Href string `json:"href"`
+			} `json:"actions"`
+		} `json:"objects"`
+	}
+	if json.Unmarshal(body, &doc) != nil || len(doc.Objects) == 0 {
+		return "", errUnknownLFSObject
+	}
+	if a, ok := doc.Objects[0].Actions["download"]; ok && a.Href != "" {
+		return a.Href, nil
+	}
+	return "", errUnknownLFSObject
+}
+
+var errUnknownLFSObject = errUnknownLFSObjectType("lfs object not found")
+
+type errUnknownLFSObjectType string
+
+func (e errUnknownLFSObjectType) Error() string { return string(e) }
+
+// validLFSObjectPath reports whether verb/oid name a real object transfer.
+func validLFSObjectPath(verb, oid string) bool {
+	if verb != "download" && verb != "upload" {
+		return false
+	}
+	if len(oid) != 64 {
+		return false
+	}
+	for _, c := range oid {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // mirrorPath is the on-disk bare mirror for host/repo.
@@ -409,6 +548,95 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, host, path string)
 	_, _ = io.Copy(w, resp.Body)
 }
 
+// rewriteLFSBatch points every batch action at the mirror's own LFS endpoint,
+// so the object fetch is served (and cached) by us. The upstream's
+// "href"/"header" fields are replaced; the batch response shape is otherwise
+// preserved.
+func (s *State) rewriteLFSBatch(r *http.Request, host, repoPath string, body []byte) []byte {
+	var doc map[string]any
+	if json.Unmarshal(body, &doc) != nil {
+		return body
+	}
+	objs, _ := doc["objects"].([]any)
+	// Build the prefix the client should use to reach this object. Two shapes
+	// exist: with a raw self-base the adapter emits the upstream origin
+	// (https://github.com/<repo>/...) and the egress proxy maps it back; with a
+	// mount self-base it emits the gateway path, which carries the host segment
+	// (/pkgs/git/<host>/<repo>/...).
+	repo := strings.Trim(repoPath, "/")
+	var prefix string
+	switch base := strings.TrimSuffix(s.SelfBase, "/"); {
+	case base == "":
+		prefix = s.selfBase(r) + "/pkgs/git/" + host + "/" + repo
+	case strings.Contains(base, "/pkgs/"):
+		prefix = base + "/" + host + "/" + repo
+	default:
+		prefix = base + "/" + repo
+	}
+	for _, o := range objs {
+		m, ok := o.(map[string]any)
+		if !ok {
+			continue
+		}
+		actions, ok := m["actions"].(map[string]any)
+		if !ok {
+			continue
+		}
+		size := sizeOf(m)
+		for _, verb := range []string{"download", "upload", "verify"} {
+			a, ok := actions[verb].(map[string]any)
+			if !ok {
+				continue
+			}
+			// verify actions keep their upstream href (they validate a local
+			// object; there is no object to fetch).
+			if verb != "verify" {
+				// Carry the object size in the href: the upstream batch API
+				// requires it, and the object fetch is a separate request.
+				a["href"] = prefix + "/info/lfs/objects/" + verb + "/" + oidOf(m) + "?size=" + strconv.FormatInt(size, 10)
+				delete(a, "header")
+			}
+		}
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+func oidOf(m map[string]any) string {
+	if oid, ok := m["oid"].(string); ok {
+		return oid
+	}
+	return ""
+}
+
+func sizeOf(m map[string]any) int64 {
+	if n, ok := m["size"].(float64); ok {
+		return int64(n)
+	}
+	return 0
+}
+
+// lfsSize reads the ?size= the batch href carried.
+func lfsSize(r *http.Request) int64 {
+	n, _ := strconv.ParseInt(r.URL.Query().Get("size"), 10, 64)
+	return n
+}
+
+// selfBase is the external base URL the client used, for emitted LFS URLs.
+func (s *State) selfBase(r *http.Request) string {
+	if s.SelfBase != "" {
+		return s.SelfBase
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
 // gitError carries the command output so the gateway surfaces why a mirror
 // could not be built.
 type gitError struct {
@@ -458,4 +686,11 @@ func gitEnv() []string {
 func formatPktLen(n int) string {
 	const hexd = "0123456789abcdef"
 	return string([]byte{hexd[(n>>12)&0xf], hexd[(n>>8)&0xf], hexd[(n>>4)&0xf], hexd[n&0xf]})
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

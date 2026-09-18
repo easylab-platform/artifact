@@ -4,9 +4,20 @@
 # never traverse another protocol's sidecar). The Service name is artifact-<p>.
 set -euo pipefail
 NS="${NS:-temp}"
-IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:v0.1.16}"
+IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:v0.13.2}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
-PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg system})
+PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg system google gradle clojars spring jitpack jsr jsrnpm opam stackage pecl bazel jenkins})
+
+# proto_mount maps an e2e protocol row to the artifact protocol it mounts (the
+# maven-layout mirrors reuse the maven adapter; jsrnpm reuses npm).
+proto_mount() {
+  case "$1" in
+    google|gradle|clojars|spring|jitpack) echo maven ;;
+    jsrnpm) echo npm ;;
+    gitlfs) echo git ;;
+    *) echo "$1" ;;
+  esac
+}
 
 # ORIGIN=1 mounts each adapter in "upstream origin" mode (--self-base-raw):
 # self URLs take the upstream shape (registry.npmjs.org/left-pad/-/x.tgz,
@@ -36,12 +47,25 @@ proto_origin() {
     rpm)         echo "https://dl.fedoraproject.org" ;;
     oci)         echo "https://registry-1.docker.io" ;;
     git)         echo "https://github.com" ;;
+    gitlfs)      echo "https://github.com" ;;
     hackage)     echo "https://hackage.haskell.org" ;;
     cran)        echo "https://cran.r-project.org" ;;
     cpan)        echo "https://cpan.metacpan.org" ;;
     luarocks)    echo "https://luarocks.org" ;;
     juliapkg)    echo "https://pkg.julialang.org" ;;
     ivy)         echo "https://repo.scala-sbt.org" ;;
+    google)      echo "https://dl.google.com/dl/android/maven2" ;;
+    gradle)      echo "https://plugins.gradle.org/m2" ;;
+    clojars)     echo "https://repo.clojars.org" ;;
+    spring)      echo "https://repo.spring.io/milestone" ;;
+    jitpack)     echo "https://jitpack.io" ;;
+    jsr)         echo "https://jsr.io" ;;
+    jsrnpm)      echo "https://npm.jsr.io" ;;
+    opam)        echo "https://opam.ocaml.org" ;;
+    stackage)    echo "https://stackage.org" ;;
+    pecl)        echo "https://pecl.php.net" ;;
+    bazel)       echo "https://bcr.bazel.build" ;;
+    jenkins)     echo "https://updates.jenkins.io" ;;
     *)           echo "" ;;
   esac
 }
@@ -50,6 +74,7 @@ ORIGIN="${ORIGIN:-1}"
 
 for p in "${PROTOCOLS[@]}"; do
   name="artifact-${p}"
+  mount="$(proto_mount "$p")"
   extra=""
   extra_args=""
   self_base="http://${name}.${NS}.svc.cluster.local"
@@ -83,7 +108,7 @@ spec:
       containers:
       - name: artifact
         image: ${IMAGE}
-        args: ["--listen=:8080", "--data=/data", "--protocols=${p}", "--self-base=${self_base}"${extra_args}]
+        args: ["--listen=:8080", "--data=/data", "--protocols=${mount}", "--self-base=${self_base}"${extra_args}]
         ports: [{ name: http, containerPort: 8080 }]
         resources:
           requests: { cpu: 50m, memory: 64Mi }
