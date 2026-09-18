@@ -29,11 +29,12 @@ UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 # protocol, built from official/prebuilt tarballs under /opt).
 PROTOCOLS=(${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg})
 KEEP="${KEEP:-0}"
+# JOBS is the number of protocols exercised concurrently (each has its own
+# pod, so they are independent). JOBS=1 reproduces the old serial behavior.
+JOBS="${JOBS:-6}"
 
 source "${HERE}/rules.sh"
-
-pass=0; fail=0
-declare -a RESULTS
+source "${HERE}/parallel.sh"
 
 # Per-protocol columns (pipe separated, values must not contain "|"):
 #   match json | strip_prefix | add_prefix
@@ -161,7 +162,8 @@ run_one() {
   write_pod "$p"
 
   if ! kubectl wait -n "$NS" --for=condition=Ready "pod/${name}" --timeout=300s >/dev/null 2>&1; then
-    echo "FAIL $p  (pod not ready)"; fail=$((fail+1)); RESULTS+=("FAIL $p pod-not-ready")
+    echo "FAIL $p  (pod not ready)"
+    emit_result "$p" "FAIL $p pod-not-ready"
     kubectl logs -n "$NS" "$name" -c easysidecar --tail=5 2>&1 | sed 's/^/      | /'
     return
   fi
@@ -175,20 +177,18 @@ run_one() {
     growth="$(git_mirror_count "$p" "$before_git")"
   fi
   if [ "$rc" -eq 0 ] && [ "${rewrites:-0}" -gt 0 ]; then
-    echo "PASS $p  ($rewrites rewrite conns, CAS +$growth)"; pass=$((pass+1)); RESULTS+=("PASS $p ($rewrites conns, CAS +$growth)")
+    echo "PASS $p  ($rewrites rewrite conns, CAS +$growth)"
+    emit_result "$p" "PASS $p ($rewrites conns, CAS +$growth)"
   elif [ "$rc" -eq 0 ]; then
-    echo "FAIL $p  (client ok but no rewrite conn — bypassed)"; fail=$((fail+1)); RESULTS+=("FAIL $p bypassed")
+    echo "FAIL $p  (client ok but no rewrite conn — bypassed)"
+    emit_result "$p" "FAIL $p bypassed"
     kubectl logs -n "$NS" "$name" -c easysidecar --tail=8 2>&1 | sed 's/^/      | /'
   else
-    echo "FAIL $p  (client rc=$rc)"; fail=$((fail+1)); RESULTS+=("FAIL $p rc=$rc")
+    echo "FAIL $p  (client rc=$rc)"
+    emit_result "$p" "FAIL $p rc=$rc"
     echo "$out" | tail -12 | sed 's/^/      | /'
   fi
   [ "$KEEP" = "1" ] || kubectl delete pod -n "$NS" "$name" --ignore-not-found >/dev/null 2>&1
 }
 
-for p in "${PROTOCOLS[@]}"; do run_one "$p"; done
-
-echo "====================================="
-printf '%s\n' "${RESULTS[@]}"
-echo "MATRIX: $pass pass, $fail fail"
-[ "$fail" -eq 0 ]
+run_pool run_one "${PROTOCOLS[@]}"

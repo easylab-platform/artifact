@@ -7,7 +7,7 @@ artifact Service. Success = the client's package manager installs/downloads a
 package through the proxy AND the sidecar logged >=1 `rewrite` connection
 (proving the request was not bypassed).
 
-Current status: **21/21 protocols PASS** (see the "Deviations" section for
+Current status: **28/28 protocols PASS** (see the "Deviations" section for
 hosts that are environment-sensitive).
 
 ## Layout
@@ -17,7 +17,11 @@ hosts that are environment-sensitive).
   `artifact-e2e-ca` secret (re-run to rotate).
 - `run.sh` — matrix driver: per protocol it creates a tool+easysidecar pod
   (spoof DNS via `dnsPolicy: None`), runs `scripts/<p>.sh`, and asserts the
-  sidecar saw a rewrite.
+  sidecar saw a rewrite. Protocols run concurrently (`JOBS`, default 6).
+- `parallel.sh` — shared bounded worker pool: `run_pool <fn> <proto...>` runs
+  `fn` for each protocol with at most `JOBS` in flight, captures each worker's
+  log to its own file, then prints them in protocol order and aggregates the
+  PASS/FAIL/SKIP result files. `JOBS=1` reproduces serial execution.
 - `scripts/<p>.sh` — the client command per protocol, mounted at `/scripts`.
 - `scripts/<p>.rules.yaml` — optional extra rewrite rules for that protocol's
   pod (e.g. `conan.rules.yaml` routes its PyPI bootstrap through artifact-pypi).
@@ -27,6 +31,7 @@ hosts that are environment-sensitive).
 ./gen-ca.sh                                   # once
 NS=temp ./deploy-protocol.sh                  # all protocols
 PROTOCOLS="npm pypi go cargo maven" ./run.sh  # subset matrix
+JOBS=12 ./run.sh                              # more parallelism (default 6)
 KEEP=1 PROTOCOLS=cargo ./run.sh               # keep the pod for debugging
 ```
 
@@ -46,7 +51,7 @@ registry.npmjs.org,pypi=https://pypi.org,...`). Each adapter then emits its own
 upstream-shaped self URLs, so all sidecar rules point at the same Service and
 differ only by `add_prefix`. `UNIFIED_SVC=artifact-unified ./run.sh` and
 `UNIFIED_SVC=artifact-unified ../lifecycle/run.sh` prove the topology is
-transparent: 21/21 pull and 18/18 lifecycle pass against one instance.
+transparent: 28/28 pull and 18/18 lifecycle pass against one instance.
 
 ## Search/aux matrix
 `run-search.sh` drives each client's SEARCH (or other auxiliary) endpoint and

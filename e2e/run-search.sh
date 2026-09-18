@@ -21,11 +21,11 @@ UPSTREAM_DNS="${UPSTREAM_DNS:-172.18.0.10}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 PROTOCOLS=(${PROTOCOLS:-npm cargo rubygems composer hex go pypi nuget helm conda rpm})
 KEEP="${KEEP:-0}"
+# JOBS protocols run concurrently (each has its own pod). JOBS=1 is serial.
+JOBS="${JOBS:-6}"
 
 source "${HERE}/rules.sh"
-
-pass=0; fail=0
-declare -a RESULTS
+source "${HERE}/parallel.sh"
 
 # search_cmd <proto>: the shell command run in the tool image. It must exit
 # non-zero (or print a sentinel) when the search yields no upstream results.
@@ -212,33 +212,34 @@ rewrite_count() { kubectl logs -n "$NS" "$1" -c easysidecar 2>/dev/null | grep -
 run_one() {
   local p="$1" name="search-$1" out rc rewrites
   if [ -z "$(search_cmd "$p")" ]; then
-    echo "SKIP $p  (no search command)"; return
+    echo "SKIP $p  (no search command)"
+    emit_result "$p" "SKIP $p"
+    return
   fi
   write_rules_cm search "$p"
   write_script_cm "$p"
   kubectl delete pod -n "$NS" "$name" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1
   write_pod "$p"
   if ! kubectl wait -n "$NS" --for=condition=Ready "pod/${name}" --timeout=300s >/dev/null 2>&1; then
-    echo "FAIL $p  (pod not ready)"; fail=$((fail+1)); RESULTS+=("FAIL $p pod-not-ready"); return
+    echo "FAIL $p  (pod not ready)"
+    emit_result "$p" "FAIL $p pod-not-ready"
+    return
   fi
   out="$(kubectl exec -n "$NS" "$name" -c tool -- timeout 400 sh "/scripts/${p}.sh" 2>&1)"; rc=$?
   rewrites="$(rewrite_count "$name")"
   if [ "$rc" -eq 0 ] && [ "${rewrites:-0}" -gt 0 ]; then
     echo "PASS $p  ($rewrites conns)  $(echo "$out" | tail -1)"
-    pass=$((pass+1)); RESULTS+=("PASS $p ($rewrites conns)")
+    emit_result "$p" "PASS $p ($rewrites conns)"
   elif [ "$rc" -eq 0 ]; then
-    echo "FAIL $p  (ok but bypassed)"; fail=$((fail+1)); RESULTS+=("FAIL $p bypassed")
+    echo "FAIL $p  (ok but bypassed)"
+    emit_result "$p" "FAIL $p bypassed"
     echo "$out" | tail -6 | sed 's/^/      | /'
   else
-    echo "FAIL $p  (rc=$rc)"; fail=$((fail+1)); RESULTS+=("FAIL $p rc=$rc")
+    echo "FAIL $p  (rc=$rc)"
+    emit_result "$p" "FAIL $p rc=$rc"
     echo "$out" | tail -10 | sed 's/^/      | /'
   fi
   [ "$KEEP" = "1" ] || kubectl delete pod -n "$NS" "$name" --ignore-not-found >/dev/null 2>&1
 }
 
-for p in "${PROTOCOLS[@]}"; do run_one "$p"; done
-
-echo "====================================="
-printf '%s\n' "${RESULTS[@]}"
-echo "SEARCH MATRIX: $pass pass, $fail fail"
-[ "$fail" -eq 0 ]
+run_pool run_one "${PROTOCOLS[@]}"

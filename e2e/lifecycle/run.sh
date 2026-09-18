@@ -34,8 +34,11 @@ KEEP="${KEEP:-0}"
 V1="${V1:-1.0.0}"
 V2="${V2:-2.0.0}"
 STAGES=(publish public private upgrade delete)
+# JOBS protocols run concurrently (each has its own pod). JOBS=1 is serial.
+JOBS="${JOBS:-6}"
 
 source "${HERE}/../rules.sh"
+source "${HERE}/../parallel.sh"
 
 # Per-protocol fully-qualified package name for run SUFFIX.
 proto_pkg() {
@@ -133,7 +136,7 @@ rm -rf "$HOME" "$WORK"; mkdir -p "$HOME" "$WORK"; sh "/scripts/'"$p"'.sh"'
 run_one() {
   local p="$1" name="lc-$1" stage ver rc out rewrites stage_result
   local failed=0
-  SUFFIX="$(date +%s)"
+  SUFFIX="$(date +%s%N)"
   local pkg; pkg="$(proto_pkg "$p")"
 
   write_rules_cm lc "$p"
@@ -142,8 +145,9 @@ run_one() {
   write_pod "$p"
   if ! kubectl wait -n "$NS" --for=condition=Ready "pod/${name}" --timeout=300s >/dev/null 2>&1; then
     echo "FAIL $p (pod not ready)"
+    emit_result "$p" "FAIL $p pod-not-ready"
     kubectl logs -n "$NS" "$name" -c easysidecar --tail=5 2>&1 | sed 's/^/      | /'
-    RESULTS+=("FAIL $p pod-not-ready"); fail=$((fail+1)); return
+    return
   fi
 
   printf '%-9s %s\n' "$p" "$pkg"
@@ -171,18 +175,11 @@ run_one() {
     echo "  FAIL bypass (no rewrite connections)"; failed=1
   fi
   if [ "$failed" -eq 0 ]; then
-    pass=$((pass+1)); RESULTS+=("PASS $p (${rewrites} conns) [${STAGES[*]}]")
+    emit_result "$p" "PASS $p (${rewrites} conns) [${STAGES[*]}]"
   else
-    fail=$((fail+1)); RESULTS+=("FAIL $p (see above)")
+    emit_result "$p" "FAIL $p (see above)"
   fi
   [ "$KEEP" = "1" ] || kubectl delete pod -n "$NS" "$name" --ignore-not-found >/dev/null 2>&1
 }
 
-pass=0; fail=0
-declare -a RESULTS
-for p in "${PROTOCOLS[@]}"; do run_one "$p"; done
-
-echo "====================================="
-printf '%s\n' "${RESULTS[@]}"
-echo "LIFECYCLE: $pass pass, $fail fail"
-[ "$fail" -eq 0 ]
+run_pool run_one "${PROTOCOLS[@]}"
