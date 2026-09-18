@@ -3,7 +3,7 @@ module github.com/easylab-platform/artifact/core
 go 1.26.5
 
 require (
-	github.com/easylab-platform/artifact/targets v0.0.0
+	github.com/easylab-platform/artifact/targets v0.1.0
 	github.com/glebarez/sqlite v1.11.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/postgres v1.6.2
