@@ -5,7 +5,7 @@
 # and verifies a layer blob from Docker Hub (whose blob endpoint 307-redirects
 # to a CDN that artifact follows, hashes and caches).
 set -e
-cat /etc/easyproxy/ca.crt >> /etc/ssl/certs/ca-certificates.crt
+cat /etc/easysidecar/ca.crt >> /etc/ssl/certs/ca-certificates.crt
 
 # fetch_manifest <registry> <repo> <tag>: pull the manifest list and print the
 # first platform digest, proving the registry resolved through the gateway.

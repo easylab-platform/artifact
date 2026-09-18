@@ -6,7 +6,7 @@ set -e
 # compiler build and run a real program.
 python3 - <<'PY'
 import ssl, http.client, urllib.parse
-ctx = ssl.create_default_context(cafile="/etc/easyproxy/ca.crt")
+ctx = ssl.create_default_context(cafile="/etc/easysidecar/ca.crt")
 def req(method, path):
     c = http.client.HTTPSConnection("api.spm.swift.org", 443, timeout=120, context=ctx)
     c.request(method, path); r = c.getresponse(); body = r.read(); c.close()

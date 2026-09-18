@@ -3,7 +3,7 @@
 # (maven has no client delete; the adapter exposes DELETE on the artifact path.)
 set -e
 # Java ignores SSL_CERT_FILE; point it at a truststore holding the egress CA.
-keytool -importcert -noprompt -alias easylab -file /etc/easyproxy/ca.crt \
+keytool -importcert -noprompt -alias easylab -file /etc/easysidecar/ca.crt \
   -keystore "$HOME/ts.p12" -storetype PKCS12 -storepass changeit >/dev/null 2>&1 || true
 export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=$HOME/ts.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12"
 G=io.easylab.lc

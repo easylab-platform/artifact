@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Per-protocol pull-through matrix: one tool+easyproxy pod per protocol, each
+# Per-protocol pull-through matrix: one tool+easysidecar pod per protocol, each
 # steered by the DNS-spoof egress policy at that protocol's artifact Service.
 #
 # For each protocol we assert:
@@ -21,7 +21,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NS="${NS:-temp}"
 TOOL_IMAGE_PREFIX="${TOOL_IMAGE_PREFIX:-forgejo.develop.10.199.64.20.nip.io/easylab/tool}"
 TOOL_TAG="${TOOL_TAG:-latest}"
-EASYPX_IMAGE="${EASYPX_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easyproxy:v0.5.3}"
+EASYSIDECAR_IMAGE="${EASYSIDECAR_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.6.0}"
 CA_SECRET="${CA_SECRET:-artifact-e2e-ca}"
 UPSTREAM_DNS="${UPSTREAM_DNS:-172.18.0.10}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
@@ -56,7 +56,7 @@ cas_count() {
 # rewrite_count prints how many rewrite connections the sidecar has logged for
 # the pod so far.
 rewrite_count() {
-  kubectl logs -n "$NS" "$1" -c easyproxy 2>/dev/null | grep -c '"action":"rewrite"'
+  kubectl logs -n "$NS" "$1" -c easysidecar 2>/dev/null | grep -c '"action":"rewrite"'
 }
 
 # await_rewrites polls until the sidecar has logged >=1 rewrite result for the
@@ -113,37 +113,37 @@ spec:
       requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: "2", memory: 4Gi }
     env:
-    - { name: SSL_CERT_FILE, value: /etc/easyproxy/ca.crt }
-    - { name: NODE_EXTRA_CA_CERTS, value: /etc/easyproxy/ca.crt }
-    - { name: REQUESTS_CA_BUNDLE, value: /etc/easyproxy/ca.crt }
-    - { name: CURL_CA_BUNDLE, value: /etc/easyproxy/ca.crt }
-    - { name: GIT_SSL_CAINFO, value: /etc/easyproxy/ca.crt }
-    - { name: SSL_CERT_DIR, value: /etc/easyproxy/ca }
+    - { name: SSL_CERT_FILE, value: /etc/easysidecar/ca.crt }
+    - { name: NODE_EXTRA_CA_CERTS, value: /etc/easysidecar/ca.crt }
+    - { name: REQUESTS_CA_BUNDLE, value: /etc/easysidecar/ca.crt }
+    - { name: CURL_CA_BUNDLE, value: /etc/easysidecar/ca.crt }
+    - { name: GIT_SSL_CAINFO, value: /etc/easysidecar/ca.crt }
+    - { name: SSL_CERT_DIR, value: /etc/easysidecar/ca }
     volumeMounts:
-    - { name: ca, mountPath: /etc/easyproxy/ca.crt, subPath: ca.crt, readOnly: true }
+    - { name: ca, mountPath: /etc/easysidecar/ca.crt, subPath: ca.crt, readOnly: true }
     - { name: script, mountPath: /scripts, readOnly: true }
-  - name: easyproxy
-    image: ${EASYPX_IMAGE}
+  - name: easysidecar
+    image: ${EASYSIDECAR_IMAGE}
     resources:
       requests: { cpu: 50m, memory: 64Mi }
       limits:   { cpu: 500m, memory: 256Mi }
     args:
     - --mode=proxy
-    - --rules=/etc/easyproxy/rules.yaml
+    - --rules=/etc/easysidecar/rules.yaml
     - --spoof
     - --spoof-dns-addr=0.0.0.0:53
     - --spoof-tls-addr=0.0.0.0:443
     - --spoof-http-addr=0.0.0.0:80
     - --upstream-dns=${UPSTREAM_DNS}
     - --upstream-proxy=${UPSTREAM_PROXY}
-    - --ca-cert=/etc/easyproxy/ca/ca.crt
-    - --ca-key=/etc/easyproxy/ca/ca.key
+    - --ca-cert=/etc/easysidecar/ca/ca.crt
+    - --ca-key=/etc/easysidecar/ca/ca.key
     env:
     - name: POD_IP
       valueFrom: { fieldRef: { fieldPath: status.podIP } }
     volumeMounts:
-    - { name: rules, mountPath: /etc/easyproxy, readOnly: true }
-    - { name: ca, mountPath: /etc/easyproxy/ca, readOnly: true }
+    - { name: rules, mountPath: /etc/easysidecar, readOnly: true }
+    - { name: ca, mountPath: /etc/easysidecar/ca, readOnly: true }
   volumes:
   - { name: rules, configMap: { name: ${name}-rules } }
   - { name: script, configMap: { name: ${name}-script } }
@@ -162,7 +162,7 @@ run_one() {
 
   if ! kubectl wait -n "$NS" --for=condition=Ready "pod/${name}" --timeout=300s >/dev/null 2>&1; then
     echo "FAIL $p  (pod not ready)"; fail=$((fail+1)); RESULTS+=("FAIL $p pod-not-ready")
-    kubectl logs -n "$NS" "$name" -c easyproxy --tail=5 2>&1 | sed 's/^/      | /'
+    kubectl logs -n "$NS" "$name" -c easysidecar --tail=5 2>&1 | sed 's/^/      | /'
     return
   fi
   out="$(kubectl exec -n "$NS" "$name" -c tool -- timeout 600 sh "/scripts/${p}.sh" 2>&1)"; rc=$?
@@ -178,7 +178,7 @@ run_one() {
     echo "PASS $p  ($rewrites rewrite conns, CAS +$growth)"; pass=$((pass+1)); RESULTS+=("PASS $p ($rewrites conns, CAS +$growth)")
   elif [ "$rc" -eq 0 ]; then
     echo "FAIL $p  (client ok but no rewrite conn — bypassed)"; fail=$((fail+1)); RESULTS+=("FAIL $p bypassed")
-    kubectl logs -n "$NS" "$name" -c easyproxy --tail=8 2>&1 | sed 's/^/      | /'
+    kubectl logs -n "$NS" "$name" -c easysidecar --tail=8 2>&1 | sed 's/^/      | /'
   else
     echo "FAIL $p  (client rc=$rc)"; fail=$((fail+1)); RESULTS+=("FAIL $p rc=$rc")
     echo "$out" | tail -12 | sed 's/^/      | /'

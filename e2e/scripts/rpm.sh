@@ -3,7 +3,7 @@ set -e
 # Native Fedora base: dnf/rpm work as-is. Trust the egress CA, point the repo
 # at the real mirror (intercepted by the spoofed proxy -> artifact-rpm), and
 # install a package. filelists metadata is skipped (only primary is needed).
-cp /etc/easyproxy/ca.crt /etc/pki/ca-trust/source/anchors/easylab.crt
+cp /etc/easysidecar/ca.crt /etc/pki/ca-trust/source/anchors/easylab.crt
 update-ca-trust
 rm -f /etc/yum.repos.d/*.repo
 printf '[main]\ninstall_weak_deps=False\nreleasever=44\n' > /etc/dnf/dnf.conf

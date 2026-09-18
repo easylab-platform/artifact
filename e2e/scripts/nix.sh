@@ -4,7 +4,7 @@ set -e
 # the spoofed proxy. Nix has its own CA handling, so trust the egress CA via
 # NIX_SSL_CERT_FILE.
 export NIX_CONFIG="experimental-features = nix-command flakes"
-export NIX_SSL_CERT_FILE=/etc/easyproxy/ca.crt
+export NIX_SSL_CERT_FILE=/etc/easysidecar/ca.crt
 nix --version
 nix store info --store https://cache.nixos.org
 # Evaluation assertion: parse + evaluate a Nix expression and a tiny derivation.

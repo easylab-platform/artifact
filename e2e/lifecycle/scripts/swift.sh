@@ -2,7 +2,7 @@
 # swift lifecycle: swift package-registry publish / resolve public+private /
 # upgrade / delete (DELETE on the release path).
 set -e
-cat /etc/easyproxy/ca.crt >> /etc/ssl/certs/ca-certificates.crt
+cat /etc/easysidecar/ca.crt >> /etc/ssl/certs/ca-certificates.crt
 export HOME="/tmp/lc-home-${STAGE}"
 # SwiftPM's security fingerprint DB pins the first checksum it saw for a
 # package; start each run clean so a re-published version is not rejected.

@@ -2,7 +2,7 @@
 # go lifecycle: module PUT /upload (proxy-style upload) / real `go get` for
 # public+private / upgrade / delete via DELETE /upload.
 set -e
-cat /etc/easyproxy/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+cat /etc/easysidecar/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
 export HOME="/tmp/lc-home-${STAGE}"
 export GOPATH="$HOME/go"
 export GOMODCACHE="$GOPATH/pkg/mod"

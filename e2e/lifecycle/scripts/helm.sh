@@ -2,7 +2,7 @@
 # helm lifecycle: cm-push (chartmuseum API) / helm pull public+private /
 # upgrade / delete via DELETE /api/charts/<name>/<version>.
 set -e
-cat /etc/easyproxy/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+cat /etc/easysidecar/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
 export HOME="/tmp/lc-home-${STAGE}"
 # The cm-push plugin is baked into the tool image at /root/.local/share/helm.
 export HELM_PLUGINS=/root/.local/share/helm/plugins

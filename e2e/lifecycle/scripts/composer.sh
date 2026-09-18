@@ -3,7 +3,7 @@
 # `composer archive` / real `composer install` for public+private / upgrade /
 # delete via DELETE /api/packages/<name>.
 set -e
-cat /etc/easyproxy/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+cat /etc/easysidecar/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
 export HOME="/tmp/lc-home-${STAGE}"
 export COMPOSER_HOME="$HOME/.composer"
 export COMPOSER_ALLOW_SUPERUSER=1

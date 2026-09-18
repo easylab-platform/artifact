@@ -1,7 +1,7 @@
 # artifact pull-through e2e harness
 
 Verifies each protocol adapter end-to-end through the spoof egress policy:
-DNS-spoof steers the package-manager hostname at the easyproxy sidecar, which
+DNS-spoof steers the package-manager hostname at the easysidecar sidecar, which
 MITMs TLS and proxies the (path-prefixed/stripped) request to the per-protocol
 artifact Service. Success = the client's package manager installs/downloads a
 package through the proxy AND the sidecar logged >=1 `rewrite` connection
@@ -15,7 +15,7 @@ hosts that are environment-sensitive).
   each mounts exactly one protocol + serves it on port 80.
 - `gen-ca.sh` — generate the fixed dev-only egress MITM CA and create the
   `artifact-e2e-ca` secret (re-run to rotate).
-- `run.sh` — matrix driver: per protocol it creates a tool+easyproxy pod
+- `run.sh` — matrix driver: per protocol it creates a tool+easysidecar pod
   (spoof DNS via `dnsPolicy: None`), runs `scripts/<p>.sh`, and asserts the
   sidecar saw a rewrite.
 - `scripts/<p>.sh` — the client command per protocol, mounted at `/scripts`.
@@ -31,11 +31,11 @@ KEEP=1 PROTOCOLS=cargo ./run.sh               # keep the pod for debugging
 ```
 
 ## Prereqs
-- namespace + images: build/push `artifact` and `easyproxy` first
-  (`../build-image.sh`, `../../easyproxy/build-image.sh`); tool images are
+- namespace + images: build/push `artifact` and `easysidecar` first
+  (`../build-image.sh`, `../../easysidecar/build-image.sh`); tool images are
   pulled through easylab's own OCI mirror
   (`easylab.${NS}.svc.cluster.local:80/docker.io/...`).
-- easyproxy >= v0.5.0 (keep-alive request rewriting: every request on a
+- easysidecar >= v0.5.0 (keep-alive request rewriting: every request on a
   connection is re-originated with its path mapped, not just the first).
 - artifact >= v0.1.14 (oci blob redirects, per-protocol routing fixes).
 

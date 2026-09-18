@@ -3,7 +3,7 @@
 # /meta, then <uuid>/<treehash> registry and artifact tarballs). Point
 # JULIA_PKG_SERVER at the gateway and let Pkg do a registry + package install.
 set -e
-CA=/etc/easyproxy/ca.crt
+CA=/etc/easysidecar/ca.crt
 export SSL_CERT_FILE=$CA
 export JULIA_PKG_SERVER=https://pkg.julialang.org
 export JULIA_DEPOT_PATH=/tmp/julia-depot

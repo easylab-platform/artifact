@@ -2,7 +2,7 @@
 set -e
 # Dart's pub honors the system trust store; add the egress CA and let the
 # spoofed proxy intercept pub.dev.
-cat /etc/easyproxy/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
+cat /etc/easysidecar/ca.crt >> /etc/ssl/certs/ca-certificates.crt 2>/dev/null || true
 dart pub cache add http --version 1.2.2
 # Compile/run assertion: build a small program against a cached package.
 rm -rf /w && mkdir -p /w/bin

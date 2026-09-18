@@ -3,7 +3,7 @@
 # through the spoofed proxy (cpan.metacpan.org -> artifact-cpan), which is what
 # cpanm does before it builds a module.
 set -e
-CA=/etc/easyproxy/ca.crt
+CA=/etc/easysidecar/ca.crt
 W="wget --ca-certificate=$CA"
 wget --ca-certificate=$CA --header='Range: bytes=0-131071' -qO /tmp/02packages "https://cpan.metacpan.org/modules/02packages.details.txt.gz"
 [ -s /tmp/02packages ] || { echo "cpan: empty index"; exit 1; }

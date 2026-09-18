@@ -15,7 +15,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NS="${NS:-temp}"
 TOOL_IMAGE_PREFIX="${TOOL_IMAGE_PREFIX:-forgejo.develop.10.199.64.20.nip.io/easylab/tool}"
 TOOL_TAG="${TOOL_TAG:-latest}"
-EASYPX_IMAGE="${EASYPX_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easyproxy:v0.5.3}"
+EASYSIDECAR_IMAGE="${EASYSIDECAR_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.6.0}"
 CA_SECRET="${CA_SECRET:-artifact-e2e-ca}"
 UPSTREAM_DNS="${UPSTREAM_DNS:-172.18.0.10}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
@@ -122,7 +122,7 @@ SH
       ;;
     rpm)
       cat <<'SH'
-cp /etc/easyproxy/ca.crt /etc/pki/ca-trust/source/anchors/easylab.crt 2>/dev/null || true
+cp /etc/easysidecar/ca.crt /etc/pki/ca-trust/source/anchors/easylab.crt 2>/dev/null || true
 update-ca-trust 2>/dev/null || true
 # Fedora's default repos use metalink (mirrors.fedoraproject.org, not in the
 # spoof policy); pin the baseurl so the search is served by the mirror.
@@ -169,37 +169,37 @@ spec:
       requests: { cpu: 100m, memory: 256Mi }
       limits:   { cpu: "2", memory: 4Gi }
     env:
-    - { name: SSL_CERT_FILE, value: /etc/easyproxy/ca.crt }
-    - { name: NODE_EXTRA_CA_CERTS, value: /etc/easyproxy/ca.crt }
-    - { name: REQUESTS_CA_BUNDLE, value: /etc/easyproxy/ca.crt }
-    - { name: CURL_CA_BUNDLE, value: /etc/easyproxy/ca.crt }
-    - { name: GIT_SSL_CAINFO, value: /etc/easyproxy/ca.crt }
-    - { name: SSL_CERT_DIR, value: /etc/easyproxy/ca }
+    - { name: SSL_CERT_FILE, value: /etc/easysidecar/ca.crt }
+    - { name: NODE_EXTRA_CA_CERTS, value: /etc/easysidecar/ca.crt }
+    - { name: REQUESTS_CA_BUNDLE, value: /etc/easysidecar/ca.crt }
+    - { name: CURL_CA_BUNDLE, value: /etc/easysidecar/ca.crt }
+    - { name: GIT_SSL_CAINFO, value: /etc/easysidecar/ca.crt }
+    - { name: SSL_CERT_DIR, value: /etc/easysidecar/ca }
     volumeMounts:
-    - { name: ca, mountPath: /etc/easyproxy/ca.crt, subPath: ca.crt, readOnly: true }
+    - { name: ca, mountPath: /etc/easysidecar/ca.crt, subPath: ca.crt, readOnly: true }
     - { name: script, mountPath: /scripts, readOnly: true }
-  - name: easyproxy
-    image: ${EASYPX_IMAGE}
+  - name: easysidecar
+    image: ${EASYSIDECAR_IMAGE}
     resources:
       requests: { cpu: 50m, memory: 64Mi }
       limits:   { cpu: 500m, memory: 256Mi }
     args:
     - --mode=proxy
-    - --rules=/etc/easyproxy/rules.yaml
+    - --rules=/etc/easysidecar/rules.yaml
     - --spoof
     - --spoof-dns-addr=0.0.0.0:53
     - --spoof-tls-addr=0.0.0.0:443
     - --spoof-http-addr=0.0.0.0:80
     - --upstream-dns=${UPSTREAM_DNS}
     - --upstream-proxy=${UPSTREAM_PROXY}
-    - --ca-cert=/etc/easyproxy/ca/ca.crt
-    - --ca-key=/etc/easyproxy/ca/ca.key
+    - --ca-cert=/etc/easysidecar/ca/ca.crt
+    - --ca-key=/etc/easysidecar/ca/ca.key
     env:
     - name: POD_IP
       valueFrom: { fieldRef: { fieldPath: status.podIP } }
     volumeMounts:
-    - { name: rules, mountPath: /etc/easyproxy, readOnly: true }
-    - { name: ca, mountPath: /etc/easyproxy/ca, readOnly: true }
+    - { name: rules, mountPath: /etc/easysidecar, readOnly: true }
+    - { name: ca, mountPath: /etc/easysidecar/ca, readOnly: true }
   volumes:
   - { name: rules, configMap: { name: ${name}-rules } }
   - { name: script, configMap: { name: ${name}-script } }
@@ -207,7 +207,7 @@ spec:
 YAML
 }
 
-rewrite_count() { kubectl logs -n "$NS" "$1" -c easyproxy 2>/dev/null | grep -c '"action":"rewrite"'; }
+rewrite_count() { kubectl logs -n "$NS" "$1" -c easysidecar 2>/dev/null | grep -c '"action":"rewrite"'; }
 
 run_one() {
   local p="$1" name="search-$1" out rc rewrites

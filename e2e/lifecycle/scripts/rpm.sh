@@ -4,7 +4,7 @@
 # delete via DELETE.
 set -e
 export HOME="/tmp/lc-home-${STAGE}"
-cp /etc/easyproxy/ca.crt /etc/pki/ca-trust/source/anchors/easylab.crt 2>/dev/null || true
+cp /etc/easysidecar/ca.crt /etc/pki/ca-trust/source/anchors/easylab.crt 2>/dev/null || true
 update-ca-trust 2>/dev/null || true
 
 REPO=easylab

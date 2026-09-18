@@ -11,7 +11,7 @@ set -e
 # bundle is a single file; it ignores the container's SSL_CERT_FILE for
 # OpenSSL, so pass the CA explicitly (sbt/coursier read the system store, but
 # this script speaks the wire protocol directly).
-CA=/etc/easyproxy/ca.crt
+CA=/etc/easysidecar/ca.crt
 W="wget --ca-certificate=$CA"
 BASE=https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases
 PLUGIN=com.typesafe.sbt/sbt-native-packager/scala_2.10/sbt_0.13/0.7.4

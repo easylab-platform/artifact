@@ -2,7 +2,7 @@
 set -e
 # Erlang's TLS uses its own cacerts file (not SSL_CERT_FILE).
 cat /etc/ssl/certs/ca-certificates.crt > /tmp/cacerts.pem 2>/dev/null || true
-cat /etc/easyproxy/ca.crt >> /tmp/cacerts.pem
+cat /etc/easysidecar/ca.crt >> /tmp/cacerts.pem
 export HEX_CACERTS_PATH=/tmp/cacerts.pem
 mix local.rebar --force >/dev/null 2>&1 || true
 mix archive.install /opt/hex-archive/hex.ez --force >/dev/null

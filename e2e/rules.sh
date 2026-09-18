@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared easyproxy rule construction for the e2e harnesses (pull matrix +
+# Shared easysidecar rule construction for the e2e harnesses (pull matrix +
 # lifecycle). Sourced, not executed. Provides proto_row / parse_row /
 # write_rules_cm.
 #

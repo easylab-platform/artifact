@@ -2,7 +2,7 @@
 # Hackage (Haskell): a plain HTTP tree. Fetch the package index and a package
 # tarball through the spoofed proxy (hackage.haskell.org -> artifact-hackage).
 set -e
-CA=/etc/easyproxy/ca.crt
+CA=/etc/easysidecar/ca.crt
 W="wget --ca-certificate=$CA"
 # The 01-index tarball is large (100MB+); fetch only its head via Range so the
 # test stays quick while still exercising the pull-through path.
