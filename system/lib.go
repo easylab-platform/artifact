@@ -144,6 +144,16 @@ func (s *State) targetKey(w http.ResponseWriter, r *http.Request, id string) {
 		if t.Protocol == "" {
 			t.Protocol, _ = targets.SplitID(t.ID)
 		}
+		if t.Kind == "" {
+			t.Kind = targets.Mirror
+		}
+		if t.Share == nil {
+			// User targets isolate by default (a private repo must not shadow
+			// public coordinates); keep the persisted copy in agreement with
+			// what the in-memory registry will apply.
+			share := false
+			t.Share = &share
+		}
 		if err := validateTarget(t); err != nil {
 			artifactkit.JSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
