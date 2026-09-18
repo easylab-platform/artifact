@@ -1,6 +1,9 @@
 package artifactkit
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestRepoKeyRoundTrip(t *testing.T) {
 	cases := []struct{ ns, name, key string }{
@@ -118,7 +121,31 @@ func TestScopedName(t *testing.T) {
 	}
 }
 
-// TestScopedKeyIsolation locks the storage-key shape for a target: a shared
+// TestMirrorOrigin locks the alias-origin rule: a request routed through a
+// named target emits self-URLs on that target's origin, so JSR's
+// npm-compatibility registry (which rides the npm adapter) advertises
+// npm.jsr.io, not registry.npmjs.org. The default target returns "" (its
+// origin is the protocol's public home and must not bypass the gateway).
+func TestMirrorOrigin(t *testing.T) {
+	ctx := WithRepoScope(context.Background(), RepoScope{
+		Format: "npm", Target: "npm.jsr", Host: "npm.jsr.io", Proto: "https",
+	})
+	if got := MirrorOrigin(ctx); got != "https://npm.jsr.io" {
+		t.Errorf("mirror origin = %q", got)
+	}
+	// Default target: no override.
+	def := WithRepoScope(context.Background(), RepoScope{
+		Format: "npm", Target: "npm", Host: "registry.npmjs.org", Proto: "https",
+	})
+	if got := MirrorOrigin(def); got != "" {
+		t.Errorf("default origin = %q, want empty", got)
+	}
+	// No target recorded (legacy): no override.
+	none := WithRepoScope(context.Background(), RepoScope{Format: "npm", Host: "registry.npmjs.org"})
+	if got := MirrorOrigin(none); got != "" {
+		t.Errorf("untargeted origin = %q, want empty", got)
+	}
+}
 // (mirror) target uses the protocol's namespace, an isolated (user-declared)
 // target wraps it in a "t:<id>/" prefix so it cannot shadow public content.
 func TestScopedKeyIsolation(t *testing.T) {

@@ -45,7 +45,17 @@ func init() {
 	artifactkit.RegisterNamespace("npm", artifactkit.ScopeNamespace)
 }
 
-func (s *State) base() string {
+// base returns the origin self-URLs are emitted on. When the request was
+// routed through a named mirror/alias (JSR's npm-compatibility registry), that
+// mirror's origin wins: the client dialed it and an intercepting sidecar maps
+// its URLs back, so advertising the base npm origin would send the client to a
+// host this pod may not cover.
+func (s *State) base(r *http.Request) string {
+	if r != nil {
+		if o := artifactkit.MirrorOrigin(r.Context()); o != "" {
+			return o
+		}
+	}
 	if s.SelfBase == "" {
 		return "http://localhost:8080/artifacts/npm"
 	}
@@ -530,7 +540,7 @@ func (s *State) aggregateMetadata(r *http.Request, name string) string {
 // repository so the client's download lands in the same namespace; a native
 // request keeps the plain shape the client already uses.
 func (s *State) tarballURLCtx(r *http.Request, name, version string) string {
-	base := s.base()
+	base := s.base(r)
 	if sc := artifactkit.RepoScopeFrom(r.Context()); sc.Explicit && sc.Namespace != "" {
 		base += "/-/" + sc.Namespace
 	}

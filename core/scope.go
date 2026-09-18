@@ -57,6 +57,25 @@ func RepoScopeFrom(ctx context.Context) RepoScope {
 	return s
 }
 
+// MirrorOrigin returns the scheme://host[/prefix] a request arrived on when it
+// was routed through a NAMED target (a mirror/alias such as npm.jsr.io), else
+// "". An adapter uses it to emit self-URLs in the shape the client dialed, so
+// an alias that shares an adapter with its base protocol (JSR's
+// npm-compatibility registry riding the npm adapter) advertises its own origin
+// instead of the base protocol's. The default target returns "": its origin is
+// the protocol's public home, and emitting that would bypass the gateway.
+func MirrorOrigin(ctx context.Context) string {
+	sc := RepoScopeFrom(ctx)
+	if sc.Target == "" || sc.Target == sc.Format || sc.Host == "" {
+		return ""
+	}
+	proto := sc.Proto
+	if proto != "http" && proto != "https" {
+		proto = "https"
+	}
+	return proto + "://" + sc.Host
+}
+
 // ScopedName maps an adapter-computed repository key onto its fully-qualified
 // form for the scope. The namespace is prefixed only when the key does not
 // already carry it, so npm's "@scope/name" (where the adapter already includes

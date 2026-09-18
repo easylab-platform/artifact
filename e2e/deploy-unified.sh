@@ -9,7 +9,7 @@ IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:latest}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 NAME="${NAME:-artifact-unified}"
 # Protocol list mirrors run.sh's default matrix.
-PROTOCOLS="${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg system}"
+PROTOCOLS="${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg google gradle clojars spring jitpack jsr jsrnpm opam stackage pecl bazel jenkins gitlfs system}"
 
 # Upstream origins (must match rules.sh proto_row hostnames).
 proto_origin() {
@@ -42,21 +42,55 @@ proto_origin() {
     luarocks)    echo "https://luarocks.org" ;;
     juliapkg)    echo "https://pkg.julialang.org" ;;
     ivy)         echo "https://repo.scala-sbt.org" ;;
+    google)      echo "https://dl.google.com/dl/android/maven2" ;;
+    gradle)      echo "https://plugins.gradle.org/m2" ;;
+    clojars)     echo "https://repo.clojars.org" ;;
+    spring)      echo "https://repo.spring.io/milestone" ;;
+    jitpack)     echo "https://jitpack.io" ;;
+    jsr)         echo "https://jsr.io" ;;
+    jsrnpm)      echo "https://npm.jsr.io" ;;
+    opam)        echo "https://opam.ocaml.org" ;;
+    stackage)    echo "https://stackage.org" ;;
+    pecl)        echo "https://pecl.php.net" ;;
+    bazel)       echo "https://bcr.bazel.build" ;;
+    jenkins)     echo "https://updates.jenkins.io" ;;
+    gitlfs)      echo "https://github.com" ;;
     *)           echo "" ;;
+  esac
+}
+
+# proto_mount maps an e2e row onto the artifact adapter that serves it
+# (mirrors ride an existing adapter), so --protocols lists distinct adapters.
+proto_mount() {
+  case "$1" in
+    google|gradle|clojars|spring|jitpack) echo maven ;;
+    jsrnpm) echo npm ;;
+    gitlfs) echo git ;;
+    *) echo "$1" ;;
   esac
 }
 
 map=""
 list=""
+seen_mount=""
+seen_map=""
 for p in $PROTOCOLS; do
-  # Every protocol is mounted; only those with a public upstream get a
-  # self-base-map entry (the admin `system` protocol has none).
-  [ -n "$list" ] && list="${list},"
-  list="${list}${p}"
+  mount="$(proto_mount "$p")"
+  # --protocols: distinct adapters only.
+  case ",${seen_mount}," in
+    *",${mount},"*) : ;;
+    *) seen_mount="${seen_mount:+${seen_mount},}${mount}"
+       list="${list:+${list},}${mount}" ;;
+  esac
   o="$(proto_origin "$p")"
   [ -n "$o" ] || continue
-  [ -n "$map" ] && map="${map},"
-  map="${map}${p}=${o}"
+  # self-base-map is keyed by adapter; the protocol's own origin wins over a
+  # later mirror entry (first occurrence), so maven keeps its Central shape.
+  case ",${seen_map}," in
+    *",${mount},"*) continue ;;
+  esac
+  seen_map="${seen_map:+${seen_map},}${mount}"
+  map="${map:+${map},}${mount}=${o}"
 done
 
 # The Fedora client baseurl is .../pub/fedora/...; the rpm adapter treats the
