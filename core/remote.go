@@ -481,11 +481,27 @@ func (r *Registry) resolveBase(ctx context.Context, format, repo string) (string
 		}
 		return e.Base, pp, true
 	}
+	// 1b. an explicitly mounted target (/artifacts/<target>/...) is operator
+	// intent and beats the host the client happened to dial: a request to a
+	// mirror's own path always means that mirror.
+	if t, ok := u.targetFromScope(ctx); ok && !t.HostOnly() {
+		var pp *string
+		if t.Proxy != "" {
+			pp = &t.Proxy
+		} else if p, has := u.ProxyURL(format); has {
+			pp = &p
+		}
+		return trimSlash(t.Base), pp, true
+	}
 	// 2. origin the client used (host-driven; allow-listed by the table).
 	if sc := RepoScopeFrom(ctx); sc.Host != "" {
 		if base, ok := u.HostBase(sc.Proto, sc.Host, sc.Prefix); ok {
 			var pp *string
-			if p, has := u.ProxyURL(format); has {
+			// A target may pin its own proxy; the protocol policy wins only
+			// when the target leaves it unset.
+			if t, ok := u.TargetFor(format, sc.Host); ok && t.Proxy != "" {
+				pp = &t.Proxy
+			} else if p, has := u.ProxyURL(format); has {
 				pp = &p
 			}
 			return base, pp, true

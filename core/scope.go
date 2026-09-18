@@ -35,6 +35,13 @@ type RepoScope struct {
 	Prefix    string
 	// Explicit is true when the request used the "/-/<repo>/" marker.
 	Explicit bool
+	// Target is the target id the request was routed through ("maven",
+	// "maven.google"). Empty means the protocol's default target.
+	Target string
+	// TargetShared is true when the target stores into the protocol's shared
+	// namespace (mirrors) rather than an isolated one (user-declared private
+	// repositories). Only meaningful when Target is set.
+	TargetShared bool
 }
 
 type repoScopeKey struct{}
@@ -64,6 +71,43 @@ func (s RepoScope) ScopedName(key string) string {
 		return key
 	}
 	return ns + "/" + key
+}
+
+// targetPrefix is the storage key prefix that isolates a target's content from
+// the protocol's shared namespace: "" for a shared (mirror) target or the
+// default target, "t:<id>" for an isolated (user-declared private) one.
+func (s RepoScope) targetPrefix() string {
+	if s.Target == "" || s.TargetShared {
+		return ""
+	}
+	return "t:" + s.Target
+}
+
+// ScopedKey is the canonical storage key for an adapter-supplied repository:
+// the target prefix (when isolated) around the namespace-qualified name.
+func (s RepoScope) ScopedKey(key string) string {
+	key = s.ScopedName(key)
+	if p := s.targetPrefix(); p != "" {
+		if key == p || strings.HasPrefix(key, p+"/") {
+			return key
+		}
+		return p + "/" + key
+	}
+	return key
+}
+
+// UnscopedKey is ScopedKey's inverse for metadata reads/list filtering: it
+// strips the target prefix first, then the namespace.
+func (s RepoScope) UnscopedKey(key string) string {
+	if p := s.targetPrefix(); p != "" {
+		if key == p {
+			return ""
+		}
+		if strings.HasPrefix(key, p+"/") {
+			key = key[len(p)+1:]
+		}
+	}
+	return s.UnscopedName(key)
 }
 
 // UnscopedName is ScopedName's inverse for catalog/list filtering.

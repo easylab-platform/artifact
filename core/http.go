@@ -141,7 +141,7 @@ func URLencode(s string) string {
 
 // AuthorizeWrite gives the universal publish gate for adapters that do not
 // track package names: it is AuthorizeWriteFor driven entirely by the
-// request's RepoScope. The /pkgs middleware resolves (namespace, name) for
+// request's RepoScope. The /artifacts middleware resolves (namespace, name) for
 // every format, so an adapter can call this one function and get full
 // namespace-aware ownership without knowing its own naming rules.
 func AuthorizeWriteScoped(w http.ResponseWriter, r *http.Request, auth Auth, reg *Registry, format string) bool {
@@ -175,7 +175,7 @@ func AuthorizeReadScoped(w http.ResponseWriter, r *http.Request, auth Auth, reg 
 // unclaimed names are claimed by the caller's tenant, claimed names must
 // match it. The error text is protocol-neutral JSON, like AuthorizeWrite.
 //
-// When the request carries a RepoScope (the /pkgs gate installs one for every
+// When the request carries a RepoScope (the /artifacts gate installs one for every
 // format), the ownership check is made against the (namespace, name) pair, so
 // a namespace — npm scope, OCI host, maven groupId — is a boundary in its own
 // right. The repository argument is qualified with the scope for the flat

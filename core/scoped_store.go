@@ -23,17 +23,25 @@ type scopedStore struct {
 // NewScopedStore wraps an IndexStore with request-scoped namespacing.
 func NewScopedStore(inner IndexStore) IndexStore { return &scopedStore{inner: inner} }
 
-// scopeIn qualifies an adapter-supplied repository with the context's scope.
+// scopeIn qualifies an adapter-supplied repository with the context's scope:
+// the target prefix first (isolated targets), then the namespace.
 func scopeIn(ctx context.Context, repository string) string {
 	s := RepoScopeFrom(ctx)
-	if s.Namespace == "" && !s.Explicit {
+	if s.Namespace == "" && !s.Explicit && s.targetPrefix() == "" {
 		return repository
 	}
-	return s.ScopedName(repository)
+	return s.ScopedKey(repository)
 }
 
 func (s *scopedStore) Put(ctx context.Context, a Artifact) error {
 	a.Repository = scopeIn(ctx, a.Repository)
+	// Record provenance: the target the request was routed through, when the
+	// adapter did not set one. It never affects the primary key.
+	if a.Target == "" {
+		if sc := RepoScopeFrom(ctx); sc.Target != "" {
+			a.Target = sc.Target
+		}
+	}
 	return s.inner.Put(ctx, a)
 }
 
@@ -44,8 +52,8 @@ func (s *scopedStore) Get(ctx context.Context, format, repository, version strin
 	}
 	// Present the repository in its unscoped form so adapters see the shape
 	// they wrote.
-	if sc := RepoScopeFrom(ctx); sc.Namespace != "" {
-		a.Repository = sc.UnscopedName(a.Repository)
+	if sc := RepoScopeFrom(ctx); sc.Namespace != "" || sc.targetPrefix() != "" {
+		a.Repository = sc.UnscopedKey(a.Repository)
 	}
 	return a, nil
 }

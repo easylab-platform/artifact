@@ -14,7 +14,7 @@ import (
 // the format) names a repository in one namespace shared by proxied and
 // hosted repos:
 //
-//	/pkgs/<format>/<repo>/<name>    upload / download / generated index
+//	/artifacts/<format>/<repo>/<name>    upload / download / generated index
 //
 // A GET for a repo that has hosted content is served from the CAS (or a
 // generated index); otherwise the request is a proxied fetch. Uploads always

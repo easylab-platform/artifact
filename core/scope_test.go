@@ -8,35 +8,35 @@ import (
 )
 
 func TestResolveScopeMaven(t *testing.T) {
-	rq := httptest.NewRequest(http.MethodGet, "/pkgs/maven/org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.pom", nil)
-	sc, path, ok := resolveScope("/pkgs", rq)
+	rq := httptest.NewRequest(http.MethodGet, "/artifacts/maven/org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.pom", nil)
+	sc, path, ok := resolveScope("/artifacts", rq)
 	if !ok || sc.Format != "maven" || sc.Namespace != "org.slf4j" || sc.Name != "slf4j-api" {
 		t.Fatalf("scope=%+v path=%q ok=%v", sc, path, ok)
 	}
-	if path != "/pkgs/maven/org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.pom" {
+	if path != "/artifacts/maven/org/slf4j/slf4j-api/2.0.9/slf4j-api-2.0.9.pom" {
 		t.Fatalf("path changed: %q", path)
 	}
 }
 
 func TestResolveScopeExplicit(t *testing.T) {
-	rq := httptest.NewRequest(http.MethodGet, "/pkgs/maven/-/internal/org/acme/lib/1.0/lib-1.0.pom", nil)
-	sc, path, ok := resolveScope("/pkgs", rq)
+	rq := httptest.NewRequest(http.MethodGet, "/artifacts/maven/-/internal/org/acme/lib/1.0/lib-1.0.pom", nil)
+	sc, path, ok := resolveScope("/artifacts", rq)
 	if !ok || sc.Namespace != "internal" || !sc.Explicit {
 		t.Fatalf("scope=%+v ok=%v", sc, ok)
 	}
-	if path != "/pkgs/maven/org/acme/lib/1.0/lib-1.0.pom" {
+	if path != "/artifacts/maven/org/acme/lib/1.0/lib-1.0.pom" {
 		t.Fatalf("rewrite: %q", path)
 	}
 }
 
 func TestResolveScopeNpmDashNotExplicit(t *testing.T) {
 	// npm reserves /-/ for its own endpoints; it must not be read as a repo.
-	rq := httptest.NewRequest(http.MethodGet, "/pkgs/npm/-/v1/search", nil)
-	sc, path, ok := resolveScope("/pkgs", rq)
+	rq := httptest.NewRequest(http.MethodGet, "/artifacts/npm/-/v1/search", nil)
+	sc, path, ok := resolveScope("/artifacts", rq)
 	if !ok || sc.Explicit {
 		t.Fatalf("npm dash misread as explicit: %+v", sc)
 	}
-	if path != "/pkgs/npm/-/v1/search" {
+	if path != "/artifacts/npm/-/v1/search" {
 		t.Fatalf("path rewritten: %q", path)
 	}
 }
@@ -75,11 +75,11 @@ func TestScopedStoreNamespaces(t *testing.T) {
 
 func TestScopeMiddlewareSetsContext(t *testing.T) {
 	var seen RepoScope
-	h := ScopeMiddleware("/pkgs", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := ScopeMiddleware("/artifacts", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = RepoScopeFrom(r.Context())
 	}))
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/pkgs/npm/@acme/ui", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/artifacts/npm/@acme/ui", nil))
 	if seen.Namespace != "@acme" || seen.Name != "ui" {
 		t.Fatalf("seen=%+v", seen)
 	}

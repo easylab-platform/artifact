@@ -117,3 +117,27 @@ func TestScopedName(t *testing.T) {
 		t.Errorf("default: %q", got)
 	}
 }
+
+// TestScopedKeyIsolation locks the storage-key shape for a target: a shared
+// (mirror) target uses the protocol's namespace, an isolated (user-declared)
+// target wraps it in a "t:<id>/" prefix so it cannot shadow public content.
+func TestScopedKeyIsolation(t *testing.T) {
+	// Shared mirror: no target prefix.
+	m := RepoScope{Namespace: "org.slf4j", Target: "maven.google", TargetShared: true}
+	if got := m.ScopedKey("slf4j-api"); got != "org.slf4j/slf4j-api" {
+		t.Errorf("shared key = %q", got)
+	}
+	// Isolated user target: target prefix wraps the namespace-qualified key.
+	u := RepoScope{Namespace: "org.slf4j", Target: "maven.corp", TargetShared: false}
+	if got := u.ScopedKey("slf4j-api"); got != "t:maven.corp/org.slf4j/slf4j-api" {
+		t.Errorf("isolated key = %q", got)
+	}
+	if got := u.UnscopedKey("t:maven.corp/org.slf4j/slf4j-api"); got != "slf4j-api" {
+		t.Errorf("isolated unscoped = %q", got)
+	}
+	// The default target (ID == protocol) is shared and unprefixed.
+	d := RepoScope{Namespace: "@acme", Target: "npm", TargetShared: true}
+	if got := d.ScopedKey("@acme/ui"); got != "@acme/ui" {
+		t.Errorf("default target key = %q", got)
+	}
+}

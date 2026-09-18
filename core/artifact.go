@@ -41,6 +41,11 @@ type Artifact struct {
 	Digest      string
 	Blobs       []Descriptor
 	Source      string
+	// Target is the target id the content was fetched through ("maven",
+	// "maven.google", "ghcr.io"). It is provenance only: the primary key stays
+	// (Format, Repository, Version), so mirrors of one protocol still share
+	// and dedupe by digest. Empty when the adapter did not record one.
+	Target string
 }
 
 type PackageSummary struct {

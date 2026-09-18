@@ -55,7 +55,7 @@ func OpenStore(cfg DriverConfig) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&artifactRow{}, &uploadRow{}, &metaRow{}, &authUserRow{}, &authTokenRow{}); err != nil {
+	if err := db.AutoMigrate(&artifactRow{}, &uploadRow{}, &metaRow{}, &targetRow{}, &authUserRow{}, &authTokenRow{}); err != nil {
 		return nil, err
 	}
 	return &Store{db: db}, nil
@@ -93,7 +93,7 @@ func (s *Store) Put(ctx context.Context, a artifactkit.Artifact) error {
 	row := &artifactRow{
 		Format: a.Format, Repository: a.Repository, Version: a.Version,
 		MediaType: a.MediaType, Digest: a.Digest, Proprietary: a.Proprietary,
-		Blobs: string(blobs), Source: a.Source,
+		Blobs: string(blobs), Source: a.Source, Target: a.Target,
 	}
 	return s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "format"}, {Name: "repository"}, {Name: "version"}},
@@ -115,6 +115,7 @@ func (s *Store) Get(ctx context.Context, format, repository, version string) (ar
 	_ = json.Unmarshal([]byte(row.Blobs), &a.Blobs)
 	a.Format, a.Repository, a.Version = row.Format, row.Repository, row.Version
 	a.MediaType, a.Digest, a.Source = row.MediaType, row.Digest, row.Source
+	a.Target = row.Target
 	a.Proprietary = row.Proprietary
 	return a, nil
 }

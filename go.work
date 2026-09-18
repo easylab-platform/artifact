@@ -30,4 +30,5 @@ use (
 	./rubygems
 	./swiftpm
 	./system
+	./targets
 )

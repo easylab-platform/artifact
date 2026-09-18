@@ -3,6 +3,7 @@ package artifactkit
 import (
 	"net/http"
 	"strings"
+
 )
 
 // ScopeMiddleware resolves a request's RepoScope and stashes it in the request
@@ -13,13 +14,13 @@ import (
 //
 // Two addressing forms are understood:
 //
-//	/pkgs/<fmt>/<native-path>            native (namespace from the resolver)
-//	/pkgs/<fmt>/-/<repo>/<native-path>   explicit repository
+//	/artifacts/<fmt>/<native-path>            native (namespace from the resolver)
+//	/artifacts/<fmt>/-/<repo>/<native-path>   explicit repository
 //
 // The explicit form is rewritten to the native path with the repository in the
 // context, so adapters only ever see their normal URL shape.
 //
-// base is the mount prefix "/pkgs"; OCI's /v2 uses ScopeMiddlewareForFormat.
+// base is the mount prefix "/artifacts"; OCI's /v2 uses ScopeMiddlewareForFormat.
 func ScopeMiddleware(base string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		scope, path, ok := resolveScope(base, r)
@@ -45,6 +46,7 @@ func ScopeMiddlewareForFormat(format, base string, next http.Handler) http.Handl
 		next.ServeHTTP(w, r)
 	})
 }
+
 
 // dashReserved prevents a format's own "-/" endpoints from being read as an
 // explicit-repository marker. npm uses "/-/ping", "/-/whoami", "/-/v1/...",
@@ -75,7 +77,7 @@ func explicitRepoMarker(format, nativePath string) (repo, rest string, ok bool) 
 	return repo, rest, true
 }
 
-// resolveScope computes the RepoScope for a /pkgs/<fmt>/... request. ok is
+// resolveScope computes the RepoScope for a /artifacts/<fmt>/... request. ok is
 // false when the path does not belong to the mount (then it is passed through).
 func resolveScope(base string, r *http.Request) (RepoScope, string, bool) {
 	p := r.URL.Path

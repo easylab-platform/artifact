@@ -54,6 +54,12 @@ func Build(name string, reg *Registry, cfg map[string]any) (http.Handler, error)
 	return build(reg, cfg)
 }
 
+// ProtocolRegistered reports whether a protocol name is registered.
+func ProtocolRegistered(name string) bool {
+	_, ok := registry[name]
+	return ok
+}
+
 // Registered returns the names of all registered protocols.
 func Registered() []string {
 	out := make([]string, 0, len(registry))

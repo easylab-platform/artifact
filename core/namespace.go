@@ -20,8 +20,8 @@ const DefaultNamespace = "default"
 
 // ExplicitRepoMarker introduces an explicit repository in a request path:
 //
-//	/pkgs/npm/-/@acme/ui        -> repo @acme, path ui
-//	/pkgs/pypi/-/internal/simple -> repo internal, path simple
+//	/artifacts/npm/-/@acme/ui        -> repo @acme, path ui
+//	/artifacts/pypi/-/internal/simple -> repo internal, path simple
 //
 // "-" is safe as a marker: npm reserves a bare "-/" itself, OCI repository
 // names cannot be a lone "-", and no protocol has a real path segment that is

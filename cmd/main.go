@@ -25,6 +25,7 @@ import (
 	_ "github.com/easylab-platform/artifact/cmd/adapters" // registers all enabled protocols
 	"github.com/easylab-platform/artifact/core"
 	"github.com/easylab-platform/artifact/core/store"
+	"github.com/easylab-platform/artifact/targets"
 )
 
 func main() {
@@ -33,7 +34,7 @@ func main() {
 		dataDir       = flag.String("data", "./data", "substrate root (sqlite + blobs + upstreams)")
 		protocols     = flag.String("protocols", "", "comma-separated protocols to mount (default: all registered)")
 		selfBase      = flag.String("self-base", "", "external base URL for auth realms / self URIs")
-		selfBaseRaw   = flag.Bool("self-base-raw", false, "treat -self-base as the protocol's own upstream origin (do NOT append /pkgs/<name>): emitted URLs take the upstream shape so an intercepting client proxy can map them back")
+		selfBaseRaw   = flag.Bool("self-base-raw", false, "treat -self-base as the protocol's own upstream origin (do NOT append /artifacts/<name>): emitted URLs take the upstream shape so an intercepting client proxy can map them back")
 		selfBaseMap   = flag.String("self-base-map", "", "per-protocol origin overrides, `proto=url` pairs comma separated; each entry implies origin (raw) mode for that protocol (e.g. npm=https://registry.npmjs.org,pypi=https://pypi.org)")
 		tokens        = flag.String("tokens", "", "`token=level` pairs (read|write) to seed into the credential DB (hashed), comma separated; repeat on every start to keep them registered")
 		airGap        = flag.Bool("air-gap", false, "disable all upstream pull-through")
@@ -47,7 +48,6 @@ func main() {
 	upstreams := defaultUpstreams(*airGap)
 	applyUpstreamOverrides(upstreams, *upstreamSet, *upstreamProxy)
 	applyRepoUpstreams(upstreams, *repoUpstreams)
-
 	// Open the metadata store (SQLite) always; blob backend is chosen below.
 	idxPath := filepath.Join(*dataDir, "pkglab.db")
 	meta, err := store.OpenSQLite(idxPath)
@@ -80,34 +80,47 @@ func main() {
 		log.Fatalf("open blob store: %v", err)
 	}
 
-	reg := &artifactkit.Registry{Blobs: blobs, Meta: artifactkit.NewScopedStore(meta), Upstreams: upstreams}
+	reg := &artifactkit.Registry{Blobs: blobs, Meta: artifactkit.NewScopedStore(meta), Upstreams: upstreams, TargetStore: meta}
+	// Load user-declared targets from the metadata DB on top of the built-ins.
+	// A load failure must not prevent startup: the built-in table is a working
+	// registry, and a broken row is dropped by the store.
+	if err := upstreams.Targets.Load(context.Background(), meta); err != nil {
+		log.Printf("targets: load user targets: %v", err)
+	}
 
-	// Determine which protocols to mount.
+	// Mount every TARGET of the enabled protocols. A protocol's default target
+	// has the protocol name as its ID, so /artifacts/<protocol> is unchanged;
+	// a named mirror (maven.google) gets its own mount. The scope middleware
+	// rewrites the target mount to the protocol mount and records the target,
+	// so adapters never see which mirror served a request.
 	names := *protocols
+	enabled := map[string]bool{}
 	if names == "" {
-		all := artifactkit.Registered()
-		names = strings.Join(all, ",")
+		for _, n := range artifactkit.Registered() {
+			enabled[n] = true
+		}
+	} else {
+		for _, n := range strings.Split(names, ",") {
+			if n = strings.TrimSpace(n); n != "" {
+				enabled[n] = true
+			}
+		}
 	}
 	mux := http.NewServeMux()
 	mounted := 0
 	selfBases := parseSelfBaseMap(*selfBaseMap)
-	for _, name := range strings.Split(names, ",") {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
+	handlers := map[string]http.Handler{}
+	for proto := range enabled {
+		// Build one handler per protocol (its targets share it).
+		if !artifactkit.ProtocolRegistered(proto) {
+			log.Fatalf("build protocol %q: unknown protocol", proto)
 		}
-		handler, err := artifactkit.Build(name, reg, configFor(name, *selfBase, *selfBaseRaw, auth, *dataDir, selfBases))
+		handler, err := artifactkit.Build(proto, reg, configFor(proto, *selfBase, *selfBaseRaw, auth, *dataDir, selfBases, meta))
 		if err != nil {
-			log.Fatalf("build protocol %q: %v", name, err)
+			log.Fatalf("build protocol %q: %v", proto, err)
 		}
-		// OCI is spec-fixed at /v2; everything else under /pkgs/<name>.
-		// Every mount is wrapped in the scope middleware, which resolves the
-		// request's repository (namespace) once and stashes it in the context;
-		// the scoped metadata store and Fetch then honor it for every adapter
-		// without their involvement.
-		if name == "oci" {
-			// Wire the /token auth endpoint the OCI challenges reference.
-			// easylab serves it under /v2/token (the /v2 mount), so expose both.
+		if proto == "oci" {
+			// OCI is spec-fixed at /v2 and its registry is the request Host.
 			if auth != nil {
 				tokenH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					serveToken(w, r, auth)
@@ -118,17 +131,20 @@ func main() {
 			scoped := artifactkit.ScopeMiddlewareForFormat("oci", "/v2", handler)
 			mux.Handle("/v2", scoped)
 			mux.Handle("/v2/", scoped)
-		} else {
-			// The explicit-repository form "/pkgs/<fmt>/-/<repo>/..." is an
-			// ADMIN (write-path) affordance: it lets a publisher or operator
-			// target a repository unambiguously. It is never advertised in
-			// generated URLs (self-base keeps the native shape), so clients
-			// reach namespaces through their protocol-native addressing.
-			scoped := artifactkit.ScopeMiddleware("/pkgs", handler)
-			mux.Handle("/pkgs/"+name+"/", scoped)
-			mux.Handle("/pkgs/"+name, scoped)
+			mounted++
+			continue
 		}
-		mounted++
+		handlers[proto] = handler
+	}
+	if len(handlers) > 0 {
+		// One dispatcher serves every target under /artifacts/<target-id>/...,
+		// resolving the target per request so a target created through the
+		// admin API is immediately reachable. A protocol's default target has
+		// the protocol name as its ID, so /artifacts/<protocol> is unchanged.
+		d := artifactkit.NewTargetDispatcher(artifactkit.MountBase, reg, handlers)
+		mux.Handle(artifactkit.MountBase+"/", d)
+		mux.Handle(artifactkit.MountBase, d)
+		mounted += len(handlers)
 	}
 	if mounted == 0 {
 		log.Fatal("no protocols registered/enabled")
@@ -226,74 +242,15 @@ func (w *logResponseWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// defaultUpstreams builds the upstream table from the target registry, which is
+// the single source of truth for public upstreams and mirrors. The flat
+// Defaults map is a projection of the registry so existing resolvers, the admin
+// API and per-deployment overrides keep working unchanged.
 func defaultUpstreams(airGap bool) *artifactkit.Upstreams {
+	reg := targets.NewRegistry()
 	return &artifactkit.Upstreams{
-		Defaults: map[string]string{
-			"oci":      "https://registry-1.docker.io",
-			"cargo":    "https://crates.io",
-			"composer": "https://repo.packagist.org",
-			"conan":    "https://center.conan.io",
-			"go":       "https://proxy.golang.org",
-			"helm":     "https://charts.helm.sh/stable",
-			"hex":      "https://repo.hex.pm",
-			"maven":    "https://repo.maven.apache.org/maven2",
-			"npm":      "https://registry.npmjs.org",
-			"nuget":    "https://api.nuget.org",
-			"pub":      "https://pub.dev",
-			"pypi":     "https://pypi.org",
-			"rubygems": "https://rubygems.org",
-			"swift":    "https://api.spm.swift.org",
-			// System packages.
-			"apk":    "https://dl-cdn.alpinelinux.org",
-			"debian": "https://deb.debian.org",
-			"rpm":    "https://dl.fedoraproject.org",
-			// AI/ML, functional, LFS, schema registries.
-			"conda":       "https://repo.anaconda.com",
-			"huggingface": "https://huggingface.co",
-			// Plain-HTTP package trees (no protocol of their own).
-			"hackage":  "https://hackage.haskell.org",
-			"cran":     "https://cran.r-project.org",
-			"cpan":     "https://cpan.metacpan.org",
-			"luarocks": "https://luarocks.org",
-			// Julia's package server is the same shape (path tree).
-			"juliapkg": "https://pkg.julialang.org",
-			"nix":      "https://cache.nixos.org",
-			"protobuf": "https://buf.build",
-			"gitlfs":   "",
-			// Additional plain-HTTP trees.
-			"jsr":      "https://jsr.io",
-			"opam":     "https://opam.ocaml.org",
-			"stackage": "https://stackage.org",
-			"pecl":     "https://pecl.php.net",
-			"bazel":    "https://bcr.bazel.build",
-			"jenkins":  "https://updates.jenkins.io",
-			// Maven-layout mirrors: the maven adapter serves them via the
-			// host-driven upstream (X-Forwarded-Host), so these entries exist
-			// to allow-list the host in knownHosts. The key's suffix names the
-			// mirror for readability and per-repo overrides.
-			"maven.google":  "https://dl.google.com/dl/android/maven2",
-			"maven.gradle":  "https://plugins.gradle.org/m2",
-			"maven.clojars": "https://repo.clojars.org",
-			"maven.spring":  "https://repo.spring.io/milestone",
-			"maven.jitpack": "https://jitpack.io",
-			// JSR's npm-compatibility registry (deno/bun/npm resolve @jsr/* from
-			// here); the npm adapter serves it host-driven.
-			"npm.jsr": "https://npm.jsr.io",
-			// Sub-endpoints that live on a different host than the format's
-			// primary upstream (crates.io: index + static downloads are
-			// served from index.crates.io / static.crates.io).
-			"cargo.index":        "https://index.crates.io",
-			"cargo.static":       "https://static.crates.io/crates",
-			"composer.search":    "https://packagist.org",
-			"conan.center":       "https://center2.conan.io",
-			"go.sumdb":           "https://sum.golang.org",
-			"nuget.search":       "https://azuresearch-usnc.nuget.org",
-			"nuget.registration": "https://api.nuget.org",
-			"hex.repo":           "https://repo.hex.pm",
-			"hex.api":            "https://hex.pm",
-			"rubygems.index":     "https://index.rubygems.org",
-			"rubygems.gems":      "https://rubygems.org/gems",
-		},
+		Targets:   reg,
+		Defaults:  reg.LegacyDefaults(),
 		Overrides: map[string]string{},
 		Proxy:     map[string]string{},
 		AirGap:    airGap,
@@ -355,9 +312,9 @@ func parseSelfBaseMap(s string) map[string]string {
 	return out
 }
 
-func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, dataDir string, selfBases map[string]string) map[string]any {
+func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, dataDir string, selfBases map[string]string, targetStore targets.Store) map[string]any {
 	cfg := map[string]any{}
-	// Each protocol mounts under /pkgs/<name> (OCI is special-cased to /v2),
+	// Each protocol mounts under /artifacts/<name> (OCI is special-cased to /v2),
 	// so its emitted self-URLs must carry that prefix. selfBase is the global
 	// origin (scheme://host[:port]). For OCI, SelfBase is used ONLY to derive
 	// the /token realm, which lives at the origin root — so pass the bare base.
@@ -365,7 +322,7 @@ func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, d
 	// With -self-base-raw the base is the protocol's OWN upstream origin: the
 	// adapter emits upstream-shaped URLs (registry.npmjs.org/react, pypi.org/
 	// simple/..., index.crates.io/config.json) unchanged, and an intercepting
-	// client proxy (easyproxy) maps them back onto /pkgs/<name>. This is what
+	// client proxy (easyproxy) maps them back onto /artifacts/<name>. This is what
 	// makes publish/pull fully transparent to an unmodified client.
 	//
 	// A -self-base-map entry is a per-protocol origin and implies raw mode for
@@ -376,7 +333,7 @@ func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, d
 		if name == "oci" || selfBaseRaw {
 			cfg["self_base"] = strings.TrimSuffix(selfBase, "/")
 		} else {
-			cfg["self_base"] = strings.TrimSuffix(selfBase, "/") + "/pkgs/" + name
+			cfg["self_base"] = strings.TrimSuffix(selfBase, "/") + "/artifacts/" + name
 		}
 	}
 	if auth != nil {
@@ -391,6 +348,10 @@ func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, d
 		// Bare mirrors live under the data dir: the second clone of a
 		// repository is served from local objects.
 		cfg["dir"] = filepath.Join(dataDir, "git")
+	}
+	if name == "system" && targetStore != nil {
+		// The admin API can CRUD user-declared targets.
+		cfg["targets_store"] = targetStore
 	}
 	return cfg
 }

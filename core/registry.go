@@ -4,7 +4,14 @@ import (
 	"context"
 	"sort"
 	"strings"
+
+	"github.com/easylab-platform/artifact/targets"
 )
+
+// MountBase is the HTTP prefix every non-OCI protocol is mounted under. It is
+// re-exported from the targets package so callers of artifactkit need not
+// import both.
+const MountBase = targets.MountBase
 
 // clientFactoryFor caches a single ClientFactory on the schema-less Upstreams
 // (per-process). Upstreams is cloned around, so we store the factory in an
@@ -25,6 +32,9 @@ type Registry struct {
 	// format where every name belongs to exactly one tenant. Nil disables
 	// ownership enforcement (single-tenant / dev mode).
 	Owners Ownership
+	// TargetStore persists user-declared targets. Nil means built-ins only,
+	// and the admin API treats target writes as unsupported.
+	TargetStore targets.Store
 }
 
 // Ownership is the npm-official-style ownership model over the registry's
@@ -92,7 +102,14 @@ type Upstream struct {
 
 // Upstreams resolves the effective remote for a format / sub-endpoint against
 // per-key overrides and per-key proxy policy, honoring an air-gap flag.
+//
+// Targets is the target registry (protocol -> upstream identity). When set it
+// is the single source of truth for hostnames (the SSRF allow-list) and for
+// host-driven resolution; Defaults/Overrides/Repos remain as per-deployment
+// policy layered on top. A nil Targets keeps the legacy table-only behavior.
 type Upstreams struct {
+	// Targets is the target registry. Nil disables target-driven resolution.
+	Targets *targets.Registry
 	// Defaults maps a format to its built-in public upstream base.
 	Defaults map[string]string
 	// Overrides overrides Defaults; empty value reverts to the default.
@@ -250,7 +267,16 @@ func (u *Upstreams) Get(format string) string {
 			return trimSlash(v)
 		}
 	}
-	return trimSlash(u.Defaults[format])
+	if v := u.Defaults[format]; v != "" {
+		return trimSlash(v)
+	}
+	// Target registry: the protocol's default target supplies the base.
+	if u.Targets != nil {
+		if t, ok := u.Targets.Default(format); ok && t.Base != "" {
+			return trimSlash(t.Base)
+		}
+	}
+	return ""
 }
 
 // Sub returns the effective base URL for a dotted sub-endpoint.
@@ -264,7 +290,61 @@ func (u *Upstreams) Sub(format, sub string) string {
 			return trimSlash(v)
 		}
 	}
-	return trimSlash(u.Defaults[key])
+	if v := u.Defaults[key]; v != "" {
+		return trimSlash(v)
+	}
+	// A target may carry the sub-endpoint as an Aux entry ("cargo.static").
+	if u.Targets != nil {
+		if t, ok := u.Targets.Get(key); ok {
+			return trimSlash(t.Base)
+		}
+		if t, ok := u.Targets.Default(format); ok {
+			if v := t.Aux[sub]; v != "" {
+				return trimSlash(v)
+			}
+		}
+	}
+	return ""
+}
+
+// TargetFor returns the target a (format, host) request resolves to, when a
+// target registry is configured. It is the host-driven half of the upstream
+// priority: the caller layers per-repo overrides on top.
+func (u *Upstreams) TargetFor(format, host string) (targets.Target, bool) {
+	if u == nil || u.Targets == nil || u.AirGap || host == "" {
+		return targets.Target{}, false
+	}
+	return u.Targets.ForHostProtocol(format, host)
+}
+
+// targetFromScope returns the NAMED target a request was explicitly mounted at
+// (/artifacts/<target-id>/...). The default target (ID == protocol) is
+// deliberately excluded: its base is the table default, and the client's Host
+// must still be able to select a mirror (a request to index.crates.io goes to
+// index.crates.io, not to cargo's default crates.io).
+func (u *Upstreams) targetFromScope(ctx context.Context) (targets.Target, bool) {
+	if u == nil || u.Targets == nil || u.AirGap {
+		return targets.Target{}, false
+	}
+	sc := RepoScopeFrom(ctx)
+	if sc.Target == "" {
+		return targets.Target{}, false
+	}
+	// A dotted ID is a named target; the bare protocol name is the default
+	// target, whose base is the table default and must NOT outrank the
+	// client's host (a request to index.crates.io goes to index.crates.io).
+	if _, name := targets.SplitID(sc.Target); name == "" {
+		return targets.Target{}, false
+	}
+	return u.Targets.Get(sc.Target)
+}
+
+// TargetsFor returns every target serving a protocol (empty when no registry).
+func (u *Upstreams) TargetsFor(format string) []targets.Target {
+	if u == nil || u.Targets == nil {
+		return nil
+	}
+	return u.Targets.ForProtocol(format)
 }
 
 // ProxyURL returns the proxy policy for a key, walking dotted parents, then

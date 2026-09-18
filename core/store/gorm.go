@@ -40,6 +40,7 @@ type artifactRow struct {
 	Proprietary []byte
 	Blobs       string `gorm:"not null;default:'[]'"`
 	Source      string `gorm:"not null;default:''"`
+	Target      string `gorm:"not null;default:''"`
 }
 
 type uploadRow struct {
@@ -57,6 +58,14 @@ type metaRow struct {
 	Data       []byte
 }
 
+// targetRow persists a user-declared pull-through target. The whole Target is
+// stored as JSON so new fields need no migration; ID is the key.
+type targetRow struct {
+	ID   string `gorm:"primaryKey;not null"`
+	JSON []byte
+}
+
 func (artifactRow) TableName() string { return "artifacts" }
 func (uploadRow) TableName() string   { return "uploads" }
 func (metaRow) TableName() string     { return "meta" }
+func (targetRow) TableName() string   { return "targets" }

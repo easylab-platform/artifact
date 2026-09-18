@@ -3,6 +3,7 @@ module github.com/easylab-platform/artifact/core
 go 1.26.5
 
 require (
+	github.com/easylab-platform/artifact/targets v0.0.0
 	github.com/glebarez/sqlite v1.11.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/postgres v1.6.2
@@ -31,4 +32,7 @@ require (
 	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
+	modernc.org/sqlite v1.58.0 // indirect
 )
+
+replace github.com/easylab-platform/artifact/targets => ../targets

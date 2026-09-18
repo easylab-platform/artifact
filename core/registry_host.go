@@ -60,7 +60,22 @@ func IsRegistryHost(host string) bool {
 	return strings.Contains(hostOnly, ".")
 }
 
-// HostOfPort splits "host:port"; a bare host returns hasPort=false.
+// baseHost extracts the lowercased host of a base URL.
+func baseHost(raw string) string {
+	rest := raw
+	if i := strings.Index(raw, "://"); i >= 0 {
+		rest = raw[i+3:]
+	}
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		rest = rest[:i]
+	}
+	if i := strings.LastIndex(rest, "@"); i >= 0 {
+		rest = rest[i+1:]
+	}
+	return CanonicalHost(rest)
+}
+
+// splitHostPort splits "host:port"; a bare host returns hasPort=false.
 func splitHostPort(h string) (host, port string, hasPort bool) {
 	i := strings.LastIndexByte(h, ':')
 	if i < 0 {
@@ -112,51 +127,69 @@ func RegistryHostFrom(ctx context.Context) string {
 }
 
 // knownHosts returns the set of upstream hosts this registry knows, derived
-// from the upstream table (defaults + sub-endpoints + per-repo overrides) plus
-// any explicitly allowed hosts. The host is the key; the value is the scheme.
+// from the target registry when present (the single source of truth) and from
+// the upstream table otherwise, plus any explicitly allowed hosts. The host is
+// the key; the value is the scheme.
 //
 // Deriving it from the table (rather than keeping a second list) means the
 // table stays the single source of truth: adding an ecosystem to the defaults
 // also makes its host reachable through the X-Forwarded-* path.
 func (u *Upstreams) knownHosts() map[string]string {
-	out := map[string]string{}
-	add := func(raw string) {
-		if raw == "" {
-			return
+	if u.Targets != nil {
+		out := u.Targets.KnownHosts()
+		// Explicit per-deployment entries may add hosts the built-in table
+		// does not carry (a private mirror, an internal proxy).
+		for _, raw := range u.Overrides {
+			addHost(out, raw)
 		}
-		scheme := "https"
-		rest := raw
-		if i := strings.Index(raw, "://"); i >= 0 {
-			scheme, rest = raw[:i], raw[i+3:]
+		for _, e := range u.Repos {
+			addHost(out, e.Base)
 		}
-		// Strip path, query, userinfo.
-		if i := strings.IndexAny(rest, "/?#"); i >= 0 {
-			rest = rest[:i]
+		for _, h := range u.AllowedHosts {
+			addHost(out, h)
 		}
-		if i := strings.LastIndex(rest, "@"); i >= 0 {
-			rest = rest[i+1:]
-		}
-		if rest == "" {
-			return
-		}
-		host := CanonicalHost(rest)
-		if _, ok := out[host]; !ok {
-			out[host] = scheme
-		}
+		return out
 	}
+	out := map[string]string{}
 	for _, base := range u.Defaults {
-		add(base)
+		addHost(out, base)
 	}
 	for _, base := range u.Overrides {
-		add(base)
+		addHost(out, base)
 	}
 	for _, e := range u.Repos {
-		add(e.Base)
+		addHost(out, e.Base)
 	}
 	for _, h := range u.AllowedHosts {
-		add(h)
+		addHost(out, h)
 	}
 	return out
+}
+
+// addHost registers one raw base/URL/host into a scheme->host map (first wins).
+func addHost(out map[string]string, raw string) {
+	if raw == "" {
+		return
+	}
+	scheme := "https"
+	rest := raw
+	if i := strings.Index(raw, "://"); i >= 0 {
+		scheme, rest = raw[:i], raw[i+3:]
+	}
+	// Strip path, query, userinfo.
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		rest = rest[:i]
+	}
+	if i := strings.LastIndex(rest, "@"); i >= 0 {
+		rest = rest[i+1:]
+	}
+	if rest == "" {
+		return
+	}
+	host := CanonicalHost(rest)
+	if _, ok := out[host]; !ok {
+		out[host] = scheme
+	}
 }
 
 // HostBase reconstructs an upstream base (scheme://host) from the origin a
@@ -169,6 +202,11 @@ func (u *Upstreams) knownHosts() map[string]string {
 // The client's stripped path prefix (/maven2, /stable) is restored here
 // because it belongs to the origin the client dialed; every other upstream
 // base comes from the table and needs none.
+//
+// When a target registry is configured, the target that owns the host is
+// authoritative: its Base already carries the mirror's path prefix (Google
+// Maven's /dl/android/maven2) and its scheme is used, so a client that did not
+// strip anything still reaches the right place.
 func (u *Upstreams) HostBase(proto, host, prefix string) (string, bool) {
 	if u == nil || u.AirGap {
 		return "", false
@@ -176,6 +214,22 @@ func (u *Upstreams) HostBase(proto, host, prefix string) (string, bool) {
 	host = CanonicalHost(host)
 	if host == "" {
 		return "", false
+	}
+	if u.Targets != nil {
+		// A target with a fixed base is authoritative for its OWN host: the
+		// base already carries the mirror's path prefix (Google Maven's
+		// /dl/android/maven2), so a client that stripped nothing still lands
+		// on the right path. The base's host must equal the requested host,
+		// so a wildcard host entry (cdn-lfs.huggingface.co) does not inherit
+		// the parent's base.
+		for _, cand := range u.Targets.ByHost(host) {
+			if cand.Base == "" {
+				continue
+			}
+			if baseHost(cand.Base) == host {
+				return trimSlash(cand.Base), true
+			}
+		}
 	}
 	scheme, ok := u.knownHosts()[host]
 	if !ok {

@@ -31,6 +31,7 @@ require (
 	github.com/easylab-platform/artifact/rubygems v0.0.0
 	github.com/easylab-platform/artifact/swiftpm v0.0.0
 	github.com/easylab-platform/artifact/system v0.0.0
+	github.com/easylab-platform/artifact/targets v0.0.0
 )
 
 require (
@@ -91,4 +92,5 @@ replace (
 	github.com/easylab-platform/artifact/rubygems => ../rubygems
 	github.com/easylab-platform/artifact/swiftpm => ../swiftpm
 	github.com/easylab-platform/artifact/system => ../system
+	github.com/easylab-platform/artifact/targets => ../targets
 )
