@@ -24,13 +24,16 @@ hosts that are environment-sensitive).
   PASS/FAIL/SKIP result files. `JOBS=1` reproduces serial execution.
 
 ## Capture mode
-`CAPTURE=1 ./run.sh` exercises the privileged all-port face instead of
-DNS-spoof: an init container installs iptables rules redirecting every outbound
-TCP connection to the sidecar, which recovers the real destination with
-`SO_ORIGINAL_DST`. The same matrix passes both ways (28/28), proving the modes
-are transparent to clients. Capture needs `NET_ADMIN` on the sidecar and init
-container; `--capture-dns` also runs the spoof resolver + :443/:80 faces for
-rewrite hosts that do not resolve publicly.
+`CAPTURE=1` makes every harness (pull, search, lifecycle) run the privileged
+all-port face instead of DNS-spoof: an init container installs iptables rules
+redirecting every outbound TCP connection to the sidecar, which recovers the
+real destination with `SO_ORIGINAL_DST`. The sidecar runs `--capture-dns`
+alongside, so rewrite hosts that do not resolve publicly still work (the
+resolver answers them with the Pod IP, served by the spoof :443/:80 faces).
+
+Verified with CAPTURE=1: pull 28/28, search 11/11, lifecycle 18/18 — the same
+results as DNS-spoof, proving the modes are transparent to unmodified clients.
+Capture needs `NET_ADMIN` on the sidecar and init container.
 - `scripts/<p>.sh` — the client command per protocol, mounted at `/scripts`.
 - `scripts/<p>.rules.yaml` — optional extra rewrite rules for that protocol's
   pod (e.g. `conan.rules.yaml` routes its PyPI bootstrap through artifact-pypi).

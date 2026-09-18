@@ -23,6 +23,9 @@ PROTOCOLS=(${PROTOCOLS:-npm cargo rubygems composer hex go pypi nuget helm conda
 KEEP="${KEEP:-0}"
 # JOBS protocols run concurrently (each has its own pod). JOBS=1 is serial.
 JOBS="${JOBS:-6}"
+# CAPTURE=1 runs the search matrix through the privileged all-port capture
+# mode (init container redirects TCP + DNS assist) instead of DNS-spoof.
+CAPTURE="${CAPTURE:-0}"
 
 source "${HERE}/rules.sh"
 source "${HERE}/parallel.sh"
@@ -150,6 +153,37 @@ write_script_cm() {
 write_pod() {
   local p="$1" name="search-$1"
   parse_row "$p"
+  local init_block="" sidecar_args sidecar_sec=""
+  if [ "${CAPTURE:-0}" = "1" ]; then
+    init_block=$(cat <<YAML
+  initContainers:
+  - name: easysidecar-capture-init
+    image: ${EASYSIDECAR_IMAGE}
+    args: ["--mode=capture","--capture-init","--capture-addr=0.0.0.0:15001"]
+    securityContext: { capabilities: { add: ["NET_ADMIN"] } }
+    resources:
+      requests: { cpu: 20m, memory: 32Mi }
+      limits:   { cpu: 200m, memory: 128Mi }
+YAML
+)
+    sidecar_args=$(cat <<YAML
+    - --mode=capture
+    - --capture-addr=0.0.0.0:15001
+    - --capture-dns
+    - --spoof-dns-addr=0.0.0.0:53
+YAML
+)
+    sidecar_sec='    securityContext: { capabilities: { add: ["NET_ADMIN"] } }'
+  else
+    sidecar_args=$(cat <<YAML
+    - --mode=proxy
+    - --spoof
+    - --spoof-dns-addr=0.0.0.0:53
+    - --spoof-tls-addr=0.0.0.0:443
+    - --spoof-http-addr=0.0.0.0:80
+YAML
+)
+  fi
   cat <<YAML | kubectl apply -n "$NS" -f - >/dev/null
 apiVersion: v1
 kind: Pod
@@ -160,6 +194,7 @@ spec:
     nameservers: ["127.0.0.1"]
     searches: ["${NS}.svc.cluster.local", "svc.cluster.local", "cluster.local"]
     options: [{ name: ndots, value: "5" }]
+${init_block}
   containers:
   - name: tool
     image: ${R_IMG}
@@ -180,16 +215,13 @@ spec:
     - { name: script, mountPath: /scripts, readOnly: true }
   - name: easysidecar
     image: ${EASYSIDECAR_IMAGE}
+${sidecar_sec}
     resources:
       requests: { cpu: 50m, memory: 64Mi }
       limits:   { cpu: 500m, memory: 256Mi }
     args:
-    - --mode=proxy
     - --rules=/etc/easysidecar/rules.yaml
-    - --spoof
-    - --spoof-dns-addr=0.0.0.0:53
-    - --spoof-tls-addr=0.0.0.0:443
-    - --spoof-http-addr=0.0.0.0:80
+${sidecar_args}
     - --upstream-dns=${UPSTREAM_DNS}
     - --upstream-proxy=${UPSTREAM_PROXY}
     - --ca-cert=/etc/easysidecar/ca/ca.crt
