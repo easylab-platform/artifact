@@ -114,11 +114,11 @@ spec:
         - name: NO_PROXY
           value: "localhost,127.0.0.1,.svc.cluster.local,.svc,.nip.io"
 ${extra}        readinessProbe:
-          tcpSocket: { port: http }
+          httpGet: { path: /readyz, port: http }
           initialDelaySeconds: 2
           periodSeconds: 5
         livenessProbe:
-          tcpSocket: { port: http }
+          httpGet: { path: /healthz, port: http }
           initialDelaySeconds: 10
           periodSeconds: 15
         volumeMounts: [{ name: data, mountPath: /data }]

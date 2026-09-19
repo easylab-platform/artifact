@@ -125,11 +125,11 @@ spec:
         - name: ARTIFACT_MAX_BODY
           value: "34359738368"
         readinessProbe:
-          tcpSocket: { port: http }
+          httpGet: { path: /readyz, port: http }
           initialDelaySeconds: 3
           periodSeconds: 5
         livenessProbe:
-          tcpSocket: { port: http }
+          httpGet: { path: /healthz, port: http }
           initialDelaySeconds: 15
           periodSeconds: 20
         volumeMounts: [{ name: data, mountPath: /data }]

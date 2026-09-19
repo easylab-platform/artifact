@@ -152,6 +152,26 @@ func main() {
 		log.Fatal("no protocols registered/enabled")
 	}
 
+	// Health endpoints (unauthenticated, outside the protocol mounts):
+	//   /healthz  liveness  — the process is up (always 200).
+	//   /readyz   readiness — the metadata store answers a cheap query; a
+	//                         failing DB (locked, gone) pulls the pod from the
+	//                         Service instead of serving errors.
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok\n")
+	})
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		if _, err := meta.ListRepositories(r.Context()); err != nil {
+			http.Error(w, "metadata store unavailable: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ready\n")
+	})
+
 	addr := *listen
 	log.Printf("artifact listening on %s (%d protocols: %s), data=%s, airgap=%v",
 		addr, mounted, names, *dataDir, *airGap)

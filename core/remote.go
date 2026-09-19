@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -146,6 +147,10 @@ func proxyKey(proxy *string) string {
 func newTransport(proxy *string) *http.Transport {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.MaxIdleConnsPerHost = 20
+	// Cap concurrent connections to one upstream host so a burst of clients
+	// pulling large blobs cannot exhaust file descriptors (or the egress
+	// proxy's connection budget).
+	tr.MaxConnsPerHost = 32
 	tr.IdleConnTimeout = 90 * time.Second
 	tr.ResponseHeaderTimeout = 120 * time.Second
 	if proxy != nil {
@@ -254,18 +259,67 @@ func (r *Remote) getBytesDirect(ctx context.Context, path string) ([]byte, error
 // a couple of seconds).
 var retryBackoff = []time.Duration{500 * time.Millisecond, 1500 * time.Millisecond}
 
-// getStable performs a GET, retrying transport errors and 502/503/504
-// (classic egress-proxy hiccup codes) with backoff. Redirects and other
-// statuses are returned as-is on the first response.
+// maxRetryAfter caps a server-directed Retry-After so a hostile or misconfigured
+// origin cannot pin a request for minutes.
+const maxRetryAfter = 30 * time.Second
+
+// retryableStatus reports whether a response should be retried: transport
+// errors (code 0), the classic egress-proxy hiccup codes 502/503/504, and 429
+// (a rate limit) which Maven Central and other registries emit.
+func retryableStatus(code int) bool {
+	switch code {
+	case 0, http.StatusBadGateway, http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout, http.StatusTooManyRequests:
+		return true
+	}
+	return false
+}
+
+// retryWait picks the backoff before the next attempt: the server's Retry-After
+// when present (and sane), else the staged default. Retry-After may be a number
+// of seconds or an HTTP date.
+func retryWait(resp *http.Response, fallback time.Duration) time.Duration {
+	if resp == nil {
+		return fallback
+	}
+	v := resp.Header.Get("Retry-After")
+	if v == "" {
+		return fallback
+	}
+	if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+		if secs <= 0 {
+			return fallback
+		}
+		if d := time.Duration(secs) * time.Second; d < maxRetryAfter {
+			return d
+		}
+		return maxRetryAfter
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := time.Until(t); d > 0 {
+			if d > maxRetryAfter {
+				return maxRetryAfter
+			}
+			return d
+		}
+	}
+	return fallback
+}
+
+// getStable performs a GET, retrying transport errors, 502/503/504, and 429
+// (honoring Retry-After) with backoff. Redirects and other statuses are
+// returned as-is on the first response.
 func (r *Remote) getStable(ctx context.Context, path string) (*http.Response, error) {
 	resp, err := r.Get(ctx, path)
 	for _, wait := range retryBackoff {
-		if err == nil && resp.StatusCode != 502 && resp.StatusCode != 503 && resp.StatusCode != 504 {
+		if err == nil && !retryableStatus(resp.StatusCode) {
 			return resp, nil
 		}
 		code := 0
+		var serverWait time.Duration
 		if resp != nil {
 			code = resp.StatusCode
+			serverWait = retryWait(resp, wait)
 			_ = resp.Body.Close()
 		}
 		// Retries ride on the transport's keep-alive pool; if the pinned
@@ -285,7 +339,7 @@ func (r *Remote) getStable(ctx context.Context, path string) (*http.Response, er
 				return nil, err
 			}
 			return nil, &UpstreamStatusError{Path: path, Status: code}
-		case <-time.After(wait):
+		case <-time.After(serverWait):
 		}
 		resp, err = r.Get(ctx, path)
 	}
@@ -962,12 +1016,14 @@ func (r *Remote) getStreamRetryCond(ctx context.Context, path string, extra map[
 	}
 	resp, err := do()
 	for _, wait := range retryBackoff {
-		if err == nil && resp.StatusCode != 502 && resp.StatusCode != 503 && resp.StatusCode != 504 {
+		if err == nil && !retryableStatus(resp.StatusCode) {
 			return resp, nil
 		}
 		code := 0
+		serverWait := wait
 		if resp != nil {
 			code = resp.StatusCode
+			serverWait = retryWait(resp, wait)
 			_ = resp.Body.Close()
 		}
 		r.client.CloseIdleConnections()
@@ -977,7 +1033,7 @@ func (r *Remote) getStreamRetryCond(ctx context.Context, path string, extra map[
 				return nil, err
 			}
 			return nil, &UpstreamStatusError{Path: path, Status: code}
-		case <-time.After(wait):
+		case <-time.After(serverWait):
 		}
 		resp, err = do()
 	}
