@@ -4,7 +4,6 @@
 package maven
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -373,12 +372,8 @@ func storeVersionBlob(reg *artifactkit.Registry, artifactID, version, filename, 
 	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
-func storeVersionSource(reg *artifactkit.Registry, artifactID, version, filename string, data []byte, source string, ctx context.Context) {
-	storeVersionStream(reg, artifactID, version, filename, bytes.NewReader(data), source, ctx)
-}
-
-// storeVersionStream is storeVersionSource over a reader: the body is streamed
-// into the CAS (no full in-memory copy) and hashed in the same pass.
+// storeVersionStream streams the body into the CAS (no full in-memory copy) and
+// hashes it in the same pass, then indexes the (find-replace by filename) blob.
 func storeVersionStream(reg *artifactkit.Registry, artifactID, version, filename string, body io.Reader, source string, ctx context.Context) {
 	if version == "" {
 		version = "0.0.0"
