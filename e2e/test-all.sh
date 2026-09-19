@@ -24,7 +24,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NS="${NS:-temp}"
-IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:v0.23.0}"
+IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:v0.26.0}"
 export EASYSIDECAR_IMAGE="${EASYSIDECAR_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.13.0}"
 export NS IMAGE JOBS="${JOBS:-8}"
 # Keep the deployments after the run for debugging (default: tear them down).
