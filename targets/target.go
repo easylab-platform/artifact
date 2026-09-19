@@ -85,6 +85,12 @@ type Target struct {
 	// the generated egress policy. Exact names, "*.suffix" wildcards, or bare
 	// suffixes.
 	Hosts []string `json:"hosts,omitempty"`
+	// PathPrefix, when set, scopes this target to a path subtree on its Hosts.
+	// It lets one host serve several targets: dl.google.com hosts both the
+	// Android Maven repo (/dl/android/maven2) and the SDK repo
+	// (/android/repository). The egress rule then matches only paths under the
+	// prefix; any other path on the host falls through (to the catch-all).
+	PathPrefix string `json:"path_prefix,omitempty"`
 	// DirectHosts are hostname patterns the egress policy must leave DIRECT
 	// even though they belong to this target's ecosystem: CDN endpoints the
 	// adapter reaches server-side (a container registry's blob CDN), which the

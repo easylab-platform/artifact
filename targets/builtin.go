@@ -195,7 +195,12 @@ func Builtins() []Target {
 		// They share the maven namespace, so a coordinate fetched through any
 		// of them dedupes by digest.
 		{ID: "maven.google", Protocol: "maven", Kind: Mirror,
-			Base: "https://dl.google.com/dl/android/maven2", Hosts: []string{"dl.google.com"}, Builtin: true},
+			Base: "https://dl.google.com/dl/android/maven2", Hosts: []string{"dl.google.com"},
+			// dl.google.com also serves the Android SDK (/android/repository);
+			// scope this target to the Maven subtree so the SDK path falls
+			// through to the catch-all (netcache) instead of being routed to
+			// the maven adapter.
+			PathPrefix: "/dl/android/maven2", Builtin: true},
 		{ID: "maven.gradle", Protocol: "maven", Kind: Mirror,
 			Base: "https://plugins.gradle.org/m2", Hosts: []string{"plugins.gradle.org"}, Builtin: true},
 		{ID: "maven.clojars", Protocol: "maven", Kind: Mirror,

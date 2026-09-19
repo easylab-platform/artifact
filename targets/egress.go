@@ -18,6 +18,9 @@ type Egress struct {
 	// Add is the prefix prepended after Strips (the protocol mount). Empty for
 	// OCI, which is spec-fixed at /v2 and routes by Host alone.
 	Add string
+	// PathPrefix scopes the rule to a path subtree on its Match hosts, so one
+	// host can serve several targets (see Target.PathPrefix).
+	PathPrefix string
 	// Direct keeps the hosts out of the gateway (action: direct). Used for CDN
 	// hosts the adapter reaches server-side.
 	Direct bool
@@ -53,6 +56,21 @@ func EgressPolicy() []Egress {
 	var out []Egress
 	seen := map[string]bool{}
 	for _, t := range Builtins() {
+		// A path-scoped target must not CLAIM its host from later targets:
+		// only its path subtree is its own, other paths fall through to a
+		// later rule (the catch-all). So its hosts are emitted WITHOUT marking
+		// them claimed.
+		if t.PathPrefix != "" {
+			if hosts := dedupe(t.Hosts); len(hosts) > 0 {
+				out = append(out, Egress{
+					Match:      hosts,
+					Strips:     t.InboundStrips(),
+					Add:        t.EgressAdd(),
+					PathPrefix: t.PathPrefix,
+				})
+			}
+			continue
+		}
 		hosts := unclaimed(seen, t.Hosts)
 		if len(hosts) > 0 {
 			out = append(out, Egress{
@@ -85,6 +103,22 @@ func unclaimed(seen map[string]bool, hosts []string) []string {
 	return out
 }
 
+// dedupe returns hosts with duplicates and empties removed, WITHOUT claiming
+// them (used by path-scoped targets, whose host may still be claimed by a
+// whole-host target).
+func dedupe(hosts []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, h := range hosts {
+		if h == "" || seen[h] {
+			continue
+		}
+		seen[h] = true
+		out = append(out, h)
+	}
+	return out
+}
+
 // RenderEgressYAML renders the default egress policy as a sidecar rules.yaml
 // with the given gateway target ("host:port"). header is an optional leading
 // comment block.
@@ -104,6 +138,9 @@ func RenderEgressYAML(gatewayHostPort string, mitmDefault bool, header string) s
 		}
 		b.WriteString("    action: rewrite\n")
 		b.WriteString("    target: \"" + gatewayHostPort + "\"\n")
+		if u.PathPrefix != "" {
+			b.WriteString("    path_prefix: \"" + u.PathPrefix + "\"\n")
+		}
 		switch len(u.Strips) {
 		case 0:
 		case 1:

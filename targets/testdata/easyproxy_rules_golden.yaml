@@ -145,6 +145,7 @@ rules:
   - match: ["dl.google.com"]
     action: rewrite
     target: "gw:80"
+    path_prefix: "/dl/android/maven2"
     strip_prefix: "/dl/android/maven2"
     add_prefix: "/artifacts/maven"
   - match: ["plugins.gradle.org"]

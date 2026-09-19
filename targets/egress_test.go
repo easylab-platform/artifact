@@ -154,7 +154,36 @@ func TestEgressMultiStrip(t *testing.T) {
 	t.Fatal("no spring rule")
 }
 
-// TestEgressNoShadowing guards declaration order: an earlier, more specific
+// TestEgressPathScoping pins dl.google.com: its maven rule is scoped to
+// /dl/android/maven2 so the Android SDK path (/android/repository) falls
+// through to the catch-all instead of being routed to the maven adapter.
+func TestEgressPathScoping(t *testing.T) {
+	var sawScoped bool
+	for _, e := range EgressPolicy() {
+		if _, ok := index(e.Match, "dl.google.com"); !ok {
+			continue
+		}
+		if e.PathPrefix != "/dl/android/maven2" {
+			t.Fatalf("dl.google.com path_prefix = %q, want /dl/android/maven2", e.PathPrefix)
+		}
+		sawScoped = true
+		if e.Add != MountBase+"/maven" {
+			t.Errorf("dl.google.com add = %q, want maven", e.Add)
+		}
+	}
+	if !sawScoped {
+		t.Fatal("no dl.google.com rule")
+	}
+	// The catch-all must still be present (the SDK path falls through to it),
+	// and dl.google.com must not be claimed (a path-scoped host is re-matchable).
+	for _, e := range EgressPolicy() {
+		if len(e.Match) == 1 && e.Match[0] == CatchAllPattern {
+			return
+		}
+	}
+	t.Fatal("catch-all rule missing")
+}
+
 // host must not be reachable by a later, broader pattern, or first-match-wins
 // would route it to the wrong target.
 func TestEgressNoShadowing(t *testing.T) {
