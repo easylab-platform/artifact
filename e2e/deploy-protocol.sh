@@ -85,13 +85,6 @@ for p in "${PROTOCOLS[@]}"; do
   if [ "$p" = "oci" ]; then
     extra=$'        - name: ARTIFACT_MAX_BODY\n          value: "34359738368"\n'
   fi
-  if [ "$p" = "rpm" ]; then
-    # The Fedora client baseurl is https://dl.fedoraproject.org/pub/fedora/
-    # linux/releases/40/Everything/x86_64/os/; the proxy preserves that path,
-    # and the rpm adapter treats the first segment ("pub") as the repo key and
-    # fetches "<base>/<rest>", so the base is .../pub.
-    extra_args="${extra_args}, \"--upstreams=rpm=https://dl.fedoraproject.org/pub\""
-  fi
   cat <<YAML | kubectl apply -n "${NS}" -f -
 apiVersion: apps/v1
 kind: Deployment

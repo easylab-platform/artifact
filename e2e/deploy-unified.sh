@@ -93,13 +93,6 @@ for p in $PROTOCOLS; do
   map="${map:+${map},}${mount}=${o}"
 done
 
-# The Fedora client baseurl is .../pub/fedora/...; the rpm adapter treats the
-# first segment ("pub") as the repo key, so its base is .../pub.
-extra_args=""
-case ",${list}," in
-  *,rpm,*) extra_args=', "--upstreams=rpm=https://dl.fedoraproject.org/pub"' ;;
-esac
-
 cat <<YAML | kubectl apply -n "${NS}" -f -
 apiVersion: apps/v1
 kind: Deployment

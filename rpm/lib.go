@@ -13,7 +13,8 @@
 //
 //	/artifacts/rpm/<repo>/<path>   where <repo> is a user-chosen repository key
 //	(e.g. "fedorarelease41"); the upstream base for each repo key is resolved
-//	from the upstream table by repo name.
+//	from the upstream table by repo name, and the key is ALSO the first segment
+//	of the upstream path (the client's base URL contains it).
 package rpm
 
 import (
@@ -84,25 +85,36 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // proxy pulls a repository path through from its upstream mirror.
+//
+// The repo key is the first path segment (the Fedora client's base URL
+// includes it: dl.fedoraproject.org/pub/fedora/... — the repo key is "pub"),
+// so the key is BOTH the upstream selector and part of the path that is
+// fetched and cached. The fetch path therefore carries the full
+// format-relative path, exactly like debian's archive segment: dropping it
+// would fetch dl.fedoraproject.org/... instead of .../pub/... .
 func (s *State) proxy(w http.ResponseWriter, r *http.Request, repo, rest string) {
 	base := s.upstreamFor(repo)
 	if base == "" {
 		artifactkit.Error(w, http.StatusNotFound, "unknown rpm repo: "+repo)
 		return
 	}
+	full := repo
+	if rest != "" {
+		full = repo + "/" + rest
+	}
 
 	// Local cache first (streamed with Range/HEAD semantics).
-	if art, err := s.Registry.Meta.Get(r.Context(), "rpm", repo, rest); err == nil && len(art.Blobs) > 0 {
+	if art, err := s.Registry.Meta.Get(r.Context(), "rpm", repo, full); err == nil && len(art.Blobs) > 0 {
 		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(rest)) {
 			return
 		}
 	}
-	fetched, err := s.Registry.FetchFor(r.Context(), "rpm", repo, base, "/"+rest)
+	fetched, err := s.Registry.FetchFor(r.Context(), "rpm", repo, base, "/"+full)
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if digest := storeCache(s, r.Context(), repo, rest, fetched.Data); digest != "" &&
+	if digest := storeCache(s, r.Context(), repo, full, fetched.Data); digest != "" &&
 		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(rest)) {
 		return
 	}

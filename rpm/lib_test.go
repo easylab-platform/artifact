@@ -18,7 +18,9 @@ import (
 func TestPullThroughRepodataAndRpm(t *testing.T) {
 	repomd := []byte(`<?xml version="1.0"?><repomd><data type="primary"/></repomd>`)
 	rpmBytes := []byte("fake-rpm-bytes")
+	var gotPaths []string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
 		switch {
 		case strings.HasSuffix(r.URL.Path, "repomd.xml"):
 			_, _ = w.Write(repomd)
@@ -62,10 +64,24 @@ func TestPullThroughRepodataAndRpm(t *testing.T) {
 		t.Fatalf("rpm: %d", rec2.Code)
 	}
 
-	// Both cached.
+	// The repo key must be part of the UPSTREAM path, not stripped: the
+	// Fedora client's base URL is dl.fedoraproject.org/pub/fedora/... and the
+	// repo key is its first segment. Dropping it fetched the wrong path.
+	for _, p := range gotPaths {
+		if !strings.HasPrefix(p, "/fedora41/") {
+			t.Errorf("upstream path %q does not carry the repo key", p)
+		}
+	}
+
+	// Both cached under (repo, repo+"/"+rest).
 	vs, err := meta.ListVersions(context.Background(), "rpm", "fedora41")
 	if err != nil || len(vs) != 2 {
 		t.Fatalf("cached versions: %v %v", vs, err)
+	}
+	for _, want := range []string{"fedora41/repodata/repomd.xml", "fedora41/packages/b/bash.rpm"} {
+		if _, err := meta.Get(context.Background(), "rpm", "fedora41", want); err != nil {
+			t.Errorf("expected cache entry %q: %v", want, err)
+		}
 	}
 
 	// Unknown repo fails closed.
