@@ -9,7 +9,7 @@ IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:latest}"
 UPSTREAM_PROXY="${UPSTREAM_PROXY:-http://mihomo.develop.svc.cluster.local:7890}"
 NAME="${NAME:-artifact-unified}"
 # Protocol list mirrors run.sh's default matrix.
-PROTOCOLS="${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg google gradle clojars spring jitpack jsr jsrnpm opam stackage pecl bazel jenkins gitlfs system}"
+PROTOCOLS="${PROTOCOLS:-npm pypi go cargo maven nuget rubygems composer hex pub helm conan swift conda nix huggingface protobuf debian apk rpm oci git ivy hackage cran cpan luarocks juliapkg google gradle clojars spring jitpack jsr jsrnpm opam stackage pecl bazel jenkins gitlfs netcache system}"
 
 # Upstream origins (must match rules.sh proto_row hostnames).
 proto_origin() {
@@ -93,6 +93,7 @@ for p in $PROTOCOLS; do
   map="${map:+${map},}${mount}=${o}"
 done
 
+extra_args=""
 cat <<YAML | kubectl apply -n "${NS}" -f -
 apiVersion: apps/v1
 kind: Deployment

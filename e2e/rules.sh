@@ -39,6 +39,7 @@ proto_row() {
     juliapkg)    echo '["pkg.julialang.org", "*.pkg.julialang.org"]||/artifacts/juliapkg' ;;
     git)         echo '["github.com"]||/artifacts/git' ;;
     gitlfs)      echo '["github.com"]||/artifacts/git' ;;
+    netcache)    echo '["raw.githubusercontent.com"]||/artifacts/netcache' ;;
     ivy)         echo '["repo.scala-sbt.org"]||/artifacts/ivy' ;;
     google)      echo '["dl.google.com"]|/dl/android/maven2|/artifacts/maven' ;;
     gradle)      echo '["plugins.gradle.org"]|/m2|/artifacts/maven' ;;
@@ -69,6 +70,7 @@ parse_row() { # sets R_IMG R_MATCH R_STRIP R_ADD
     jsr)     R_IMG="${TOOL_IMAGE_PREFIX}-haskell:${TOOL_TAG}" ;;
     gitlfs)  R_IMG="${TOOL_IMAGE_PREFIX}-gitlfs:${TOOL_TAG}" ;;
     opam|stackage|pecl|bazel|jenkins) R_IMG="${TOOL_IMAGE_PREFIX}-haskell:${TOOL_TAG}" ;;
+    netcache) R_IMG="${TOOL_IMAGE_PREFIX}-git:${TOOL_TAG}" ;;
     *)           R_IMG="${TOOL_IMAGE_PREFIX}-$1:${TOOL_TAG}" ;;
   esac
 }
