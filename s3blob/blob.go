@@ -11,9 +11,11 @@
 package s3blob
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -176,8 +178,40 @@ func (s *Store) PutIfAbsent(ctx context.Context, digest string, r io.Reader) (bo
 	return true, nil
 }
 
-// HashesFor implements BlobStore: recompute from the stored bytes.
+// PutHashes implements artifactkit.HashPersister: store the hashes computed
+// while streaming the blob as a sidecar object next to it, so HashesFor is a
+// small GET rather than a full re-read of a possibly multi-GB layer.
+func (s *Store) PutHashes(ctx context.Context, digest string, h artifactkit.Hashes) error {
+	k, err := s.key(digest)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(h)
+	if err != nil {
+		return err
+	}
+	body := bytes.NewReader(data)
+	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{Bucket: &s.bucket, Key: aws.String(k), Body: body})
+	return err
+}
+
+// HashesFor implements BlobStore: read the persisted sidecar when present, else
+// recompute from the stored bytes.
 func (s *Store) HashesFor(ctx context.Context, digest string) (artifactkit.Hashes, error) {
+	k, err := s.key(digest)
+	if err != nil {
+		return artifactkit.Hashes{}, err
+	}
+	if out, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: &s.bucket, Key: aws.String(k + hashSidecarSuffix)}); err == nil {
+		data, rerr := io.ReadAll(out.Body)
+		_ = out.Body.Close()
+		if rerr == nil {
+			var h artifactkit.Hashes
+			if json.Unmarshal(data, &h) == nil && h.SHA256 != "" {
+				return h, nil
+			}
+		}
+	}
 	rd, err := s.Open(ctx, digest)
 	if err != nil {
 		return artifactkit.Hashes{}, err
@@ -189,13 +223,18 @@ func (s *Store) HashesFor(ctx context.Context, digest string) (artifactkit.Hashe
 	return artifactkit.ComputeHashes(rd)
 }
 
+// hashSidecarSuffix names the persisted-hashes sidecar for a blob object.
+const hashSidecarSuffix = ".hashes.json"
+
 // Delete implements BlobStore (unconditional; a missing key is not an error).
 func (s *Store) Delete(ctx context.Context, digest string) error {
 	k, err := s.key(digest)
 	if err != nil {
 		return err
 	}
-	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: &k})
+	// Best-effort sidecar removal; the object delete is authoritative.
+	_, _ = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: aws.String(k + hashSidecarSuffix)})
+	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: aws.String(k)})
 	return err
 }
 

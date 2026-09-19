@@ -66,6 +66,19 @@ func (s *scopedStore) ListVersions(ctx context.Context, format, repository strin
 	return s.inner.ListVersions(ctx, format, scopeIn(ctx, repository))
 }
 
+func (s *scopedStore) ListArtifacts(ctx context.Context, format, repository string) ([]Artifact, error) {
+	arts, err := s.inner.ListArtifacts(ctx, format, scopeIn(ctx, repository))
+	if err != nil {
+		return nil, err
+	}
+	if sc := RepoScopeFrom(ctx); sc.Namespace != "" || sc.targetPrefix() != "" {
+		for i := range arts {
+			arts[i].Repository = sc.UnscopedKey(arts[i].Repository)
+		}
+	}
+	return arts, nil
+}
+
 func (s *scopedStore) DeleteRepo(ctx context.Context, format, repository string) (int, error) {
 	return s.inner.DeleteRepo(ctx, format, scopeIn(ctx, repository))
 }

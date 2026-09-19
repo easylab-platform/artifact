@@ -33,6 +33,14 @@ type BlobStore interface {
 	List(ctx context.Context) ([]string, error)
 }
 
+// HashPersister is an optional BlobStore capability: persist the multi-hashes
+// computed while streaming a blob, so a later HashesFor is a sidecar read
+// instead of a full re-read of a possibly large blob. StoreStream calls it when
+// the backend implements it; backends without it simply recompute.
+type HashPersister interface {
+	PutHashes(ctx context.Context, digest string, h Hashes) error
+}
+
 // UploadRecord is a persisted in-progress multi-chunk upload session.
 type UploadRecord struct {
 	ID         string `json:"id"`
@@ -55,6 +63,10 @@ type IndexStore interface {
 	Delete(ctx context.Context, format, repository, version string) error
 	// ListVersions returns all versions for a repository, ordered.
 	ListVersions(ctx context.Context, format, repository string) ([]string, error)
+	// ListArtifacts returns every artifact row for a repository in one pass
+	// (rather than Get-per-version). Index generators use it so a repo with N
+	// files costs one query, not N.
+	ListArtifacts(ctx context.Context, format, repository string) ([]Artifact, error)
 	// ListRepositoriesByFormat returns every repository that has ≥1 version.
 	ListRepositoriesByFormat(ctx context.Context, format string) ([]string, error)
 	// ListRepositories returns every repository across all formats.

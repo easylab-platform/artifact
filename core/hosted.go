@@ -43,14 +43,11 @@ func SplitRepo(p string) (repo, rest string, ok bool) {
 // repoKey is the internal metadata repository name for a hosted repo.
 func repoKey(repo string) string { return "hosted/" + repo }
 
-// HostedUpload stores uploaded bytes under (format, repo, name) and indexes
-// them. It returns the digest and size.
+// HostedUpload streams uploaded bytes under (format, repo, name) into the CAS
+// and indexes them, without buffering the whole body in memory. It returns the
+// digest and size.
 func (h HostedStore) HostedUpload(ctx context.Context, format, repo, name string, r io.Reader) (string, int64, error) {
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return "", 0, err
-	}
-	stored, err := h.Registry.StoreAndHash(ctx, data)
+	stored, err := h.Registry.StoreStream(ctx, r)
 	if err != nil {
 		return "", 0, err
 	}
@@ -74,14 +71,24 @@ func (h HostedStore) HostedFile(ctx context.Context, format, repo, name string) 
 	return art.Blobs[0].Digest, true
 }
 
-// HostedList returns every hosted file name under a repo (sorted).
-func (h HostedStore) HostedList(ctx context.Context, format, repo string) ([]string, error) {
-	vs, err := h.Registry.Meta.ListVersions(ctx, format, repoKey(repo))
+// HostedFiles returns every hosted file in the repo with its digest and size in
+// ONE index pass, rather than a Get + Stat per name. Index generation uses it
+// so a repo with N packages costs one query.
+func (h HostedStore) HostedFiles(ctx context.Context, format, repo string) ([]HostedFile, error) {
+	arts, err := h.Registry.Meta.ListArtifacts(ctx, format, repoKey(repo))
 	if err != nil {
 		return nil, err
 	}
-	sort.Strings(vs)
-	return vs, nil
+	out := make([]HostedFile, 0, len(arts))
+	for i := range arts {
+		if len(arts[i].Blobs) == 0 {
+			continue
+		}
+		b := arts[i].Blobs[0]
+		out = append(out, HostedFile{Name: arts[i].Version, Digest: b.Digest, Size: b.Size})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
 
 // HostedDelete removes one hosted file and its CAS blob when unreferenced.
@@ -153,10 +160,11 @@ func (h *HostedHandler) Get(w http.ResponseWriter, r *http.Request, repo, name s
 		return false
 	}
 	// A generated index (e.g. repodata/repomd.xml, Packages) takes priority
-	// because it is derived, not stored.
+	// because it is derived, not stored. The whole repo is loaded in one pass
+	// so regenerating an N-file index costs one query, not N.
 	if h.Generator != nil {
-		if names, err := h.Store.HostedList(r.Context(), h.Format, repo); err == nil && len(names) > 0 {
-			if gf, ok := h.generate(r.Context(), repo, names, name); ok {
+		if files, err := h.Store.HostedFiles(r.Context(), h.Format, repo); err == nil && len(files) > 0 {
+			if gf, ok := h.generate(files, name); ok {
 				w.Header().Set("Content-Type", gf.ContentType)
 				w.Header().Set("Content-Length", fmt.Sprint(len(gf.Body)))
 				w.WriteHeader(http.StatusOK)
@@ -201,21 +209,10 @@ func (h *HostedHandler) Delete(w http.ResponseWriter, r *http.Request, repo, nam
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// generate regenerates the repo index from a known file list and returns the
-// requested member.
-func (h *HostedHandler) generate(ctx context.Context, repo string, names []string, name string) (GeneratedFile, bool) {
-	files := make([]HostedFile, 0, len(names))
-	for _, n := range names {
-		digest, ok := h.Store.HostedFile(ctx, h.Format, repo, n)
-		if !ok {
-			continue
-		}
-		f := HostedFile{Name: n, Digest: digest}
-		if sz, err := h.Store.Registry.Blobs.Stat(ctx, digest); err == nil && sz != nil {
-			f.Size = *sz
-		}
-		files = append(files, f)
-	}
+// generate renders the repo index from an already-loaded file list and returns
+// the requested member. The caller supplies the list (one index pass), so
+// generation adds no per-file queries.
+func (h *HostedHandler) generate(files []HostedFile, name string) (GeneratedFile, bool) {
 	out, err := h.Generator(files)
 	if err != nil {
 		return GeneratedFile{}, false

@@ -2,12 +2,9 @@ package artifactkit
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -328,27 +325,14 @@ func (r *Registry) refreshURI(ctx context.Context, key string, h http.Header) (U
 }
 
 // streamToBlob copies a stream into the CAS, hashing as it goes, and returns
-// the digest and size without buffering the whole body in memory.
+// the digest and size without buffering the whole body in memory. It is the
+// thin digest/size view over StoreStream.
 func (r *Registry) streamToBlob(ctx context.Context, body io.Reader) (string, int64, error) {
-	tmp, err := os.CreateTemp("", "artifact-uricache-*")
+	stored, err := r.StoreStream(ctx, body)
 	if err != nil {
 		return "", 0, err
 	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	defer func() { _ = tmp.Close() }()
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(tmp, h), body)
-	if err != nil {
-		return "", 0, err
-	}
-	digest := "sha256:" + hex.EncodeToString(h.Sum(nil))
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return "", 0, err
-	}
-	if _, err := r.Blobs.PutIfAbsent(ctx, digest, tmp); err != nil {
-		return "", 0, err
-	}
-	return digest, n, nil
+	return stored.Digest, stored.Size, nil
 }
 
 // storeNegative records a 404/410 briefly so a scanner does not hammer the

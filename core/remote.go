@@ -477,6 +477,56 @@ func (r *Registry) StoreAndHash(ctx context.Context, data []byte) (Stored, error
 	return Stored{Hashes: h, Size: int64(len(data)), Digest: digest}, nil
 }
 
+// StoreStream consumes a reader into the CAS without buffering the whole body
+// in memory, computing every hash in the same pass. It writes to a temp file
+// (the digest must be known before PutIfAbsent), then commits it. This is the
+// upload-path counterpart to StoreAndHash: a multi-GB OCI layer or Helm chart
+// never sits in RAM. The returned Stored carries the multi-hashes so callers
+// (e.g. Maven/Hex checksum files) need not re-read the blob.
+func (r *Registry) StoreStream(ctx context.Context, body io.Reader) (Stored, error) {
+	tmp, err := os.CreateTemp("", "artifact-store-*")
+	if err != nil {
+		return Stored{}, err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	defer func() { _ = tmp.Close() }()
+	hasher := newMultiHasher()
+	n, err := io.Copy(io.MultiWriter(tmp, hasher), body)
+	if err != nil {
+		return Stored{}, err
+	}
+	h := hasher.sum()
+	digest := "sha256:" + h.SHA256
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return Stored{}, err
+	}
+	if _, err := r.Blobs.PutIfAbsent(ctx, digest, tmp); err != nil {
+		return Stored{}, err
+	}
+	// Persist the hashes we already computed, so a later HashesFor (Maven/
+	// Hex checksum files) is a sidecar read, not a full re-read of the blob.
+	if hp, ok := r.Blobs.(HashPersister); ok {
+		LogMetaErr("hash sidecar", hp.PutHashes(ctx, digest, h))
+	}
+	return Stored{Hashes: h, Size: n, Digest: digest}, nil
+}
+
+// ReadBlobPrefix reads at most n bytes from the start of a blob, streaming
+// rather than loading it whole. Index generators use it to parse the small
+// control/header region of a large package without reading every byte.
+// (nil, nil) when the blob is absent.
+func (r *Registry) ReadBlobPrefix(ctx context.Context, digest string, n int64) ([]byte, error) {
+	rd, err := r.Blobs.Open(ctx, digest)
+	if err != nil || rd == nil {
+		return nil, err
+	}
+	defer func() { _ = rd.Close() }()
+	if n <= 0 {
+		n = 1 << 20
+	}
+	return io.ReadAll(io.LimitReader(rd, n))
+}
+
 // StorePathBlob is the shared "cache one fetched path" flow for the path-tree
 // protocols (apk/debian/rpm/conda/nix/...): store the bytes in the CAS by
 // digest, then index them under (format, repository, version). It is

@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -133,10 +134,35 @@ func (s *FileBlobStore) PutIfAbsent(ctx context.Context, digest string, r io.Rea
 	return true, nil
 }
 
-// HashesFor implements BlobStore: recompute (or read cached sidecar) from the
-// stored bytes. We recompute every time — blobs are immutable and the cache is
-// the file itself.
+// PutHashes implements artifactkit.HashPersister: store the hashes computed
+// while streaming the blob as a sidecar file next to it. A sidecar write
+// failure is non-fatal (HashesFor recomputes), so the error is advisory.
+func (s *FileBlobStore) PutHashes(ctx context.Context, digest string, h artifactkit.Hashes) error {
+	p, err := s.path(digest)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(h)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p+hashSidecarSuffix, data, 0o644)
+}
+
+// HashesFor implements BlobStore: read the persisted sidecar when present,
+// else recompute from the stored bytes. The sidecar makes the Maven/Hex
+// checksum paths O(1) instead of re-reading a possibly multi-GB jar.
 func (s *FileBlobStore) HashesFor(ctx context.Context, digest string) (artifactkit.Hashes, error) {
+	p, err := s.path(digest)
+	if err != nil {
+		return artifactkit.Hashes{}, err
+	}
+	if data, err := os.ReadFile(p + hashSidecarSuffix); err == nil {
+		var h artifactkit.Hashes
+		if json.Unmarshal(data, &h) == nil && h.SHA256 != "" {
+			return h, nil
+		}
+	}
 	f, err := s.Open(ctx, digest)
 	if err != nil {
 		return artifactkit.Hashes{}, err
@@ -152,12 +178,18 @@ func (s *FileBlobStore) HashesFor(ctx context.Context, digest string) (artifactk
 	return h, nil
 }
 
+// hashSidecarSuffix names the persisted-hashes sidecar for a blob file. The
+// blob path is `sha256/<2>/<62>`; the sidecar is that path plus this suffix, so
+// List (which validates the exact 64-hex shape) ignores it.
+const hashSidecarSuffix = ".hashes.json"
+
 // Delete implements BlobStore.
 func (s *FileBlobStore) Delete(ctx context.Context, digest string) error {
 	p, err := s.path(digest)
 	if err != nil {
 		return err
 	}
+	_ = os.Remove(p + hashSidecarSuffix)
 	err = os.Remove(p)
 	if os.IsNotExist(err) {
 		return nil

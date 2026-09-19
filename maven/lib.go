@@ -149,12 +149,9 @@ func (s *State) putPath(w http.ResponseWriter, r *http.Request, p string, c coor
 	}
 	filename := pathLast(p)
 	artifactkit.LimitBody(w, r)
-	data, err := io.ReadAll(r.Body)
-	if err != nil {
-		artifactkit.WriteReadErr(w, err)
-		return
-	}
-	storeVersionSource(s.Registry, c.artifactID, c.version, filename, data, "push", r.Context())
+	// The filename and coordinates come from the URL, so the body can stream
+	// straight into the CAS without buffering a (potentially large) jar.
+	storeVersionStream(s.Registry, c.artifactID, c.version, filename, r.Body, "push", r.Context())
 	artifactkit.JSON(w, http.StatusCreated, map[string]any{"ok": true})
 }
 
@@ -377,6 +374,12 @@ func storeVersionBlob(reg *artifactkit.Registry, artifactID, version, filename, 
 }
 
 func storeVersionSource(reg *artifactkit.Registry, artifactID, version, filename string, data []byte, source string, ctx context.Context) {
+	storeVersionStream(reg, artifactID, version, filename, bytes.NewReader(data), source, ctx)
+}
+
+// storeVersionStream is storeVersionSource over a reader: the body is streamed
+// into the CAS (no full in-memory copy) and hashed in the same pass.
+func storeVersionStream(reg *artifactkit.Registry, artifactID, version, filename string, body io.Reader, source string, ctx context.Context) {
 	if version == "" {
 		version = "0.0.0"
 	}
@@ -385,25 +388,26 @@ func storeVersionSource(reg *artifactkit.Registry, artifactID, version, filename
 	art.Source = source
 	art.Repository = artifactID
 	art.Version = version
-	if len(data) > 0 {
-		h, _ := artifactkit.ComputeHashesBytes(data)
-		digest := "sha256:" + h.SHA256
-		var removed, kept []artifactkit.Descriptor
-		for _, b := range art.Blobs {
-			if b.Name == filename {
-				removed = append(removed, b)
-			} else {
-				kept = append(kept, b)
-			}
+	stored, err := reg.StoreStream(ctx, body)
+	if err != nil || stored.Size == 0 {
+		// An empty body stores no blob, matching the byte-slice path.
+		artifactkit.LogMetaErr("store stream", err)
+		artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
+		return
+	}
+	var removed, kept []artifactkit.Descriptor
+	for _, b := range art.Blobs {
+		if b.Name == filename {
+			removed = append(removed, b)
+		} else {
+			kept = append(kept, b)
 		}
-		art.Blobs = kept
-		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
-		}
-		for _, b := range removed {
-			if b.Digest != digest {
-				artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
-			}
+	}
+	art.Blobs = kept
+	art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: stored.Digest, Size: stored.Size, Name: filename})
+	for _, b := range removed {
+		if b.Digest != stored.Digest {
+			artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
 		}
 	}
 	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))

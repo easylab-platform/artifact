@@ -1,7 +1,6 @@
 package oci
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -608,7 +607,9 @@ func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session s
 				return
 			}
 			artifactkit.LimitBody(w, r)
-			data, err := io.ReadAll(r.Body)
+			// Stream the body into the CAS (no full in-memory copy) and verify
+			// the client's digest against the one we computed.
+			stored, err := a.state.Registry.StoreStream(r.Context(), r.Body)
 			if err != nil {
 				if artifactkit.IsBodyTooLarge(err) {
 					writeJSON(w, http.StatusRequestEntityTooLarge, ociError("BLOB_UPLOAD_INVALID", "blob too large"))
@@ -617,12 +618,11 @@ func (a *Adapter) upload(w http.ResponseWriter, r *http.Request, name, session s
 				writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "read error"))
 				return
 			}
-			if dgst != "sha256:"+hexDigest(data) {
+			if dgst != stored.Digest {
+				// The body was streamed under its true digest; the client
+				// named a different one, so drop the bytes we just stored.
+				artifactkit.LogMetaErr("oci reject blob", a.state.Registry.Blobs.Delete(r.Context(), stored.Digest))
 				writeJSON(w, http.StatusBadRequest, ociError("DIGEST_INVALID", "digest does not match content"))
-				return
-			}
-			if _, err := a.state.Registry.Blobs.PutIfAbsent(r.Context(), dgst, bytes.NewReader(data)); err != nil {
-				writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
 				return
 			}
 			w.Header().Set("Location", "/v2/"+name+"/blobs/"+dgst)

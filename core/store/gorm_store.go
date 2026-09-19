@@ -115,6 +115,11 @@ func (s *Store) Get(ctx context.Context, format, repository, version string) (ar
 	if err != nil {
 		return artifactkit.Artifact{}, err
 	}
+	return artifactFromRow(&row), nil
+}
+
+// artifactFromRow maps a persisted row onto the in-memory Artifact.
+func artifactFromRow(row *artifactRow) artifactkit.Artifact {
 	var a artifactkit.Artifact
 	_ = json.Unmarshal([]byte(row.Blobs), &a.Blobs)
 	a.Format, a.Repository, a.Version = row.Format, row.Repository, row.Version
@@ -126,7 +131,7 @@ func (s *Store) Get(ctx context.Context, format, repository, version string) (ar
 		a.ExpiresAt = time.Unix(row.ExpiresAt, 0)
 	}
 	a.Proprietary = row.Proprietary
-	return a, nil
+	return a
 }
 
 // Delete implements IndexStore.
@@ -148,6 +153,19 @@ func (s *Store) ListVersions(ctx context.Context, format, repository string) ([]
 		return nil, err
 	}
 	return rows, nil
+}
+
+// ListArtifacts implements IndexStore: every row for a repository in one query.
+func (s *Store) ListArtifacts(ctx context.Context, format, repository string) ([]artifactkit.Artifact, error) {
+	var rows []artifactRow
+	if err := s.db.Where("format=? AND repository=?", format, repository).Order("version").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]artifactkit.Artifact, 0, len(rows))
+	for i := range rows {
+		out = append(out, artifactFromRow(&rows[i]))
+	}
+	return out, nil
 }
 
 // ListRepositoriesByFormat implements IndexStore.

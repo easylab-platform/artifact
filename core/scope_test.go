@@ -116,6 +116,15 @@ func (f *fakeIndex) ListVersions(_ context.Context, format, repo string) ([]stri
 	}
 	return out, nil
 }
+func (f *fakeIndex) ListArtifacts(_ context.Context, format, repo string) ([]Artifact, error) {
+	var out []Artifact
+	for _, a := range f.m {
+		if a.Format == format && a.Repository == repo {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
 func (f *fakeIndex) ListRepositoriesByFormat(context.Context, string) ([]string, error) {
 	return nil, nil
 }

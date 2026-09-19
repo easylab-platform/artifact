@@ -40,6 +40,51 @@ func TestFileBlobStoreDedupAndVerify(t *testing.T) {
 	}
 }
 
+// TestHashesForSidecar verifies StoreStream persists the hashes it computed
+// and HashesFor reads them back without the bytes, while a blob written outside
+// StoreStream still recomputes.
+func TestHashesForSidecar(t *testing.T) {
+	blobs, err := store.NewFileBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	data := []byte("checksum me")
+	d := artifactkit.DigestOf(data)
+
+	reg := &artifactkit.Registry{Blobs: blobs}
+	stored, err := reg.StoreStream(ctx, strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Digest != d {
+		t.Fatalf("digest = %s, want %s", stored.Digest, d)
+	}
+	// The sidecar lets HashesFor return the full hash set without re-reading.
+	got, err := blobs.HashesFor(ctx, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != stored.Hashes {
+		t.Fatalf("hashes = %+v, want %+v", got, stored.Hashes)
+	}
+	// List must not surface the sidecar as a phantom digest.
+	all, err := blobs.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0] != d {
+		t.Fatalf("list = %v, want exactly [%s]", all, d)
+	}
+	// Deleting the blob removes the sidecar too.
+	if err := blobs.Delete(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blobs.HashesFor(ctx, d); err == nil {
+		t.Fatal("HashesFor on a deleted blob should error")
+	}
+}
+
 func TestSQLiteStoreRoundtrip(t *testing.T) {
 	s, err := store.OpenSQLite(t.TempDir() + "/meta.db")
 	if err != nil {
