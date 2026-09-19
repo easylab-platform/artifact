@@ -209,7 +209,7 @@ func (s *State) proxyUncached(w http.ResponseWriter, r *http.Request, path strin
 
 // upstreamGet issues the Hub request with the optional bearer token.
 func (s *State) upstreamGet(r *http.Request, path string) (*http.Response, error) {
-	up := s.Registry.RemoteAt(strings.TrimSuffix(s.upstreamBase(), "/") + "/" + path)
+	up, _ := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Base: strings.TrimSuffix(s.upstreamBase(), "/") + "/" + path})
 	if s.HFToken != "" {
 		up = up.WithHeader("Authorization", "Bearer "+s.HFToken)
 	}

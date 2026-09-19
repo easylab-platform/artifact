@@ -48,7 +48,7 @@ type Adapter struct {
 	// registryUpstreams is a per-host cache of on-demand upstreams for
 	// explicitly prefixed registries (ghcr.io/...).
 	registryUpstreamsMu sync.Mutex
-	registryUpstreams   map[string]*Upstream
+	registryUpstreams   map[string]*Client
 	// uploads stores in-progress blob uploads on disk.
 	uploads *uploadSessions
 	// sweeperStop stops the upload-session GC.
@@ -73,7 +73,7 @@ func New(state *OciState) *Adapter {
 		// A broken upload dir is a broken environment; surface it eagerly.
 		panic("artifact/oci: upload sessions: " + err.Error())
 	}
-	a := &Adapter{state: state, registryUpstreams: map[string]*Upstream{}, uploads: uploads, sweeperStop: make(chan struct{})}
+	a := &Adapter{state: state, registryUpstreams: map[string]*Client{}, uploads: uploads, sweeperStop: make(chan struct{})}
 	go a.sweepLoop()
 	return a
 }
@@ -140,7 +140,7 @@ func (a *Adapter) tokenRealm() string {
 
 // upstreamForRegistry returns the pull-through upstream for a registry host
 // ("" = default upstream; docker hub aliases -> default).
-func (a *Adapter) upstreamForRegistry(host string) *Upstream {
+func (a *Adapter) upstreamForRegistry(host string) *Client {
 	host = strings.ToLower(strings.TrimSpace(host))
 	// An explicit repository override (-repo-upstreams oci/ghcr.io=...) wins
 	// over the derived https://<host> default.
@@ -150,12 +150,12 @@ func (a *Adapter) upstreamForRegistry(host string) *Upstream {
 			if e.Proxy != "" {
 				p = &e.Proxy
 			}
-			return NewUpstream(a.state.Registry.Upstreams.ProxyFactory(), e.Base, p)
+			return NewClient(a.state.Registry.Upstreams.ProxyFactory(), e.Base, p)
 		}
 	}
 	switch host {
 	case "", "docker.io", "index.docker.io", "registry-1.docker.io":
-		return NewUpstream(
+		return NewClient(
 			a.state.Registry.Upstreams.ProxyFactory(),
 			a.state.DefaultUpstream,
 			proxyOf(a.state.Registry.Upstreams, "oci"),

@@ -424,7 +424,7 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 	// Merge upstream results (pull-through) so public packages still appear,
 	// filtered by the same name pattern.
 	upstream := map[string]bool{}
-	if remote, err := s.Registry.RemoteCtx(r.Context(), "conan"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "conan"}); err == nil {
 		if body, err := remote.GetBytes(r.Context(), "/v2/conans/search?q="+artifactkit.URLencode(q)); err == nil {
 			var m map[string]any
 			if json.Unmarshal(body, &m) == nil {
@@ -482,7 +482,7 @@ func (s *State) replyOrProxy(w http.ResponseWriter, r *http.Request, local any, 
 	}
 	// The center sub-endpoint lives on center2.conan.io; host-driven
 	// resolution picks whichever the client actually dialed.
-	if remote, err := s.Registry.RemoteForSub(r.Context(), "conan", "center"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "conan", Sub: "center"}); err == nil {
 		if body, err := remote.GetBytes(r.Context(), upstreamPath); err == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -509,7 +509,7 @@ func (s *State) proxyRecipe(w http.ResponseWriter, r *http.Request, path string)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	remote, err := s.Registry.RemoteForSub(r.Context(), "conan", "center")
+	remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "conan", Sub: "center"})
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
@@ -719,7 +719,7 @@ func (s *State) recipeKnown(ctx context.Context, name, ver string) bool {
 // fetchUpstreamFile pulls a conans/... path's bytes through from center2 so
 // package/recipe files are cached server-side on first access.
 func (s *State) fetchUpstreamFile(r *http.Request, path string) ([]byte, bool) {
-	remote, err := s.Registry.RemoteForSub(r.Context(), "conan", "center")
+	remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "conan", Sub: "center"})
 	if err != nil {
 		return nil, false
 	}

@@ -110,7 +110,7 @@ func (s *State) names(w http.ResponseWriter, r *http.Request) {
 			seen[n] = true
 		}
 	}
-	if remote, err := s.Registry.RemoteForSub(r.Context(), "rubygems", "index"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "rubygems", Sub: "index"}); err == nil {
 		if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/names"); err == nil {
 			for _, line := range strings.Split(body, "\n") {
 				line = strings.TrimSpace(line)
@@ -127,7 +127,7 @@ func (s *State) names(w http.ResponseWriter, r *http.Request) {
 func (s *State) versionsAPI(w http.ResponseWriter, r *http.Request, name string) {
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "rubygems", name)
 	if len(versions) == 0 {
-		remote, _ := s.Registry.RemoteCtx(r.Context(), "rubygems")
+		remote, _ := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "rubygems"})
 		if remote != nil {
 			if body, err := remote.GetBytes(r.Context(), "/api/v1/versions/"+artifactkit.URLencode(name)+".json"); err == nil {
 				artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
@@ -188,7 +188,7 @@ func (s *State) searchGem(w http.ResponseWriter, r *http.Request) {
 		seen[name] = true
 	}
 	// Merge the upstream search so uncached public gems are discoverable.
-	if remote, _ := s.Registry.RemoteCtx(r.Context(), "rubygems"); remote != nil {
+	if remote, _ := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "rubygems"}); remote != nil {
 		p := "/api/v1/search.json"
 		if raw := r.URL.RawQuery; raw != "" {
 			p += "?" + raw
@@ -234,7 +234,7 @@ func (s *State) compactVersions(w http.ResponseWriter, r *http.Request) {
 		}
 		sb.WriteString(name + " " + strings.Join(versions, ",") + " " + strings.Repeat("0", 64) + "\n")
 	}
-	if remote, err := s.Registry.RemoteForSub(r.Context(), "rubygems", "index"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "rubygems", Sub: "index"}); err == nil {
 		if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/versions"); err == nil {
 			if i := strings.Index(body, "---\n"); i >= 0 {
 				sb.WriteString(body[i+4:])
@@ -248,7 +248,7 @@ func (s *State) compactInfo(w http.ResponseWriter, r *http.Request, name string)
 	name = strings.Trim(name, "/")
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "rubygems", name)
 	if len(versions) == 0 {
-		if remote, err := s.Registry.RemoteForSub(r.Context(), "rubygems", "index"); err == nil {
+		if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "rubygems", Sub: "index"}); err == nil {
 			if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/info/"+artifactkit.URLencode(name)); err == nil {
 				artifactkit.Text(w, http.StatusOK, body, "text/plain")
 				return
@@ -309,7 +309,7 @@ func (s *State) quickMarshal(w http.ResponseWriter, r *http.Request, rel string)
 		artifactkit.OctetResponse(w, r, z.Bytes())
 		return
 	}
-	remote, _ := s.Registry.RemoteCtx(r.Context(), "rubygems")
+	remote, _ := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "rubygems"})
 	if remote != nil {
 		if data, err := remote.GetBytes(r.Context(), "/quick/Marshal.4.8/"+rel); err == nil {
 			artifactkit.OctetResponse(w, r, data)
@@ -453,7 +453,7 @@ func (s *State) download(w http.ResponseWriter, r *http.Request, filename string
 		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
-	if remote, err := s.Registry.RemoteForSub(r.Context(), "rubygems", "gems"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "rubygems", Sub: "gems"}); err == nil {
 		if data, err := remote.GetBytes(r.Context(), "/"+filename); err == nil {
 			storeVersionSource(s.Registry, name, version, filename, data, "pull", r.Context())
 			artifactkit.OctetResponse(w, r, data)

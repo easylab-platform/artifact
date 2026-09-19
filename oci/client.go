@@ -14,10 +14,10 @@ import (
 
 const acceptManifests = Accept
 
-// Upstream is a remote OCI registry used as a pull-through source. It
+// Client is a remote OCI registry used as a pull-through source. It
 // transparently acquires bearer tokens via the WWW-Authenticate challenge on
 // 401/403, caches them per scope, and exposes manifest/blob/tag access.
-type Upstream struct {
+type Client struct {
 	scheme  string
 	host    string
 	factory *artifactkit.ClientFactory
@@ -27,9 +27,9 @@ type Upstream struct {
 	tokens map[string]string
 }
 
-// NewUpstream parses a host string (with or without scheme), defaulting to
+// NewClient parses a host string (with or without scheme), defaulting to
 // https unless the host is localhost or an IP literal (insecure convention).
-func NewUpstream(factory *artifactkit.ClientFactory, host string, proxy *string) *Upstream {
+func NewClient(factory *artifactkit.ClientFactory, host string, proxy *string) *Client {
 	scheme := "https"
 	h := host
 	for _, p := range []string{"https://", "http://"} {
@@ -39,12 +39,12 @@ func NewUpstream(factory *artifactkit.ClientFactory, host string, proxy *string)
 			break
 		}
 	}
-	return &Upstream{scheme: scheme, host: h, factory: factory, proxy: proxy, tokens: map[string]string{}}
+	return &Client{scheme: scheme, host: h, factory: factory, proxy: proxy, tokens: map[string]string{}}
 }
 
 // ForRegistry builds an upstream for an explicitly prefixed registry host,
 // honoring the insecure-registry convention (http for localhost/IP).
-func ForRegistry(factory *artifactkit.ClientFactory, host string, proxy *string) *Upstream {
+func ForRegistry(factory *artifactkit.ClientFactory, host string, proxy *string) *Client {
 	scheme := "https"
 	h := host
 	for _, p := range []string{"https://", "http://"} {
@@ -61,7 +61,7 @@ func ForRegistry(factory *artifactkit.ClientFactory, host string, proxy *string)
 	if h == "localhost" || strings.HasPrefix(h, "localhost:") || isIP(ipHost) {
 		scheme = "http"
 	}
-	return &Upstream{scheme: scheme, host: h, factory: factory, proxy: proxy, tokens: map[string]string{}}
+	return &Client{scheme: scheme, host: h, factory: factory, proxy: proxy, tokens: map[string]string{}}
 }
 
 func isIP(s string) bool {
@@ -76,22 +76,22 @@ func isIP(s string) bool {
 	return true
 }
 
-func (u *Upstream) base() string { return fmt.Sprintf("%s://%s/v2", u.scheme, u.host) }
+func (u *Client) base() string { return fmt.Sprintf("%s://%s/v2", u.scheme, u.host) }
 
-func (u *Upstream) client() *http.Client { return u.factory.Client(u.proxy) }
+func (u *Client) client() *http.Client { return u.factory.Client(u.proxy) }
 
 // followClient follows redirects: blob endpoints of Docker Hub / MCR / GHCR /
 // Quay 307-redirect to a CDN (CloudFront / Azure Blob), so the adapter must
 // read the object through the redirect to verify + cache it.
-func (u *Upstream) followClient() *http.Client { return u.factory.Redirecting(u.proxy) }
+func (u *Client) followClient() *http.Client { return u.factory.Redirecting(u.proxy) }
 
-func (u *Upstream) tokenFor(scope string) string {
+func (u *Client) tokenFor(scope string) string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return u.tokens[scope]
 }
 
-func (u *Upstream) setToken(scope, tok string) {
+func (u *Client) setToken(scope, tok string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.tokens[scope] = tok
@@ -99,16 +99,16 @@ func (u *Upstream) setToken(scope, tok string) {
 
 // doGet GETs a path under /v2 with a scope, retrying once with a fresh token
 // on 401/403. Redirects are NOT followed (manifest/tag/index endpoints).
-func (u *Upstream) doGet(scope, path string, accept string) (*http.Response, error) {
+func (u *Client) doGet(scope, path string, accept string) (*http.Response, error) {
 	return u.doGetWith(u.client(), scope, path, accept)
 }
 
 // doGetFollow is doGet but follows 3xx (blob CDN redirects).
-func (u *Upstream) doGetFollow(scope, path string, accept string) (*http.Response, error) {
+func (u *Client) doGetFollow(scope, path string, accept string) (*http.Response, error) {
 	return u.doGetWith(u.followClient(), scope, path, accept)
 }
 
-func (u *Upstream) doGetWith(client *http.Client, scope, path string, accept string) (*http.Response, error) {
+func (u *Client) doGetWith(client *http.Client, scope, path string, accept string) (*http.Response, error) {
 	urlp := u.base() + path
 	req, err := http.NewRequest(http.MethodGet, urlp, nil)
 	if err != nil {
@@ -151,7 +151,7 @@ type tokenResponse struct {
 	AccessToken string `json:"access_token"`
 }
 
-func (u *Upstream) fetchTokenForChallenge(challenge, scope string) (string, error) {
+func (u *Client) fetchTokenForChallenge(challenge, scope string) (string, error) {
 	params := parseAuthParams(challenge)
 	if realm, ok := params["realm"]; ok {
 		tok, err := u.fetchToken(realm, params, scope)
@@ -173,7 +173,7 @@ func (u *Upstream) fetchTokenForChallenge(challenge, scope string) (string, erro
 	return u.fetchToken(realm, params, scope)
 }
 
-func (u *Upstream) fetchToken(realm string, params map[string]string, scope string) (string, error) {
+func (u *Client) fetchToken(realm string, params map[string]string, scope string) (string, error) {
 	u2, err := url.Parse(realm)
 	if err != nil {
 		return "", err
@@ -227,7 +227,7 @@ func parseAuthParams(s string) map[string]string {
 }
 
 // GetManifest fetches a manifest by name+reference. Returns (body, content-type).
-func (u *Upstream) GetManifest(name, reference string) ([]byte, string, error) {
+func (u *Client) GetManifest(name, reference string) ([]byte, string, error) {
 	scope := "repository:" + name + ":pull"
 	path := "/" + name + "/manifests/" + reference
 	resp, err := u.doGet(scope, path, acceptManifests)
@@ -252,7 +252,7 @@ func (u *Upstream) GetManifest(name, reference string) ([]byte, string, error) {
 // GetBlob streams a blob by digest. Returns (response, content-length).
 // Blob endpoints commonly 307-redirect to a CDN, so this follows redirects
 // (unlike GetManifest/ListTags, which never do).
-func (u *Upstream) GetBlob(name, digest string) (*http.Response, *int64, error) {
+func (u *Client) GetBlob(name, digest string) (*http.Response, *int64, error) {
 	scope := "repository:" + name + ":pull"
 	path := "/" + name + "/blobs/" + digest
 	resp, err := u.doGetFollow(scope, path, "application/octet-stream")
@@ -271,7 +271,7 @@ func (u *Upstream) GetBlob(name, digest string) (*http.Response, *int64, error) 
 }
 
 // ListTags returns the tag list for a repository.
-func (u *Upstream) ListTags(name string) ([]string, error) {
+func (u *Client) ListTags(name string) ([]string, error) {
 	scope := "repository:" + name + ":pull"
 	path := "/" + name + "/tags/list"
 	resp, err := u.doGet(scope, path, acceptManifests)

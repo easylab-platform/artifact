@@ -385,22 +385,7 @@ func (r *Registry) Fetch(ctx context.Context, format, upstreamBase, path string)
 		// upstream sees the path it published.
 		return r.FetchPath(ctx, format, path)
 	}
-	remote, err := r.remote(ctx, format, upstreamBase)
-	if err != nil {
-		return Fetched{}, err
-	}
-	return r.fetchWith(ctx, remote, path)
-}
-
-// FetchFor is Fetch for one repository of a format: the repository's upstream
-// override (longest prefix match) and proxy policy decide where the request
-// goes. An empty upstreamBase means "resolve from the repository policy".
-func (r *Registry) FetchFor(ctx context.Context, format, repo, upstreamBase, path string) (Fetched, error) {
-	remote, err := r.remoteFor(ctx, format, repo, upstreamBase)
-	if err != nil {
-		return Fetched{}, err
-	}
-	return r.fetchWith(ctx, remote, path)
+	return r.fetchWith(ctx, r.remoteAtBase(upstreamBase), path)
 }
 
 // FetchPath pulls a format-relative path using the request's full upstream
@@ -614,45 +599,52 @@ func baseNameOf(p string) string {
 	return p
 }
 
-// Remote returns a proxy-aware upstream handle for a format. When
-// upstreamBase is "" the format's configured/default upstream is used.
-func (r *Registry) Remote(format, upstreamBase string) (*Remote, error) {
-	base := upstreamBase
-	if base == "" {
-		base = r.Upstreams.Get(format)
-		if base == "" {
-			return nil, fmt.Errorf("no upstream for %s", format)
-		}
-	}
-	factory := sharedFactory
-	return NewRemote(factory, base, proxyPtr(r.Upstreams, format)), nil
+// UpstreamSpec selects which upstream a Remote targets. Exactly one selector
+// is used, in this precedence:
+//
+//	Base  an absolute base URL, verbatim (no target auth; generic proxy)
+//	Host  address the upstream by hostname (git/ivy source mirrors)
+//	Sub   a format sub-endpoint on its own host (cargo index, nuget search)
+//	Repo  one repository of Format (per-repo override + target auth)
+//	zero  the request-context priority for Format (override -> client origin
+//	      -> table default), applying the resolved target's auth
+//
+// It is the ONE constructor for upstream handles; adapters never assemble a
+// base themselves.
+type UpstreamSpec struct {
+	Format string
+	Repo   string
+	Sub    string
+	Host   string
+	Base   string
 }
 
-// RemoteFor returns a proxy-aware upstream handle for one repository of a
-// format: the repository override wins over the format default, and the
-// repository's own proxy policy wins over the format's.
-func (r *Registry) RemoteFor(format, repo, upstreamBase string) (*Remote, error) {
-	base := upstreamBase
-	if base == "" {
-		base = r.Upstreams.Repo(format, repo)
-		if base == "" {
-			return nil, fmt.Errorf("no upstream for %s/%s", format, repo)
+// Remote resolves an upstream handle for a spec. A Base is honored verbatim; a
+// Host addresses the source by hostname; a Sub targets a sub-endpoint; else the
+// format/repository is resolved from the request context (per-repo override ->
+// client origin -> table default) with the target's auth applied.
+func (r *Registry) Remote(ctx context.Context, spec UpstreamSpec) (*Remote, error) {
+	switch {
+	case spec.Base != "":
+		return r.remoteAtBase(spec.Base), nil
+	case spec.Host != "":
+		if m, ok := r.remoteHost(spec.Format, spec.Host); ok {
+			return m, nil
 		}
+		return nil, fmt.Errorf("no upstream for host %s", spec.Host)
+	case spec.Sub != "":
+		return r.remoteSub(ctx, spec.Format, spec.Sub)
+	default:
+		repo := spec.Repo
+		if repo == "" {
+			sc := RepoScopeFrom(ctx)
+			repo = sc.Namespace
+			if repo == "" {
+				repo = sc.Name
+			}
+		}
+		return r.remoteFor(ctx, spec.Format, repo, "")
 	}
-	factory := sharedFactory
-	proxy, ok := r.Upstreams.RepoProxy(format, repo)
-	var pp *string
-	if ok {
-		pp = &proxy
-	}
-	return NewRemote(factory, base, pp), nil
-}
-
-// RemoteAt returns a remote against an arbitrary absolute base using the
-// format's proxy policy.
-func (r *Registry) RemoteAt(base string) *Remote {
-	factory := sharedFactory
-	return NewRemote(factory, base, proxyPtr(r.Upstreams, "generic"))
 }
 
 // proxyPtr returns a *string to the configured proxy for key, or nil when
@@ -664,27 +656,6 @@ func proxyPtr(u *Upstreams, key string) *string {
 		return nil
 	}
 	return &v
-}
-
-// remote resolves the upstream for a format. The priority is:
-//
-//  1. an explicit per-repository override (operator intent), else
-//  2. the origin the client reached us by (X-Forwarded-Host/Proto/Prefix,
-//     applied only for hosts the table already knows), else
-//  3. the table default for the format's repository.
-//
-// An explicitly supplied base is honored verbatim (adapters that must fetch
-// from a URL they already resolved).
-func (r *Registry) remote(ctx context.Context, format, upstreamBase string) (*Remote, error) {
-	if upstreamBase != "" {
-		return r.Remote(format, upstreamBase)
-	}
-	sc := RepoScopeFrom(ctx)
-	repo := sc.Namespace
-	if repo == "" {
-		repo = sc.Name
-	}
-	return r.remoteFor(ctx, format, repo, "")
 }
 
 // resolveBase applies the upstream priority above and returns the base plus
@@ -746,7 +717,14 @@ func (r *Registry) resolveBase(ctx context.Context, format, repo string) (string
 // the resolved target's auth policy (passthrough/basic/bearer).
 func (r *Registry) remoteFor(ctx context.Context, format, repo, upstreamBase string) (*Remote, error) {
 	if upstreamBase != "" {
-		return r.RemoteFor(format, repo, upstreamBase)
+		// An explicit base is honored verbatim but keeps the repository's
+		// proxy policy (the original RemoteFor semantics).
+		proxy, has := r.Upstreams.RepoProxy(format, repo)
+		var pp *string
+		if has {
+			pp = &proxy
+		}
+		return NewRemote(sharedFactory, upstreamBase, pp), nil
 	}
 	base, proxy, ok := r.resolveBase(ctx, format, repo)
 	if !ok {
@@ -798,56 +776,19 @@ func (r *Registry) finishFetch(ctx context.Context, data []byte) (Fetched, error
 	return Fetched{Data: data, Hashes: stored.Hashes, Size: stored.Size, Digest: stored.Digest}, nil
 }
 
-// ResolveUpstream exposes the upstream priority (per-repo override → client
-// origin → table default) plus the client's stripped path prefix, for adapters
-// that need to build their own request (metadata overlays, HEAD probes) rather
-// than use Fetch.
-func (r *Registry) ResolveUpstream(ctx context.Context, format, repo string) (base, prefix string, ok bool) {
-	base, _, ok = r.resolveBase(ctx, format, repo)
-	if !ok {
-		return "", "", false
-	}
-	if sc := RepoScopeFrom(ctx); strings.HasPrefix(sc.Prefix, "/") {
-		prefix = strings.TrimSuffix(sc.Prefix, "/")
-	}
-	return base, prefix, true
-}
-
-// RemoteCtx resolves the upstream for a format using the request context's
-// host/repository priority (per-repo override → client origin → table
-// default). Adapters should prefer it over Remote so a client's original
-// hostname (recorded by the egress proxy) selects the upstream without a
-// per-ecosystem table.
-func (r *Registry) RemoteCtx(ctx context.Context, format string) (*Remote, error) {
-	return r.remote(ctx, format, "")
-}
-
-// RemoteUpstream resolves the upstream for a format using the request context
-// (host-driven) and falls back to explicitBase when the table has nothing (a
-// sub-endpoint the caller knows about). It returns nil when neither exists.
-func (r *Registry) RemoteUpstream(ctx context.Context, format, explicitBase string) *Remote {
-	if m, err := r.remote(ctx, format, ""); err == nil {
-		return m
-	}
-	if explicitBase == "" {
-		return nil
-	}
-	return r.remoteAtBase(explicitBase)
-}
-
 // remoteAtBase is the ctx-free absolute-base constructor.
 func (r *Registry) remoteAtBase(base string) *Remote {
 	factory := sharedFactory
 	return NewRemote(factory, base, proxyPtr(r.Upstreams, "generic"))
 }
 
-// RemoteForSub resolves a sub-endpoint of a format (cargo's index/static,
-// nuget's search/registration, hex's api, ...). The configured sub-endpoint
-// base is authoritative: a sub-endpoint lives on a host of its own, and the
-// host the client happened to dial for the parent request (index.crates.io)
-// must not redirect a static download. A per-repository override still wins,
-// and the format default is the last resort.
-func (r *Registry) RemoteForSub(ctx context.Context, format, sub string) (*Remote, error) {
+// remoteSub resolves a sub-endpoint of a format (cargo's index/static, nuget's
+// search/registration, hex's api, ...). The configured sub-endpoint base is
+// authoritative: a sub-endpoint lives on a host of its own, and the host the
+// client happened to dial for the parent request (index.crates.io) must not
+// redirect a static download. A per-repository override still wins, and the
+// format default is the last resort.
+func (r *Registry) remoteSub(ctx context.Context, format, sub string) (*Remote, error) {
 	u := r.Upstreams
 	if u == nil {
 		return nil, fmt.Errorf("no upstream for %s.%s", format, sub)
@@ -866,11 +807,11 @@ func (r *Registry) RemoteForSub(ctx context.Context, format, sub string) (*Remot
 	return nil, fmt.Errorf("no upstream for %s.%s", format, sub)
 }
 
-// RemoteHost resolves a Remote for an upstream identified by its hostname
+// remoteHost resolves a Remote for an upstream identified by its hostname
 // (the git/ivy mirrors address servers directly). Priority: a per-host
 // repository override, then the upstream table, then any syntactically valid
 // public host (source mirrors treat the requested host as the source).
-func (r *Registry) RemoteHost(format, host string) (*Remote, bool) {
+func (r *Registry) remoteHost(format, host string) (*Remote, bool) {
 	if r.Upstreams == nil {
 		return nil, false
 	}

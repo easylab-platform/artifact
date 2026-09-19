@@ -122,7 +122,7 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 	// packagist's search API lives on packagist.org, not the metadata host
 	// (repo.packagist.org/search.json 404s). Prefer the composer.search
 	// upstream when configured.
-	if remote, err := s.Registry.RemoteForSub(r.Context(), "composer", "search"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "composer", Sub: "search"}); err == nil {
 		p := "/search.json"
 		if raw := r.URL.RawQuery; raw != "" {
 			p += "?" + raw
@@ -156,7 +156,7 @@ func (s *State) p2(w http.ResponseWriter, r *http.Request, rest string) {
 	full := strings.Join(parts[:2], "/")
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "composer", full)
 	if len(versions) == 0 {
-		remote, err := s.Registry.RemoteCtx(r.Context(), "composer")
+		remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "composer"})
 		if err == nil {
 			if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/p2/"+artifactkit.URLencode(full)+".json"); err == nil {
 				artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
@@ -226,7 +226,7 @@ func (s *State) providersAPI(w http.ResponseWriter, r *http.Request, rest string
 	// package does not exist. Locally-published packages are still served by
 	// p2/<name>/<version>.json, which the client queries first.
 	rest = strings.Trim(rest, "/")
-	if remote, err := s.Registry.RemoteCtx(r.Context(), "composer"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "composer"}); err == nil {
 		if body, err := remote.GetBytes(r.Context(), "/providers/"+rest); err == nil {
 			artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
 			return

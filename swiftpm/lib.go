@@ -268,7 +268,7 @@ func (s *State) releases(w http.ResponseWriter, r *http.Request, scope, name, id
 				return
 			}
 		}
-		remote, err := s.Registry.RemoteCtx(r.Context(), "swift")
+		remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "swift"})
 		if err == nil {
 			if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/"+artifactkit.URLencode(scope)+"="+artifactkit.URLencode(name)); err == nil {
 				w.Header().Set("Content-Version", "1")

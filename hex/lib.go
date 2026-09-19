@@ -146,7 +146,7 @@ func (s *State) versions(w http.ResponseWriter, r *http.Request) {
 func (s *State) pkg(w http.ResponseWriter, r *http.Request, name string) {
 	versionList, _ := s.Registry.Meta.ListVersions(r.Context(), "hex", name)
 	if len(versionList) == 0 {
-		if remote, err := s.Registry.RemoteCtx(r.Context(), "hex"); err == nil {
+		if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "hex"}); err == nil {
 			if body, err := remote.GetBytes(r.Context(), "/packages/"+artifactkit.URLencode(name)); err == nil {
 				artifactkit.OctetResponse(w, r, body)
 				return
@@ -213,7 +213,7 @@ func (s *State) tarball(w http.ResponseWriter, r *http.Request, rest string) {
 			}
 		}
 	}
-	if remote, err := s.Registry.RemoteCtx(r.Context(), "hex"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "hex"}); err == nil {
 		if data, err := remote.GetBytes(r.Context(), "/tarballs/"+filename); err == nil {
 			artifactkit.ServeData(w, r, s.Registry, r.Context(), data, "application/octet-stream", filename)
 			return
@@ -325,7 +325,7 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 		})
 		seen[name] = true
 	}
-	if remote, err := s.Registry.RemoteForSub(r.Context(), "hex", "api"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "hex", Sub: "api"}); err == nil {
 		p := "/api/packages"
 		if raw := r.URL.RawQuery; raw != "" {
 			p += "?" + raw
@@ -359,7 +359,7 @@ func (s *State) proxyAll(w http.ResponseWriter, r *http.Request, path string) {
 	if q := r.URL.RawQuery; q != "" {
 		upPath += "?" + q
 	}
-	if remote, err := s.Registry.RemoteCtx(r.Context(), "hex"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "hex"}); err == nil {
 		if body, err := remote.GetBytes(r.Context(), "/"+strings.Trim(upPath, "/")); err == nil {
 			artifactkit.OctetResponse(w, r, body)
 			return

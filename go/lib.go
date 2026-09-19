@@ -230,9 +230,9 @@ func (s *State) sumdb(w http.ResponseWriter, r *http.Request, rest string) {
 	if q := r.URL.RawQuery; q != "" {
 		upURL += "?" + q
 	}
-	remote, _ := s.Registry.RemoteForSub(r.Context(), "go", "sumdb")
+	remote, _ := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "go", Sub: "sumdb"})
 	if remote == nil {
-		remote, _ = s.Registry.RemoteCtx(r.Context(), "go")
+		remote, _ = s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "go"})
 	}
 	body, err := remote.GetBytes(r.Context(), upURL)
 	if err != nil {
@@ -252,7 +252,7 @@ func (s *State) sumdb(w http.ResponseWriter, r *http.Request, rest string) {
 }
 
 func (s *State) registryFetch(ctx context.Context, path string) ([]byte, error) {
-	remote, err := s.Registry.RemoteCtx(ctx, "go")
+	remote, err := s.Registry.Remote(ctx, artifactkit.UpstreamSpec{Format: "go"})
 	if err != nil {
 		return nil, err
 	}

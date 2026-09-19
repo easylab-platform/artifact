@@ -116,8 +116,8 @@ func (s *State) get(w http.ResponseWriter, r *http.Request, host, filePath strin
 			return
 		}
 	}
-	up, ok := s.Registry.RemoteHost("ivy", host)
-	if !ok {
+	up, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "ivy", Host: host})
+	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "unknown upstream host: "+host)
 		return
 	}

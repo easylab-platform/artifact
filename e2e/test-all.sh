@@ -20,14 +20,27 @@
 #   JOBS               protocols exercised concurrently (default 8)
 #   PROTOCOLS          override the matrix (space separated)
 #   SUITES             override which suites run (space separated)
+#   KEEP               "1" keeps the deployments after the run (default: reap)
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NS="${NS:-temp}"
 IMAGE="${IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/artifact:v0.23.0}"
 export EASYSIDECAR_IMAGE="${EASYSIDECAR_IMAGE:-forgejo.develop.10.199.64.20.nip.io/easylab/easysidecar:v0.13.0}"
 export NS IMAGE JOBS="${JOBS:-8}"
+# Keep the deployments after the run for debugging (default: tear them down).
+KEEP="${KEEP:-0}"
 
 SUITES="${SUITES:-${*:-unified perproto lifecycle search}}"
+
+# The suite manifests (deploy-unified/deploy-protocol/lifecycle/search) create
+# Deployments + Services that were previously left behind on every run. Remove
+# them on exit unless KEEP=1, so a regression run does not accumulate resources.
+cleanup() {
+  [ "$KEEP" = "1" ] && return 0
+  kubectl -n "$NS" delete deploy,svc -l app=artifact-e2e --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kubectl -n "$NS" delete deploy,svc -l app=artifact-unified --ignore-not-found --wait=false >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 run_unified() {
   echo "########## unified: ONE service, all protocols concurrent ##########"

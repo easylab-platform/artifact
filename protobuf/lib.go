@@ -92,7 +92,7 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		artifactkit.Error(w, http.StatusNotFound, "protobuf upstream disabled (air-gap)")
 		return
 	}
-	up := s.Registry.RemoteAt(strings.TrimSuffix(base, "/") + apiPath)
+	up, _ := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Base: strings.TrimSuffix(base, "/") + apiPath})
 	if s.BSRToken != "" {
 		up = up.WithHeader("Authorization", "Bearer "+s.BSRToken)
 	}

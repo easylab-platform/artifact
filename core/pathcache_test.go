@@ -171,7 +171,7 @@ func TestFlightKindsDoNotCollide(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		r := reg.RemoteAt(srv.URL)
+		r, _ := reg.Remote(ctx, artifactkit.UpstreamSpec{Base: srv.URL})
 		r.GetBytes(ctx, "/same")
 	}()
 	wg.Wait() // a collision would panic the test

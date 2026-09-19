@@ -141,7 +141,7 @@ func (s *State) pkgMetadata(w http.ResponseWriter, r *http.Request, name string)
 	// list (a local cache fill must not hide versions we have not seen yet).
 	upstream := map[string]map[string]any{}
 	var upstreamOrder []string
-	if remote, err := s.Registry.RemoteCtx(r.Context(), "pub"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "pub"}); err == nil {
 		if body, err := remote.GetCached(r.Context(), artifactkit.SharedIndexCache(), "/api/packages/"+artifactkit.URLencode(name)); err == nil {
 			var doc struct {
 				Versions []map[string]any `json:"versions"`

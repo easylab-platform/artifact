@@ -161,7 +161,7 @@ func (s *State) simpleProject(w http.ResponseWriter, r *http.Request, name strin
 // document was served. When the upstream is unreachable, returns false so the
 // caller falls back to local-only.
 func (s *State) mergeSimpleProject(w http.ResponseWriter, r *http.Request, name string, versions []string) bool {
-	remote, err := s.Registry.RemoteCtx(r.Context(), "pypi")
+	remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "pypi"})
 	if err != nil {
 		return false
 	}
@@ -326,7 +326,7 @@ func (s *State) simpleFile(w http.ResponseWriter, r *http.Request, project, file
 		return
 	}
 	pagePath := "/simple/" + artifactkit.URLencode(project) + "/"
-	remote := s.Registry.RemoteAt(base)
+	remote, _ := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Base: base})
 	html, err := remote.GetBytes(r.Context(), pagePath)
 	if err != nil {
 		artifactkit.Error(w, http.StatusNotFound, "not found")
@@ -449,7 +449,7 @@ func (s *State) metadataFile(w http.ResponseWriter, r *http.Request, project, fi
 	}
 	if base != "" {
 		pagePath := "/simple/" + artifactkit.URLencode(project) + "/"
-		remote := s.Registry.RemoteAt(base)
+		remote, _ := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Base: base})
 		page, err := remote.GetBytes(r.Context(), pagePath)
 		if err == nil {
 			pageURL := base + pagePath

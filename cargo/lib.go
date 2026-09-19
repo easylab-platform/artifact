@@ -119,7 +119,7 @@ func (s *State) search(w http.ResponseWriter, r *http.Request) {
 		seen[name] = true
 	}
 	// Merge crates.io's search so uncached public crates are discoverable.
-	if remote, err := s.Registry.RemoteCtx(r.Context(), "cargo"); err == nil {
+	if remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "cargo"}); err == nil {
 		p := "/api/v1/crates"
 		if raw := r.URL.RawQuery; raw != "" {
 			p += "?" + raw
@@ -147,7 +147,7 @@ func (s *State) apiFallback(w http.ResponseWriter, r *http.Request, name string)
 	name = strings.Trim(name, "/")
 	versions, _ := s.Registry.Meta.ListVersions(r.Context(), "cargo", name)
 	if len(versions) == 0 {
-		remote, err := s.Registry.RemoteCtx(r.Context(), "cargo")
+		remote, err := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Format: "cargo"})
 		if err == nil {
 			if body, err := remote.GetBytes(r.Context(), "/api/v1/crates/"+artifactkit.URLencode(name)); err == nil {
 				artifactkit.JSON(w, http.StatusOK, json.RawMessage(body))
@@ -409,7 +409,7 @@ func (s *State) saveMeta(ctx context.Context, name string, m meta) {
 }
 
 func (s *State) registrySubRemote(ctx context.Context, format, sub string) (*artifactkit.Remote, error) {
-	return s.Registry.RemoteForSub(ctx, format, sub)
+	return s.Registry.Remote(ctx, artifactkit.UpstreamSpec{Format: format, Sub: sub})
 }
 
 // parsePublishBody parses cargo's binary framing:

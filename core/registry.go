@@ -101,13 +101,6 @@ func CanRead(ctx context.Context, o Ownership, format, namespace, name string, t
 	return o.CanRead(ctx, format, RepoKey(namespace, name), tenantID)
 }
 
-// Upstream describes a remote base URL for a protocol (or a sub-endpoint).
-type Upstream struct {
-	Base    string // "" means the format's configured/default upstream
-	Proxy   string // "" = direct, otherwise a proxy URL
-	Default *string
-}
-
 // Upstreams resolves the effective remote for a format / sub-endpoint against
 // per-key overrides and per-key proxy policy, honoring an air-gap flag.
 //

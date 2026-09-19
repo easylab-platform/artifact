@@ -174,7 +174,7 @@ func (s *State) lfsBatch(w http.ResponseWriter, r *http.Request, host, repoPath 
 	if !ok {
 		base = "https://" + host
 	}
-	remote := s.Registry.RemoteAt(base)
+	remote, _ := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Base: base})
 	resp, err := remote.Do(r.Context(), http.MethodPost,
 		"/"+strings.Trim(repoPath, "/")+"/info/lfs/objects/batch",
 		bytes.NewReader(body), r.Header.Get("Content-Type"), r.Header.Get("Accept"))
@@ -242,7 +242,7 @@ func (s *State) upstreamLFSHref(ctx context.Context, host, repoPath, oid string,
 	if !ok {
 		base = "https://" + host
 	}
-	remote := s.Registry.RemoteAt(base)
+	remote, _ := s.Registry.Remote(ctx, artifactkit.UpstreamSpec{Base: base})
 	reqBody := `{"operation":"download","transfers":["basic"],"objects":[{"oid":"` + oid + `","size":` + strconv.FormatInt(size, 10) + `}]}`
 	resp, err := remote.Do(ctx, http.MethodPost,
 		"/"+strings.Trim(repoPath, "/")+"/info/lfs/objects/batch",
@@ -534,7 +534,7 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, host, path string)
 	if !ok {
 		base = "https://" + host
 	}
-	remote := s.Registry.RemoteAt(base)
+	remote, _ := s.Registry.Remote(r.Context(), artifactkit.UpstreamSpec{Base: base})
 	resp, err := remote.Do(r.Context(), r.Method, "/"+strings.TrimPrefix(path, "/"), bytes.NewReader(body), r.Header.Get("Content-Type"), r.Header.Get("Accept"))
 	if err != nil {
 		artifactkit.Error(w, http.StatusBadGateway, "upstream: "+err.Error())
