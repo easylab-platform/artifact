@@ -86,32 +86,17 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"tree": s.Tree})
 		return
 	}
-	// Local cache first (streamed, with HEAD/Range semantics).
-	if art, err := s.Registry.Meta.Get(r.Context(), s.Tree, "tree", path); err == nil && len(art.Blobs) > 0 {
-		ct := art.MediaType
-		if ct == "" {
-			ct = mediaTypeOf(path)
-		}
-		if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, ct, pathBase(path)) {
-			return
-		}
-	}
-	// Pull-through: the host-driven origin (when the request arrived through
-	// the egress proxy) or the table default. The body is streamed into the
-	// CAS (these trees carry 100MB+ index files) and served FROM the store, so
-	// a client's Range request is satisfied locally after the first fetch.
-	digest, size, ok := s.Registry.FetchToBlob(r.Context(), s.Tree, "/"+path)
+	// Cache-first with shared freshness handling (single-flight, TTL +
+	// conditional revalidation). The body streams into the CAS, so a client's
+	// Range request is satisfied locally after the first fetch; these trees
+	// carry 100MB+ index files.
+	ct := mediaTypeOf(path)
+	digest, _, _, ok := s.Registry.FetchCachedPath(r.Context(), s.Tree, "tree", path, "/"+path, "",
+		artifactkit.PathCachePolicy{MediaType: ct, BlobName: pathBase(path)})
 	if !ok {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	ct := mediaTypeOf(path)
-	artifactkit.LogMetaErr(s.Tree+" cache", s.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
-		Format: s.Tree, Repository: "tree", Version: path,
-		MediaType: ct, Digest: digest,
-		Blobs:  []artifactkit.Descriptor{{Digest: digest, Size: size, Name: pathBase(path)}},
-		Source: "pull",
-	}))
 	if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), digest, ct, pathBase(path)) {
 		return
 	}

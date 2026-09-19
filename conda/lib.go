@@ -16,7 +16,6 @@
 package conda
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
@@ -98,21 +97,17 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, path, channel, res
 	}
 
 	repo := channel + "/" + subdirOf(rest)
-	if art, err := s.Registry.Meta.Get(r.Context(), "conda", repo, path); err == nil && len(art.Blobs) > 0 {
-		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(path)) {
-			return
-		}
-	}
-	fetched, err := s.Registry.FetchFor(r.Context(), "conda", channel, base, "/"+path)
-	if err != nil {
+	ct := mediaTypeOf(path)
+	digest, _, _, ok := s.Registry.FetchCachedPath(r.Context(), "conda", repo, path, "/"+path, base,
+		artifactkit.PathCachePolicy{MediaType: ct})
+	if !ok {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if digest := storeCache(s, r.Context(), repo, path, fetched.Data); digest != "" &&
-		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(path)) {
+	if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, ct) {
 		return
 	}
-	artifactkit.OctetResponse(w, r, fetched.Data)
+	artifactkit.Error(w, http.StatusBadGateway, "cache error")
 }
 
 // upstreamFor resolves the upstream base for a channel key: a per-channel
@@ -137,11 +132,6 @@ func subdirOf(rest string) string {
 		return rest[:i]
 	}
 	return rest
-}
-
-// storeCache persists a fetched path (best-effort).
-func storeCache(s *State, ctx context.Context, repo, name string, data []byte) string {
-	return s.Registry.StorePathBlob(ctx, "conda", repo, name, name, mediaTypeOf(name), data)
 }
 
 func mediaTypeOf(name string) string {

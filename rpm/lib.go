@@ -18,7 +18,6 @@
 package rpm
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
@@ -103,22 +102,17 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, repo, rest string)
 		full = repo + "/" + rest
 	}
 
-	// Local cache first (streamed with Range/HEAD semantics).
-	if art, err := s.Registry.Meta.Get(r.Context(), "rpm", repo, full); err == nil && len(art.Blobs) > 0 {
-		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(rest)) {
-			return
-		}
-	}
-	fetched, err := s.Registry.FetchFor(r.Context(), "rpm", repo, base, "/"+full)
-	if err != nil {
+	ct := mediaTypeOf(rest)
+	digest, _, _, ok := s.Registry.FetchCachedPath(r.Context(), "rpm", repo, full, "/"+full, base,
+		artifactkit.PathCachePolicy{MediaType: ct, BlobName: rest})
+	if !ok {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if digest := storeCache(s, r.Context(), repo, full, fetched.Data); digest != "" &&
-		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(rest)) {
+	if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, ct) {
 		return
 	}
-	artifactkit.OctetResponse(w, r, fetched.Data)
+	artifactkit.Error(w, http.StatusBadGateway, "cache error")
 }
 
 // upstreamFor resolves the upstream base for a repository key: an explicit
@@ -131,11 +125,6 @@ func (s *State) upstreamFor(repo string) string {
 		}
 	}
 	return s.Registry.Upstreams.Repo("rpm", repo)
-}
-
-// storeCache persists a fetched path into the CAS + index (best-effort).
-func storeCache(s *State, ctx context.Context, repo, name string, data []byte) string {
-	return s.Registry.StorePathBlob(ctx, "rpm", repo, name, name, mediaTypeOf(name), data)
 }
 
 // mediaTypeOf maps well-known yum repository files to media types.

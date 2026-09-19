@@ -9,11 +9,42 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/easylab-platform/artifact/targets"
+	"golang.org/x/sync/singleflight"
 )
+
+// fetchGroup collapses concurrent identical upstream fetches process-wide: N
+// simultaneous misses for one URL trigger a single upstream request, so a burst
+// of clients (or a slow fetch) never downloads the same object N times. The key
+// includes a digest of the request headers, so two callers with different
+// credentials (a passthrough target) never share a result.
+var fetchGroup singleflight.Group
+
+// flightKey identifies one upstream fetch: the absolute URL plus a digest of the
+// resolved request headers (Authorization in practice).
+func flightKey(remote *Remote, path string) string {
+	url := remote.URL(path)
+	if len(remote.headers) == 0 {
+		return url
+	}
+	keys := make([]string, 0, len(remote.headers))
+	for k := range remote.headers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := sha256.New()
+	for _, k := range keys {
+		_, _ = io.WriteString(h, k)
+		_, _ = io.WriteString(h, "\x00")
+		_, _ = io.WriteString(h, remote.headers[k])
+		_, _ = io.WriteString(h, "\x00")
+	}
+	return url + "\x00" + hex.EncodeToString(h.Sum(nil))
+}
 
 // UserAgent is sent on every upstream request. Registries rate-limit generic
 // user agents (Maven Central 429s the default Go UA), so a stable bespoke one
@@ -291,7 +322,20 @@ func (r *Registry) FetchPath(ctx context.Context, format, path string) (Fetched,
 }
 
 // fetchWith issues one GET against a resolved upstream and caches the bytes.
+// Concurrent identical fetches (same URL and auth headers) are collapsed into
+// one upstream request by a process-wide single-flight group.
 func (r *Registry) fetchWith(ctx context.Context, remote *Remote, path string) (Fetched, error) {
+	v, err, _ := fetchGroup.Do(flightKey(remote, path), func() (any, error) {
+		return r.fetchWithDirect(ctx, remote, path)
+	})
+	if err != nil {
+		return Fetched{}, err
+	}
+	return v.(Fetched), nil
+}
+
+// fetchWithDirect is fetchWith without the single-flight wrapper.
+func (r *Registry) fetchWithDirect(ctx context.Context, remote *Remote, path string) (Fetched, error) {
 	resp, err := remote.getStable(ctx, path)
 	if err != nil {
 		return Fetched{}, fmt.Errorf("http: %w", err)
@@ -737,11 +781,17 @@ func (r *Registry) FetchPathFollow(ctx context.Context, format, path string) (Fe
 	if err != nil {
 		return Fetched{}, err
 	}
-	data, err := remote.GetBytesFollow(ctx, path)
+	v, err, _ := fetchGroup.Do(flightKey(remote, path), func() (any, error) {
+		data, err := remote.GetBytesFollow(ctx, path)
+		if err != nil {
+			return Fetched{}, err
+		}
+		return r.finishFetch(ctx, data)
+	})
 	if err != nil {
 		return Fetched{}, err
 	}
-	return r.finishFetch(ctx, data)
+	return v.(Fetched), nil
 }
 
 // FetchToBlob streams a remote object into the CAS and returns its digest and
@@ -759,11 +809,29 @@ func (r *Registry) FetchToBlob(ctx context.Context, format, path string) (string
 	if err != nil {
 		return "", 0, false
 	}
+	type blobResult struct {
+		digest string
+		size   int64
+		ok     bool
+	}
+	v, _, _ := fetchGroup.Do(flightKey(remote, path), func() (any, error) {
+		digest, size, ok := r.fetchToBlobDirect(ctx, remote, path)
+		return blobResult{digest, size, ok}, nil
+	})
+	res := v.(blobResult)
+	return res.digest, res.size, res.ok
+}
+
+// fetchToBlobDirect is FetchToBlob without the single-flight wrapper.
+func (r *Registry) fetchToBlobDirect(ctx context.Context, remote *Remote, path string) (string, int64, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, remote.URL(path), nil)
 	if err != nil {
 		return "", 0, false
 	}
 	req.Header.Set("User-Agent", UserAgent)
+	for k, v := range remote.headers {
+		req.Header.Set(k, v)
+	}
 	client := &http.Client{Transport: remote.client.Transport}
 	resp, err := client.Do(req)
 	if err != nil {

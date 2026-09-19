@@ -15,7 +15,6 @@
 package nix
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
@@ -55,27 +54,18 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Local cache first (single global repo "cache"), streamed.
-	if art, err := s.Registry.Meta.Get(r.Context(), "nix", "cache", path); err == nil && len(art.Blobs) > 0 {
-		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(path)) {
-			return
-		}
-	}
-	base := s.Registry.Upstreams.Get("nix")
-	if base == "" {
-		artifactkit.Error(w, http.StatusNotFound, "nix upstream disabled (air-gap)")
-		return
-	}
-	fetched, err := s.Registry.Fetch(r.Context(), "nix", base, "/"+path)
-	if err != nil {
+	// Cache-first with shared freshness (single global repo "cache").
+	ct := mediaTypeOf(path)
+	digest, _, _, ok := s.Registry.FetchCachedPath(r.Context(), "nix", "cache", path, "/"+path, "",
+		artifactkit.PathCachePolicy{MediaType: ct, BlobName: path})
+	if !ok {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if digest := storeCache(s, r.Context(), path, fetched.Data, mediaTypeOf(path)); digest != "" &&
-		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(path)) {
+	if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), digest, ct, path) {
 		return
 	}
-	artifactkit.OctetResponse(w, r, fetched.Data)
+	artifactkit.Error(w, http.StatusBadGateway, "cache error")
 }
 
 // defaultNixCacheInfo is served at the cache root (mirrors cache.nixos.org).
@@ -115,11 +105,6 @@ func isHex32(s string) bool {
 		}
 	}
 	return true
-}
-
-// storeCache persists a fetched path (best-effort).
-func storeCache(s *State, ctx context.Context, name string, data []byte, mediaType string) string {
-	return s.Registry.StorePathBlob(ctx, "nix", "cache", name, name, mediaType, data)
 }
 
 func mediaTypeOf(path string) string {

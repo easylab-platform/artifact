@@ -17,7 +17,6 @@ package apk
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -89,32 +88,22 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // fetch serves a repository path (index or package) through the local CAS
 // with upstream pull-through. Bytes are stored by digest so repeated fetches
-// hit the cache and the APKINDEX signature survives verbatim.
+// hit the cache and the APKINDEX signature survives verbatim. Freshness
+// (single-flight, TTL, conditional revalidation) is shared with the other
+// path-tree protocols via FetchCachedPath.
 func (s *State) fetch(w http.ResponseWriter, r *http.Request, repoPath string) {
-	// Local cache first: the (repo, path) pair is stored as an artifact
-	// version whose blobs[0] holds the bytes. ServeBlobAt streams with
-	// Range/HEAD semantics instead of buffering.
 	repo, name := splitRepoPath(repoPath)
-	if art, err := s.Registry.Meta.Get(r.Context(), "apk", repo, name); err == nil && len(art.Blobs) > 0 {
-		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(name)) {
-			return
-		}
-	}
-	base := s.Registry.Upstreams.Repo("apk", repo)
-	if base == "" {
-		artifactkit.Error(w, http.StatusNotFound, "apk upstream disabled (air-gap)")
-		return
-	}
-	fetched, err := s.Registry.Fetch(r.Context(), "apk", base, "/"+repoPath)
-	if err != nil {
+	ct := mediaTypeOf(name)
+	digest, _, _, ok := s.Registry.FetchCachedPath(r.Context(), "apk", repo, name, "/"+repoPath, "",
+		artifactkit.PathCachePolicy{MediaType: ct, BlobName: name})
+	if !ok {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	digest := storeCache(s, r.Context(), repo, name, fetched.Data)
-	if digest != "" && artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(name)) {
+	if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, ct) {
 		return
 	}
-	artifactkit.OctetResponse(w, r, fetched.Data)
+	artifactkit.Error(w, http.StatusBadGateway, "cache error")
 }
 
 // splitRepoPath splits "v3.21/main/x86_64/APKINDEX.tar.gz" into
@@ -127,13 +116,6 @@ func splitRepoPath(repoPath string) (repo, name string) {
 		return "main", repoPath
 	}
 	return repoPath[:i], repoPath[i+1:]
-}
-
-// storeCache persists a fetched path into the CAS + index. Index files get
-// a per-path version key; packages likewise. Best-effort: cache failures do
-// not break the response.
-func storeCache(s *State, ctx context.Context, repo, name string, data []byte) string {
-	return s.Registry.StorePathBlob(ctx, "apk", repo, name, name, mediaTypeOf(name), data)
 }
 
 // mediaTypeOf maps well-known apk repository files to media types.

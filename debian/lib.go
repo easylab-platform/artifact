@@ -18,7 +18,6 @@
 package debian
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
@@ -97,22 +96,17 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, archive, rest stri
 	// The client's source keeps the archive prefix in the URL
 	// (deb.debian.org/debian/dists/...), so fetch and cache the full path.
 	repo := archive + "/" + suiteOf(rest)
-	// Local cache first (streamed with Range/HEAD semantics).
-	if art, err := s.Registry.Meta.Get(r.Context(), "debian", repo, path); err == nil && len(art.Blobs) > 0 {
-		if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), art.Blobs[0].Digest, mediaTypeOf(rest)) {
-			return
-		}
-	}
-	fetched, err := s.Registry.FetchFor(r.Context(), "debian", archive, base, "/"+path)
-	if err != nil {
+	ct := mediaTypeOf(rest)
+	digest, _, _, ok := s.Registry.FetchCachedPath(r.Context(), "debian", repo, path, "/"+path, base,
+		artifactkit.PathCachePolicy{MediaType: ct, BlobName: path})
+	if !ok {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if digest := storeCache(s, r.Context(), repo, path, fetched.Data); digest != "" &&
-		artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, mediaTypeOf(rest)) {
+	if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, ct) {
 		return
 	}
-	artifactkit.OctetResponse(w, r, fetched.Data)
+	artifactkit.Error(w, http.StatusBadGateway, "cache error")
 }
 
 // upstreamFor picks the mirror host for an archive key + path. The archive
@@ -159,11 +153,6 @@ func suiteOf(rest string) string {
 		return parts[1]
 	}
 	return "pool"
-}
-
-// storeCache persists a fetched path into the CAS + index (best-effort).
-func storeCache(s *State, ctx context.Context, repo, name string, data []byte) string {
-	return s.Registry.StorePathBlob(ctx, "debian", repo, name, name, mediaTypeOf(name), data)
 }
 
 // mediaTypeOf maps well-known apt repository files to media types.
