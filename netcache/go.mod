@@ -3,8 +3,8 @@ module github.com/easylab-platform/artifact/netcache
 go 1.26.5
 
 require (
-	github.com/easylab-platform/artifact/core v0.0.0
-	github.com/easylab-platform/artifact/targets v0.1.0
+	github.com/easylab-platform/artifact/core v0.14.0
+	github.com/easylab-platform/artifact/targets v0.1.2
 )
 
 require (

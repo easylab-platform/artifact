@@ -31,13 +31,13 @@ require (
 	github.com/easylab-platform/artifact/rubygems v0.0.0
 	github.com/easylab-platform/artifact/swiftpm v0.0.0
 	github.com/easylab-platform/artifact/system v0.0.0
-	github.com/easylab-platform/artifact/targets v0.1.0
+	github.com/easylab-platform/artifact/targets v0.1.2
 )
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/easylab-platform/artifact/netcache v0.0.0
+	github.com/easylab-platform/artifact/netcache v0.1.0
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
 	github.com/glebarez/sqlite v1.11.0 // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
