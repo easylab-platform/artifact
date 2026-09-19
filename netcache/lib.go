@@ -66,7 +66,13 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.Registry.FetchURIToBlob(r.Context(), rawURL, opts)
 	if err != nil {
-		artifactkit.Error(w, http.StatusBadGateway, "upstream: "+err.Error())
+		// A remembered negative or an upstream 4xx is the origin's verdict, so
+		// surface that status instead of masking it as a gateway error.
+		status := http.StatusBadGateway
+		if us, ok := err.(*artifactkit.UpstreamStatusError); ok && us.Status >= 400 && us.Status < 500 {
+			status = us.Status
+		}
+		artifactkit.Error(w, status, "upstream: "+err.Error())
 		return
 	}
 	// Serve from the CAS, replaying the stored Content-Encoding/ETag/

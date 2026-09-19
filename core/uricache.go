@@ -53,6 +53,13 @@ const DefaultURICacheTTL = 5 * time.Minute
 // hammer the upstream for a missing object.
 const DefaultNegativeTTL = 60 * time.Second
 
+// NegativeMediaType marks a remembered netcache negative (404/410) entry: it
+// holds no blob and exists only to absorb repeated misses until it expires. It
+// is stored in the MediaType column and is the one media type that is read
+// BEFORE the digest/blob emptiness checks, because a negative entry has
+// neither.
+const NegativeMediaType = "application/x-netcache-miss"
+
 func sharedURICache() *uriCache {
 	uriCacheOnce.Do(func() {
 		sharedURI = &uriCache{ttl: DefaultURICacheTTL, negTTL: DefaultNegativeTTL}
@@ -176,9 +183,13 @@ func (r *Registry) FetchURIToBlob(ctx context.Context, rawURL string, opts URIOp
 	uc := sharedURICache()
 
 	if !opts.NoStore {
-		// Fast path: a fresh cached entry.
+		// Fast path: a fresh cached entry, or a remembered negative so a
+		// scanner does not hammer the origin for a missing object.
 		if res, ok := r.cachedURI(ctx, key); ok {
 			return res, nil
+		}
+		if r.cachedNegative(ctx, key) {
+			return URICacheResult{}, &UpstreamStatusError{Path: key, Status: http.StatusNotFound}
 		}
 	}
 
@@ -187,6 +198,9 @@ func (r *Registry) FetchURIToBlob(ctx context.Context, rawURL string, opts URIOp
 			// Re-check inside the single-flight: a peer may have just stored it.
 			if res, ok := r.cachedURI(ctx, key); ok {
 				return res, nil
+			}
+			if r.cachedNegative(ctx, key) {
+				return URICacheResult{}, &UpstreamStatusError{Path: key, Status: http.StatusNotFound}
 			}
 		}
 		return r.fetchURI(ctx, key, rawURL, opts)
@@ -198,13 +212,15 @@ func (r *Registry) FetchURIToBlob(ctx context.Context, rawURL string, opts URIOp
 }
 
 // cachedURI returns a fresh cached entry for key, or false. Immutable entries
-// never expire; mutable ones are trusted for the cache TTL.
+// never expire; mutable ones are trusted for the cache TTL. A negative entry
+// is NOT a usable entry and always reports false (the caller consults
+// cachedNegative separately).
 func (r *Registry) cachedURI(ctx context.Context, key string) (URICacheResult, bool) {
 	art, err := r.Meta.Get(ctx, "netcache", "uri", key)
 	if err != nil || art.Digest == "" || len(art.Blobs) == 0 {
 		return URICacheResult{}, false
 	}
-	if art.MediaType == "application/x-netcache-miss" {
+	if art.MediaType == NegativeMediaType {
 		return URICacheResult{}, false
 	}
 	if !isFresh(art, time.Now()) {
@@ -217,6 +233,18 @@ func (r *Registry) cachedURI(ctx context.Context, key string) (URICacheResult, b
 		Immutable: art.CacheControl == "immutable",
 		Status:    http.StatusOK,
 	}, true
+}
+
+// cachedNegative reports whether a fresh negative (404/410) entry is remembered
+// for key. It is checked separately from cachedURI because a negative entry has
+// no digest or blobs, so cachedURI would reject it before ever inspecting the
+// marker. A stale entry reports false, so the caller re-probes the origin.
+func (r *Registry) cachedNegative(ctx context.Context, key string) bool {
+	art, err := r.Meta.Get(ctx, "netcache", "uri", key)
+	if err != nil || art.MediaType != NegativeMediaType {
+		return false
+	}
+	return isFresh(art, time.Now())
 }
 
 // fetchURI performs the upstream GET and stores the result. When a stale entry

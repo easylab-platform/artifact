@@ -36,6 +36,12 @@ type OciState struct {
 	UploadDir string
 }
 
+// defaultManifestTTL is how long a pulled manifest is trusted when it was
+// addressed by TAG. Tags move (latest, stable, a re-pushed version), so a
+// cached tag row expires and is re-resolved; digest references name immutable
+// content and are cached permanently.
+const defaultManifestTTL = 5 * time.Minute
+
 // Adapter is the OCI protocol handler. It implements http.Handler, so it can
 // be mounted at any prefix (usually "/v2").
 type Adapter struct {
@@ -368,8 +374,14 @@ func (a *Adapter) manifest(w http.ResponseWriter, r *http.Request, name, ref str
 
 func (a *Adapter) getManifest(w http.ResponseWriter, r *http.Request, name, ref string, body bool) {
 	registry := artifactkit.RegistryHostFrom(r.Context())
-	art, err := a.state.Registry.Meta.Get(r.Context(), "oci", name, ref)
-	if err == nil && len(art.Proprietary) > 0 {
+	// A manifest addressed by digest names immutable content: cache it forever.
+	// A tag may move, so a cached tag row expires and is re-resolved (the
+	// origin's mutable-tag semantics; a PUSHed manifest is stored immutable and
+	// never expires). Without this, `docker pull img:latest` would serve the
+	// first-seen manifest indefinitely.
+	byDigest := strings.Contains(ref, ":")
+	if art, err := a.state.Registry.Meta.Get(r.Context(), "oci", name, ref); err == nil &&
+		len(art.Proprietary) > 0 && (byDigest || artifactkit.Fresh(art, time.Now())) {
 		dgst := art.Digest
 		if dgst == "" {
 			dgst = "sha256:" + hexDigest(art.Proprietary)
@@ -383,15 +395,21 @@ func (a *Adapter) getManifest(w http.ResponseWriter, r *http.Request, name, ref 
 		if mbody, ct, err := up.GetManifest(name, ref); err == nil {
 			dgst := "sha256:" + hexDigest(mbody)
 			blobs := extractBlobs(mbody)
-			// Store both the reference and the digest as versions.
-			artifactkit.LogMetaErr("oci pull cache", a.state.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
-				Format: "oci", Repository: name, Version: ref,
-				MediaType: ct, Proprietary: mbody, Digest: dgst, Blobs: blobs, Source: "pull",
-			}))
-			artifactkit.LogMetaErr("oci pull cache", a.state.Registry.Meta.Put(r.Context(), artifactkit.Artifact{
+			// Store the digest row as immutable (it can never change) and the
+			// tag row with a TTL (the tag may be re-pushed upstream).
+			dgRow := artifactkit.Artifact{
 				Format: "oci", Repository: name, Version: dgst,
-				MediaType: ct, Proprietary: mbody, Digest: dgst, Blobs: blobs, Source: "pull",
-			}))
+				MediaType: ct, Proprietary: mbody, Digest: dgst, Blobs: blobs,
+				Source: "pull", CacheControl: artifactkit.ImmutableTag,
+			}
+			artifactkit.LogMetaErr("oci pull cache", a.state.Registry.Meta.Put(r.Context(), dgRow))
+			if !byDigest {
+				tagRow := dgRow
+				tagRow.Version = ref
+				tagRow.CacheControl = ""
+				tagRow.ExpiresAt = time.Now().Add(defaultManifestTTL)
+				artifactkit.LogMetaErr("oci pull cache", a.state.Registry.Meta.Put(r.Context(), tagRow))
+			}
 			writeManifest(w, mbody, ct, dgst, body)
 			return
 		}

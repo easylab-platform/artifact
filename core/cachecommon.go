@@ -79,6 +79,15 @@ func isFresh(art Artifact, now time.Time) bool {
 	return art.CacheControl == "immutable" || art.ExpiresAt.IsZero() || now.Before(art.ExpiresAt)
 }
 
+// Fresh reports whether a cached entry may be served without revalidation. It
+// is the exported form of isFresh for adapters (OCI) that hold their own cache
+// rows in the shared IndexStore.
+func Fresh(art Artifact, now time.Time) bool { return isFresh(art, now) }
+
+// ImmutableTag marks an entry whose key looks up content that can never change
+// (a content-addressed digest). Immutable entries never expire.
+const ImmutableTag = "immutable"
+
 // headerFromArtifact reconstructs the replay headers from a cached entry.
 func headerFromArtifact(art Artifact) http.Header {
 	h := http.Header{}

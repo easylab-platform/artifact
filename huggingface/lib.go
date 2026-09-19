@@ -82,9 +82,10 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Split(path, "/")
-	// Repo-type prefix is optional (models have none; datasets/spaces carry
-	// it): everything before /resolve|raw/ is the repo id ("{ns}/{name}" or a
-	// bare name for canonical models/datasets).
+	// The repo-type prefix is optional but must be recognized: models have no
+	// prefix, datasets/spaces carry one. An unrecognized leading segment is a
+	// namespace, NOT a repo type; the remaining repo id is then "{ns}/{name}"
+	// (or a bare name). Anything deeper is not a Hub path and 404s.
 	repoType := "models"
 	if repoTypes[parts[0]] {
 		repoType = parts[0]
@@ -97,7 +98,11 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	if marker < 1 {
+	// The repo id before /resolve|raw/ is a bare name (1 segment) or
+	// "{namespace}/{name}" (2 segments). A deeper path is not a Hub repo path
+	// (an unrecognized leading segment is a namespace, not a repo type), so
+	// "bogus/ns/repo/resolve/..." is a 404, not a model "bogus/ns/repo".
+	if marker < 1 || marker > 2 {
 		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}

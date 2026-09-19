@@ -191,6 +191,41 @@ func TestRevalidation304(t *testing.T) {
 	_ = meta
 }
 
+// TestNegativeCacheAbsorbsMiss verifies a 404 from the origin is remembered
+// briefly: repeated requests for a missing object do not re-hit the upstream,
+// and the client still receives the origin's 404 (not a masked 502).
+func TestNegativeCacheAbsorbsMiss(t *testing.T) {
+	var hits int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&hits, 1)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(upstream.Close)
+
+	s, meta := newState(t)
+	declare(s, "assets.example.com", upstream.URL)
+	reqPath := "/artifacts/netcache/assets.example.com/missing.bin"
+
+	for i := 0; i < 3; i++ {
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, reqPath, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("request %d: code = %d, want 404 (body=%s)", i, rec.Code, rec.Body.String())
+		}
+	}
+	if got := atomic.LoadInt64(&hits); got != 1 {
+		t.Fatalf("upstream hits = %d, want 1 (negative entry must absorb the rest)", got)
+	}
+	// The negative entry carries the marker the reader checks for.
+	art, err := meta.Get(context.Background(), "netcache", "uri", "https://assets.example.com/missing.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.MediaType != artifactkit.NegativeMediaType {
+		t.Fatalf("media type = %q, want %q", art.MediaType, artifactkit.NegativeMediaType)
+	}
+}
+
 // TestTargetBasicAuth verifies a declared target's basic-auth policy is applied
 // to the upstream request, and that such a request is not shared in cache
 // (the upstream response may be private to the credential).
