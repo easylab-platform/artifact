@@ -51,9 +51,17 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := artifactkit.URIOptions{Headers: passthroughHeaders(r), KeyURL: clientURL(r)}
-	// A request carrying a per-client credential must never be shared: the
-	// response may be private to that credential. Proxy it without storing.
-	if r.Header.Get("Authorization") != "" || r.Header.Get("Proxy-Authorization") != "" {
+	// A declared target may carry its own upstream credential (basic/bearer),
+	// used when the client did not supply one; a per-client credential routes
+	// the request but is never shared.
+	declaredAuth := r.Header.Get("Authorization")
+	if t, ok := s.Registry.Upstreams.TargetFor("netcache", hostOf(clientURL(r))); ok {
+		if h, err := artifactkit.TargetAuthHeader(t.Auth, declaredAuth); err == nil && h != "" {
+			opts.Headers.Set("Authorization", h)
+			declaredAuth = h
+		}
+	}
+	if declaredAuth != "" {
 		opts.NoStore = true
 	}
 	res, err := s.Registry.FetchURIToBlob(r.Context(), rawURL, opts)
@@ -118,6 +126,19 @@ func (s *State) targetURL(r *http.Request) (string, bool) {
 		scheme = "https"
 	}
 	return joinURL(scheme+"://"+host, rest, r.URL.RawQuery), true
+}
+
+// hostOf extracts the host from an absolute URL ("" when unparseable).
+func hostOf(rawURL string) string {
+	i := strings.Index(rawURL, "://")
+	if i < 0 {
+		return ""
+	}
+	rest := rawURL[i+3:]
+	if j := strings.IndexAny(rest, "/?#"); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
 }
 
 // joinURL builds base + "/" + rest + "?" + query without doubling slashes.

@@ -146,6 +146,8 @@ func TestMirrorOrigin(t *testing.T) {
 		t.Errorf("untargeted origin = %q, want empty", got)
 	}
 }
+
+// TestScopedKeyIsolation locks the storage-key shape for a target: a shared
 // (mirror) target uses the protocol's namespace, an isolated (user-declared)
 // target wraps it in a "t:<id>/" prefix so it cannot shadow public content.
 func TestScopedKeyIsolation(t *testing.T) {

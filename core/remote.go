@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/easylab-platform/artifact/targets"
 )
 
 // UserAgent is sent on every upstream request. Registries rate-limit generic
@@ -391,6 +393,39 @@ func (r *Registry) StoreAndHash(ctx context.Context, data []byte) (Stored, error
 	return Stored{Hashes: h, Size: int64(len(data)), Digest: digest}, nil
 }
 
+// StorePathBlob is the shared "cache one fetched path" flow for the path-tree
+// protocols (apk/debian/rpm/conda/nix/...): store the bytes in the CAS by
+// digest, then index them under (format, repository, version). It is
+// best-effort: a cache write failure never fails the response, so the caller
+// keeps serving the bytes it already has.
+//
+// blobName is recorded on the descriptor (adapters differ: some use the
+// basename, some the full relative path). Empty falls back to version.
+func (r *Registry) StorePathBlob(ctx context.Context, format, repository, version, blobName, mediaType string, data []byte) string {
+	stored, err := r.StoreAndHash(ctx, data)
+	if err != nil {
+		return ""
+	}
+	if blobName == "" {
+		blobName = baseNameOf(version)
+	}
+	LogMetaErr(format+" cache", r.Meta.Put(ctx, Artifact{
+		Format: format, Repository: repository, Version: version,
+		MediaType: mediaType, Digest: stored.Digest,
+		Blobs:  []Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: blobName}},
+		Source: "pull",
+	}))
+	return stored.Digest
+}
+
+// baseNameOf returns the final path segment ("b/bash.rpm" -> "bash.rpm").
+func baseNameOf(p string) string {
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
 // Remote returns a proxy-aware upstream handle for a format. When
 // upstreamBase is "" the format's configured/default upstream is used.
 func (r *Registry) Remote(format, upstreamBase string) (*Remote, error) {
@@ -519,7 +554,8 @@ func (r *Registry) resolveBase(ctx context.Context, format, repo string) (string
 	return "", nil, false
 }
 
-// remoteFor resolves a Remote for one repository using resolveBase.
+// remoteFor resolves a Remote for one repository using resolveBase, applying
+// the resolved target's auth policy (passthrough/basic/bearer).
 func (r *Registry) remoteFor(ctx context.Context, format, repo, upstreamBase string) (*Remote, error) {
 	if upstreamBase != "" {
 		return r.RemoteFor(format, repo, upstreamBase)
@@ -529,7 +565,41 @@ func (r *Registry) remoteFor(ctx context.Context, format, repo, upstreamBase str
 		return nil, fmt.Errorf("no upstream for %s/%s", format, repo)
 	}
 	factory := NewClientFactory()
-	return NewRemote(factory, base, proxy), nil
+	remote := NewRemote(factory, base, proxy)
+	return r.applyAuth(ctx, format, repo, remote)
+}
+
+// applyAuth layers the resolved target's auth onto a remote. When no target is
+// configured the remote is returned unchanged (anonymous).
+func (r *Registry) applyAuth(ctx context.Context, format, repo string, remote *Remote) (*Remote, error) {
+	t, ok := r.targetFor(ctx, format, repo)
+	if !ok {
+		return remote, nil
+	}
+	clientAuth := RepoScopeFrom(ctx).ClientAuth
+	authed, err := withTargetAuth(remote, t, clientAuth)
+	if err != nil {
+		return nil, fmt.Errorf("auth for target %s: %w", t.ID, err)
+	}
+	return authed, nil
+}
+
+// targetFor resolves the target a (format, repo) request maps to: the explicit
+// scope target, else the host-driven target, else the protocol default.
+func (r *Registry) targetFor(ctx context.Context, format, repo string) (targets.Target, bool) {
+	u := r.Upstreams
+	if u == nil || u.Targets == nil {
+		return targets.Target{}, false
+	}
+	if t, ok := u.targetFromScope(ctx); ok {
+		return t, true
+	}
+	if sc := RepoScopeFrom(ctx); sc.Host != "" {
+		if t, ok := u.TargetFor(format, sc.Host); ok {
+			return t, true
+		}
+	}
+	return u.Targets.Default(format)
 }
 
 func (r *Registry) finishFetch(ctx context.Context, data []byte) (Fetched, error) {

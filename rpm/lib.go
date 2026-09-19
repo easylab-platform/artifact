@@ -135,17 +135,7 @@ func (s *State) upstreamFor(repo string) string {
 
 // storeCache persists a fetched path into the CAS + index (best-effort).
 func storeCache(s *State, ctx context.Context, repo, name string, data []byte) string {
-	stored, err := s.Registry.StoreAndHash(ctx, data)
-	if err != nil {
-		return ""
-	}
-	artifactkit.LogMetaErr("rpm cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
-		Format: "rpm", Repository: repo, Version: name,
-		MediaType: mediaTypeOf(name), Digest: stored.Digest,
-		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
-		Source: "pull",
-	}))
-	return stored.Digest
+	return s.Registry.StorePathBlob(ctx, "rpm", repo, name, name, mediaTypeOf(name), data)
 }
 
 // mediaTypeOf maps well-known yum repository files to media types.

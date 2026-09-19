@@ -133,17 +133,7 @@ func splitRepoPath(repoPath string) (repo, name string) {
 // a per-path version key; packages likewise. Best-effort: cache failures do
 // not break the response.
 func storeCache(s *State, ctx context.Context, repo, name string, data []byte) string {
-	stored, err := s.Registry.StoreAndHash(ctx, data)
-	if err != nil {
-		return ""
-	}
-	artifactkit.LogMetaErr("apk cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
-		Format: "apk", Repository: repo, Version: name,
-		MediaType: mediaTypeOf(name), Digest: stored.Digest,
-		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
-		Source: "pull",
-	}))
-	return stored.Digest
+	return s.Registry.StorePathBlob(ctx, "apk", repo, name, name, mediaTypeOf(name), data)
 }
 
 // mediaTypeOf maps well-known apk repository files to media types.

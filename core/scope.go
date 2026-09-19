@@ -42,6 +42,10 @@ type RepoScope struct {
 	// namespace (mirrors) rather than an isolated one (user-declared private
 	// repositories). Only meaningful when Target is set.
 	TargetShared bool
+	// ClientAuth is the request's Authorization header, captured so a target
+	// with passthrough auth can forward the caller's own credential upstream.
+	// It is never logged or stored as key material.
+	ClientAuth string
 }
 
 type repoScopeKey struct{}

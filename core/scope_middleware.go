@@ -3,7 +3,6 @@ package artifactkit
 import (
 	"net/http"
 	"strings"
-
 )
 
 // ScopeMiddleware resolves a request's RepoScope and stashes it in the request
@@ -46,7 +45,6 @@ func ScopeMiddlewareForFormat(format, base string, next http.Handler) http.Handl
 		next.ServeHTTP(w, r)
 	})
 }
-
 
 // dashReserved prevents a format's own "-/" endpoints from being read as an
 // explicit-repository marker. npm uses "/-/ping", "/-/whoami", "/-/v1/...",
@@ -92,7 +90,7 @@ func resolveScope(base string, r *http.Request) (RepoScope, string, bool) {
 	}
 
 	scope := RepoScope{Format: format, Host: CanonicalHost(requestHost(r)),
-		Proto: forwardedProto(r), Prefix: forwardedPrefix(r)}
+		Proto: forwardedProto(r), Prefix: forwardedPrefix(r), ClientAuth: r.Header.Get("Authorization")}
 
 	// Explicit "/-/<repo>/" marker: the repository is given verbatim and the
 	// path is rewritten to the native form for the adapter.
@@ -157,7 +155,7 @@ func resolveScopeForFormat(format, base string, r *http.Request) (RepoScope, str
 	}
 	nativePath := strings.TrimPrefix(strings.TrimPrefix(p, base), "/")
 	scope := RepoScope{Format: format, Host: CanonicalHost(requestHost(r)),
-		Proto: forwardedProto(r), Prefix: forwardedPrefix(r)}
+		Proto: forwardedProto(r), Prefix: forwardedPrefix(r), ClientAuth: r.Header.Get("Authorization")}
 	if repo, inner, explicit := SplitExplicitRepo(nativePath); explicit {
 		scope.Namespace, scope.Explicit = repo, true
 		scope.Name, _, _ = ResolveNamespace(format, inner)

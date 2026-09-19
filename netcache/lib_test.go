@@ -190,3 +190,33 @@ func TestRevalidation304(t *testing.T) {
 	}
 	_ = meta
 }
+
+// TestTargetBasicAuth verifies a declared target's basic-auth policy is applied
+// to the upstream request, and that such a request is not shared in cache
+// (the upstream response may be private to the credential).
+func TestTargetBasicAuth(t *testing.T) {
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte("private"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	s, _ := newState(t)
+	t.Setenv("NETCACHE_TEST_PW", "s3cret")
+	s.Registry.Upstreams.Targets.Put(targets.Target{
+		ID: "netcache.corp", Protocol: "netcache", Base: upstream.URL,
+		Hosts: []string{"corp.example.com"},
+		Auth:  targets.Auth{Mode: targets.AuthBasic, Username: "alice", Secret: "env:NETCACHE_TEST_PW"},
+	})
+
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/artifacts/netcache/corp.example.com/thing", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d body=%s", rec.Code, rec.Body.String())
+	}
+	// base64("alice:s3cret") = YWxpY2U6czNjcmV0
+	if gotAuth != "Basic YWxpY2U6czNjcmV0" {
+		t.Errorf("upstream auth = %q, want Basic alice:s3cret", gotAuth)
+	}
+}

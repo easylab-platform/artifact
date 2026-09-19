@@ -119,17 +119,7 @@ func isHex32(s string) bool {
 
 // storeCache persists a fetched path (best-effort).
 func storeCache(s *State, ctx context.Context, name string, data []byte, mediaType string) string {
-	stored, err := s.Registry.StoreAndHash(ctx, data)
-	if err != nil {
-		return ""
-	}
-	artifactkit.LogMetaErr("nix cache", s.Registry.Meta.Put(ctx, artifactkit.Artifact{
-		Format: "nix", Repository: "cache", Version: name,
-		MediaType: mediaType, Digest: stored.Digest,
-		Blobs:  []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: name}},
-		Source: "pull",
-	}))
-	return stored.Digest
+	return s.Registry.StorePathBlob(ctx, "nix", "cache", name, name, mediaType, data)
 }
 
 func mediaTypeOf(path string) string {
