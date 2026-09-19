@@ -41,6 +41,12 @@ type artifactRow struct {
 	Blobs       string `gorm:"not null;default:'[]'"`
 	Source      string `gorm:"not null;default:''"`
 	Target      string `gorm:"not null;default:''"`
+	// HTTP cache metadata (netcache): replay + revalidation.
+	ETag            string `gorm:"not null;default:''"`
+	LastModified    string `gorm:"not null;default:''"`
+	ContentEncoding string `gorm:"not null;default:''"`
+	CacheControl    string `gorm:"not null;default:''"`
+	ExpiresAt       int64  `gorm:"not null;default:0"`
 }
 
 type uploadRow struct {

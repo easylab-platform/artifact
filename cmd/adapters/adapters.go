@@ -21,6 +21,7 @@ import (
 	_ "github.com/easylab-platform/artifact/ivy"
 	_ "github.com/easylab-platform/artifact/maven"
 	_ "github.com/easylab-platform/artifact/nix"
+	_ "github.com/easylab-platform/artifact/netcache"
 	_ "github.com/easylab-platform/artifact/npm"
 	_ "github.com/easylab-platform/artifact/nuget"
 	_ "github.com/easylab-platform/artifact/oci"

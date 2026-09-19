@@ -3,6 +3,8 @@ package artifactkit
 import (
 	"context"
 	"strings"
+
+	"github.com/easylab-platform/artifact/targets"
 )
 
 // Registry host handling for the container protocols. A docker/podman client
@@ -269,22 +271,8 @@ func (u *Upstreams) AllowedSource(host string) (string, bool) {
 // not an IP literal, not a cluster-local name, not localhost). The git and ivy
 // mirrors use it to tell a real upstream server (github.com) from the gateway
 // they are themselves running behind, since their upstream identity may come
-// from the request origin rather than the path.
+// from the request origin rather than the path. It delegates to the shared
+// targets guard so the egress catch-all and the adapters agree.
 func IsPublicHostname(host string) bool {
-	h := CanonicalHost(host)
-	if h == "" {
-		return false
-	}
-	hostOnly, _, _ := splitHostPort(h)
-	if hostOnly == "localhost" || isIPLiteral(hostOnly) {
-		return false
-	}
-	switch {
-	case strings.HasSuffix(hostOnly, ".local"),
-		strings.HasSuffix(hostOnly, ".svc"),
-		strings.HasSuffix(hostOnly, ".cluster.local"),
-		strings.HasSuffix(hostOnly, ".internal"):
-		return false
-	}
-	return strings.Contains(hostOnly, ".")
+	return targets.IsPublicHost(CanonicalHost(host))
 }

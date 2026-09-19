@@ -23,10 +23,23 @@ type Egress struct {
 	Direct bool
 }
 
+// CatchAllPattern is the match pattern of the final rule in the policy. It
+// means "any PUBLIC hostname" (the sidecar applies the public-host guard), so
+// every other host is cached through netcache unless an earlier rule handled
+// it. It is explicitly in the rule list rather than the `default:` action so it
+// is visible in the ConfigMap and overridable, and so the guard cannot be
+// forgotten by a bare `default: rewrite`.
+const CatchAllPattern = "*"
+
+// CatchAllAdd is the mount the catch-all steers unmatched public hosts into.
+const CatchAllAdd = MountBase + "/netcache"
+
 // EgressPolicy derives the ordered default egress table from the target
 // registry: for each target, its not-yet-claimed Hosts become one rewrite rule
 // whose strips come from the target's Base path (+ ExtraStrips) and whose add
-// is the protocol mount; its DirectHosts become direct rules.
+// is the protocol mount; its DirectHosts become direct rules. A final catch-all
+// rule routes every other public host through netcache, so an arbitrary
+// external asset is cached the first time it is fetched.
 //
 // This is the SINGLE source formerly duplicated between easylab's k8s client
 // (defaultUpstreams) and easysidecar's rule/defaultrules.go. Deriving it is the
@@ -52,6 +65,10 @@ func EgressPolicy() []Egress {
 			out = append(out, Egress{Match: direct, Direct: true})
 		}
 	}
+	// Catch-all: any remaining PUBLIC host is cached through netcache. It must
+	// be last (first-match-wins) and carries no strip: netcache keys on the
+	// full client path + query.
+	out = append(out, Egress{Match: []string{CatchAllPattern}, Add: CatchAllAdd})
 	return out
 }
 
@@ -116,8 +133,12 @@ func quoteList(items []string) string {
 }
 
 // matchHost mirrors easysidecar's rule.MatchHost (exact / *.suffix / bare
-// suffix) so both layers agree on pattern semantics.
+// suffix) so both layers agree on pattern semantics. "*" matches any PUBLIC
+// hostname (the SSRF guard is applied by the sidecar's MatchPublic).
 func matchHost(pattern, host string) bool {
+	if pattern == CatchAllPattern {
+		return IsPublicHost(host)
+	}
 	pattern = strings.ToLower(strings.TrimSuffix(pattern, "."))
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	if pattern == host {

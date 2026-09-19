@@ -3,28 +3,29 @@ go 1.26.5
 use (
 	./apk
 	./cargo
-	./debian
 	./cmd
 	./composer
-	./conda
 	./conan
+	./conda
 	./core
+	./debian
 	./generic
 	./git
 	./gitlfs
 	./go
 	./helm
-	./ivy
-	./huggingface
-	./httpcache
 	./hex
+	./httpcache
+	./huggingface
+	./ivy
 	./maven
+	./netcache
 	./nix
 	./npm
 	./nuget
 	./oci
-	./pub
 	./protobuf
+	./pub
 	./pypi
 	./rpm
 	./rubygems

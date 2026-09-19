@@ -165,5 +165,9 @@ rules:
     action: rewrite
     target: "gw:80"
     add_prefix: "/artifacts/maven"
+  - match: ["*"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/netcache"
 default: direct
 mitm_default: false

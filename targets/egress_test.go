@@ -73,7 +73,15 @@ func TestEgressCovers(t *testing.T) {
 		"cdn-lfs.huggingface.co": true,
 		"conda.anaconda.org":     true,
 		"cache.nixos.org":        true,
-		"example.com":            false, // not an upstream: direct
+		// An arbitrary public host is now covered by the catch-all: it is
+		// cached through netcache rather than fetched twice.
+		"example.com": true,
+		// Cluster-local names and IPs are NOT covered: the catch-all only
+		// matches public hostnames, so it never captures in-cluster traffic.
+		"kubernetes.default.svc": false,
+		"easylab":                false,
+		"127.0.0.1":              false,
+		"localhost":              false,
 	}
 	for host, want := range cases {
 		if got := EgressCovers(host); got != want {

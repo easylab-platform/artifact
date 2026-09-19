@@ -16,8 +16,8 @@ require (
 	github.com/easylab-platform/artifact/go v0.0.0
 	github.com/easylab-platform/artifact/helm v0.0.0
 	github.com/easylab-platform/artifact/hex v0.0.0
-	github.com/easylab-platform/artifact/huggingface v0.0.0
 	github.com/easylab-platform/artifact/httpcache v0.0.0
+	github.com/easylab-platform/artifact/huggingface v0.0.0
 	github.com/easylab-platform/artifact/ivy v0.0.0
 	github.com/easylab-platform/artifact/maven v0.0.0
 	github.com/easylab-platform/artifact/nix v0.0.0
@@ -37,6 +37,7 @@ require (
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/easylab-platform/artifact/netcache v0.0.0
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
 	github.com/glebarez/sqlite v1.11.0 // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
@@ -77,8 +78,8 @@ replace (
 	github.com/easylab-platform/artifact/go => ../go
 	github.com/easylab-platform/artifact/helm => ../helm
 	github.com/easylab-platform/artifact/hex => ../hex
-	github.com/easylab-platform/artifact/huggingface => ../huggingface
 	github.com/easylab-platform/artifact/httpcache => ../httpcache
+	github.com/easylab-platform/artifact/huggingface => ../huggingface
 	github.com/easylab-platform/artifact/ivy => ../ivy
 	github.com/easylab-platform/artifact/maven => ../maven
 	github.com/easylab-platform/artifact/nix => ../nix
@@ -94,3 +95,5 @@ replace (
 	github.com/easylab-platform/artifact/system => ../system
 	github.com/easylab-platform/artifact/targets => ../targets
 )
+
+replace github.com/easylab-platform/artifact/netcache => ../netcache

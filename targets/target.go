@@ -19,7 +19,10 @@
 //	           digest); an identity target's host is part of the repository.
 package targets
 
-import "strings"
+import (
+	"net"
+	"strings"
+)
 
 // MountBase is the HTTP prefix every non-OCI protocol is mounted under.
 // OCI is spec-fixed at /v2 and is not mounted here.
@@ -201,4 +204,33 @@ func pathOf(raw string) string {
 		p = p[:j]
 	}
 	return strings.Trim(p, "/")
+}
+
+// IsPublicHost reports whether host is a public DNS name: dotted, not an IP
+// literal, not localhost, not a cluster-local name. The egress catch-all uses
+// it so "cache everything" never captures cluster-internal traffic (the API
+// server, DNS, sibling services) — the SSRF guard for the catch-all rule.
+func IsPublicHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" {
+		return false
+	}
+	if hostOnly, _, err := net.SplitHostPort(h); err == nil {
+		h = hostOnly
+	}
+	h = strings.Trim(h, "[]")
+	if h == "" || h == "localhost" {
+		return false
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return false
+	}
+	switch {
+	case strings.HasSuffix(h, ".local"),
+		strings.HasSuffix(h, ".svc"),
+		strings.HasSuffix(h, ".cluster.local"),
+		strings.HasSuffix(h, ".internal"):
+		return false
+	}
+	return strings.Contains(h, ".")
 }

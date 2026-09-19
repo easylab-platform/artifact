@@ -1,5 +1,7 @@
 package artifactkit
 
+import "time"
+
 type Hashes struct {
 	SHA256 string
 	SHA1   string
@@ -46,6 +48,17 @@ type Artifact struct {
 	// (Format, Repository, Version), so mirrors of one protocol still share
 	// and dedupe by digest. Empty when the adapter did not record one.
 	Target string
+	// HTTP response metadata, recorded for byte-exact replay and revalidation
+	// of cached URIs (the netcache protocol). None of these are key material.
+	ETag            string
+	LastModified    string
+	ContentEncoding string
+	// CacheControl is "immutable" for content whose URL denotes a fixed
+	// revision (a digest/hash in the URI), which is never revalidated.
+	CacheControl string
+	// ExpiresAt, when non-zero, is when a non-immutable entry must be
+	// revalidated before being served again.
+	ExpiresAt time.Time
 }
 
 type PackageSummary struct {

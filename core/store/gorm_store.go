@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/easylab-platform/artifact/core"
 	"gorm.io/gorm"
@@ -94,6 +95,9 @@ func (s *Store) Put(ctx context.Context, a artifactkit.Artifact) error {
 		Format: a.Format, Repository: a.Repository, Version: a.Version,
 		MediaType: a.MediaType, Digest: a.Digest, Proprietary: a.Proprietary,
 		Blobs: string(blobs), Source: a.Source, Target: a.Target,
+		ETag: a.ETag, LastModified: a.LastModified,
+		ContentEncoding: a.ContentEncoding, CacheControl: a.CacheControl,
+		ExpiresAt: a.ExpiresAt.Unix(),
 	}
 	return s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "format"}, {Name: "repository"}, {Name: "version"}},
@@ -116,6 +120,11 @@ func (s *Store) Get(ctx context.Context, format, repository, version string) (ar
 	a.Format, a.Repository, a.Version = row.Format, row.Repository, row.Version
 	a.MediaType, a.Digest, a.Source = row.MediaType, row.Digest, row.Source
 	a.Target = row.Target
+	a.ETag, a.LastModified = row.ETag, row.LastModified
+	a.ContentEncoding, a.CacheControl = row.ContentEncoding, row.CacheControl
+	if row.ExpiresAt > 0 {
+		a.ExpiresAt = time.Unix(row.ExpiresAt, 0)
+	}
 	a.Proprietary = row.Proprietary
 	return a, nil
 }
