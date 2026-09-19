@@ -12,21 +12,43 @@ const (
 	BlobS3         = "s3"
 )
 
-// OpenBlobStore returns a BlobStore for the given backend. Only "filesystem"
-// (default; a filesystem CAS rooted at dir) is implemented. Requesting "s3"
-// is a configuration error and fails startup loudly — a silent fallback to
-// the local filesystem would put multi-GB blobs on the wrong storage and
-// surprise an operator at disk-full time. Metadata is never stored inline as
-// blobs.
+// OpenBlobStore returns a BlobStore for the given backend. "filesystem"
+// (default; a filesystem CAS rooted at dir) is built in. Other backends (e.g.
+// "s3") register a constructor via RegisterBlobBackend from their own module,
+// so this package never imports a heavy cloud SDK and the adapter module graph
+// stays lean. Requesting an unregistered backend fails startup loudly — a
+// silent fallback would put multi-GB blobs on the wrong storage.
 func OpenBlobStore(backend, dir string) (artifactkit.BlobStore, error) {
 	switch backend {
 	case BlobFilesystem, "":
 		return NewFileBlobStore(dir)
-	case BlobS3:
-		return nil, fmt.Errorf("blob backend %q is not implemented yet (use filesystem)", backend)
-	default:
-		return nil, fmt.Errorf("unsupported blob backend %q (filesystem|s3)", backend)
 	}
+	if build, ok := blobBackends[backend]; ok {
+		return build(dir)
+	}
+	return nil, fmt.Errorf("unsupported blob backend %q (filesystem, or a registered one)", backend)
+}
+
+// blobBackends holds registered non-filesystem backends (process-global).
+var blobBackends = map[string]func(dir string) (artifactkit.BlobStore, error){}
+
+// RegisterBlobBackend installs a constructor for a backend name. A separate
+// module (e.g. s3blob) calls this from its init() so consumers enable it with a
+// blank import; OpenBlobStore then resolves it by name.
+func RegisterBlobBackend(name string, build func(dir string) (artifactkit.BlobStore, error)) {
+	if name == "" || build == nil {
+		return
+	}
+	blobBackends[name] = build
+}
+
+// BlobBackends lists the registered backend names (filesystem plus any).
+func BlobBackends() []string {
+	out := []string{BlobFilesystem}
+	for n := range blobBackends {
+		out = append(out, n)
+	}
+	return out
 }
 
 // EnsureDir creates a directory (and parents) if it does not exist.

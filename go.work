@@ -31,5 +31,6 @@ use (
 	./rubygems
 	./swiftpm
 	./system
+	./s3blob
 	./targets
 )
