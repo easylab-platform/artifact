@@ -258,13 +258,17 @@ func (s *State) dist(w http.ResponseWriter, r *http.Request, rest string) {
 			}
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "composer", "", "/dist/"+full+"/"+version+"/"+ref)
-	if err != nil {
+	// Stream the dist zip into the CAS (no full buffering of a large archive).
+	digest, size, ok := s.Registry.FetchToBlob(r.Context(), "composer", "/dist/"+full+"/"+version+"/"+ref)
+	if !ok {
 		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
-	storeVersionSource(s.Registry, full, version, fetched.Data, "pull", r.Context())
-	artifactkit.ServeData(w, r, s.Registry, r.Context(), fetched.Data, "application/octet-stream", filename)
+	storeVersionBlob(s.Registry, full, version, filename, digest, size, "pull", r.Context())
+	if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), digest, "application/octet-stream", filename) {
+		return
+	}
+	artifactkit.Error(w, http.StatusBadGateway, "cache error")
 }
 
 func (s *State) upload(w http.ResponseWriter, r *http.Request) {
@@ -308,6 +312,24 @@ func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.
 		}
 	}
 	artifactkit.LogMetaErr("meta delete", reg.Meta.Delete(ctx, "composer", name, version))
+}
+
+// storeVersionBlob records a dist zip already streamed into the CAS. It must
+// not clobber an existing entry's autoload metadata (Proprietary), which only
+// the composer.json path knows.
+func storeVersionBlob(reg *artifactkit.Registry, name, version, filename, digest string, size int64, source string, ctx context.Context) {
+	art, _ := reg.Meta.Get(ctx, "composer", name, version)
+	if art.Format == "" {
+		art = artifactkit.Artifact{Format: "composer", Repository: name, Version: version, Source: source}
+	}
+	var kept []artifactkit.Descriptor
+	for _, b := range art.Blobs {
+		if b.Name != filename {
+			kept = append(kept, b)
+		}
+	}
+	art.Blobs = append(kept, artifactkit.Descriptor{Digest: digest, Size: size, Name: filename})
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func storeVersionSource(reg *artifactkit.Registry, name, version string, data []byte, source string, ctx context.Context) {

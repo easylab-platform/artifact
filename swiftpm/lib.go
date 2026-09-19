@@ -308,8 +308,9 @@ func (s *State) sourceZip(w http.ResponseWriter, r *http.Request, id, version, n
 			}
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "swift", "", "/"+artifactkit.URLencode(id)+"/"+version+".zip")
-	if err != nil {
+	// Stream the source zip into the CAS (no full buffering).
+	digest, size, ok := s.Registry.FetchToBlob(r.Context(), "swift", "/"+artifactkit.URLencode(id)+"/"+version+".zip")
+	if !ok {
 		// SCM-to-registry: build a source archive from the persisted git repo.
 		if gu := s.gitURLFor(r.Context(), id); gu != "" {
 			if data := s.gitArchive(r.Context(), gu, version); len(data) > 0 {
@@ -324,11 +325,11 @@ func (s *State) sourceZip(w http.ResponseWriter, r *http.Request, id, version, n
 		artifactkit.JSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
 		return
 	}
-	storeVersionSource(s.Registry, id, version, filename, fetched.Data, "pull", r.Context())
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Length", fmt.Sprint(len(fetched.Data)))
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(fetched.Data)
+	storeVersionBlob(s.Registry, id, version, filename, digest, size, "pull", r.Context())
+	if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), digest, "application/zip", filename) {
+		return
+	}
+	artifactkit.Error(w, http.StatusBadGateway, "cache error")
 }
 
 func (s *State) packageSwift(w http.ResponseWriter, r *http.Request, id, version, name string) {
@@ -386,6 +387,22 @@ func (s *State) putPath(w http.ResponseWriter, r *http.Request, path string) {
 		"id": full, "version": ver,
 		"resources": []any{map[string]any{"name": "source-archive", "type": "application/zip", "checksum": h.SHA256}},
 	})
+}
+
+// storeVersionBlob records a source zip already streamed into the CAS.
+func storeVersionBlob(reg *artifactkit.Registry, full, version, filename, digest string, size int64, source string, ctx context.Context) {
+	art, _ := reg.Meta.Get(ctx, "swift", full, version)
+	if art.Format == "" {
+		art = artifactkit.Artifact{Format: "swift", Repository: full, Version: version, Source: source}
+	}
+	var kept []artifactkit.Descriptor
+	for _, b := range art.Blobs {
+		if b.Name != filename {
+			kept = append(kept, b)
+		}
+	}
+	art.Blobs = append(kept, artifactkit.Descriptor{Digest: digest, Size: size, Name: filename})
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func storeVersionSource(reg *artifactkit.Registry, full, version, filename string, data []byte, source string, ctx context.Context) {

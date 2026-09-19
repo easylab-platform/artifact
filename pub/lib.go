@@ -273,13 +273,17 @@ func (s *State) archive(w http.ResponseWriter, r *http.Request, rest string) {
 			}
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "pub", "", "/api/archives/"+artifactkit.URLencode(name+"-"+version+".tar.gz"))
-	if err != nil {
+	// Stream the package tarball into the CAS (no full buffering).
+	digest, size, ok := s.Registry.FetchToBlob(r.Context(), "pub", "/api/archives/"+artifactkit.URLencode(name+"-"+version+".tar.gz"))
+	if !ok {
 		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
-	storeVersionSource(s.Registry, name, version, filename, fetched.Data, "pull", r.Context())
-	artifactkit.ServeData(w, r, s.Registry, r.Context(), fetched.Data, "application/octet-stream", filename)
+	storeVersionBlob(s.Registry, name, version, filename, digest, size, "pull", r.Context())
+	if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), digest, "application/octet-stream", filename) {
+		return
+	}
+	artifactkit.Error(w, http.StatusBadGateway, "cache error")
 }
 
 func (s *State) retract(w http.ResponseWriter, r *http.Request, name string) {
@@ -308,6 +312,22 @@ func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.
 		}
 	}
 	artifactkit.LogMetaErr("meta delete", reg.Meta.Delete(ctx, "pub", name, version))
+}
+
+// storeVersionBlob records a tarball already streamed into the CAS.
+func storeVersionBlob(reg *artifactkit.Registry, name, version, filename, digest string, size int64, source string, ctx context.Context) {
+	art, _ := reg.Meta.Get(ctx, "pub", name, version)
+	if art.Format == "" {
+		art = artifactkit.Artifact{Format: "pub", Repository: name, Version: version, Source: source}
+	}
+	var kept []artifactkit.Descriptor
+	for _, b := range art.Blobs {
+		if b.Name != filename {
+			kept = append(kept, b)
+		}
+	}
+	art.Blobs = append(kept, artifactkit.Descriptor{Digest: digest, Size: size, Name: filename})
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func storeVersionSource(reg *artifactkit.Registry, name, version, filename string, data []byte, source string, ctx context.Context) {

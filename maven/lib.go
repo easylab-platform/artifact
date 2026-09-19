@@ -113,22 +113,19 @@ func (s *State) getPath(w http.ResponseWriter, r *http.Request, p string, c coor
 			}
 		}
 	}
-	fetched, err := s.Registry.Fetch(r.Context(), "maven", "", "/"+p)
-	if err != nil {
-		// JitPack 302s to the built version and the Gradle Plugin Portal 303s
-		// to Maven Central; both are content we want to mirror, so follow the
-		// redirect and cache the final body.
-		fetched, err = s.Registry.FetchPathFollow(r.Context(), "maven", "/"+p)
-		if err != nil {
-			artifactkit.Error(w, http.StatusNotFound, "not found")
-			return
-		}
-	}
-	storeVersionSource(s.Registry, c.artifactID, c.version, filename, fetched.Data, "pull", r.Context())
-	if fetched.Digest != "" && artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), fetched.Digest, "application/octet-stream", filename) {
+	// Stream into the CAS (no full buffering of a large jar). FetchToBlob
+	// follows redirects, covering JitPack's 302 and the Gradle Plugin Portal's
+	// 303 to Maven Central.
+	digest, size, ok := s.Registry.FetchToBlob(r.Context(), "maven", "/"+p)
+	if !ok {
+		artifactkit.Error(w, http.StatusNotFound, "not found")
 		return
 	}
-	artifactkit.ServeData(w, r, s.Registry, r.Context(), fetched.Data, "application/octet-stream", filename)
+	storeVersionBlob(s.Registry, c.artifactID, c.version, filename, digest, size, "pull", r.Context())
+	if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), digest, "application/octet-stream", filename) {
+		return
+	}
+	artifactkit.Error(w, http.StatusBadGateway, "cache error")
 }
 
 func (s *State) headPath(w http.ResponseWriter, r *http.Request, p string, c coords) {
@@ -349,6 +346,34 @@ func allDigits(b []byte) bool {
 		}
 	}
 	return len(b) > 0
+}
+
+// storeVersionBlob records a blob already streamed into the CAS (digest/size
+// known, bytes not in memory) under (artifactID, version, filename).
+func storeVersionBlob(reg *artifactkit.Registry, artifactID, version, filename, digest string, size int64, source string, ctx context.Context) {
+	if version == "" {
+		version = "0.0.0"
+	}
+	art, _ := reg.Meta.Get(ctx, "maven", artifactID, version)
+	art.Format = "maven"
+	art.Source = source
+	art.Repository = artifactID
+	art.Version = version
+	var removed, kept []artifactkit.Descriptor
+	for _, b := range art.Blobs {
+		if b.Name == filename {
+			removed = append(removed, b)
+		} else {
+			kept = append(kept, b)
+		}
+	}
+	art.Blobs = append(kept, artifactkit.Descriptor{Digest: digest, Size: size, Name: filename})
+	for _, b := range removed {
+		if b.Digest != digest {
+			artifactkit.LogMetaErr("blob delete", reg.Blobs.Delete(ctx, b.Digest))
+		}
+	}
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
 }
 
 func storeVersionSource(reg *artifactkit.Registry, artifactID, version, filename string, data []byte, source string, ctx context.Context) {
