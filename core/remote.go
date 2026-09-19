@@ -24,10 +24,12 @@ import (
 // credentials (a passthrough target) never share a result.
 var fetchGroup singleflight.Group
 
-// flightKey identifies one upstream fetch: the absolute URL plus a digest of the
-// resolved request headers (Authorization in practice).
-func flightKey(remote *Remote, path string) string {
-	url := remote.URL(path)
+// flightKey identifies one upstream fetch: the operation kind, the absolute URL,
+// and a digest of the resolved request headers (Authorization in practice). The
+// kind keeps callers with different result types (a []byte document vs a
+// Fetched blob) from colliding on one in-flight entry.
+func flightKey(kind string, remote *Remote, path string) string {
+	url := kind + "\x00" + remote.URL(path)
 	if len(remote.headers) == 0 {
 		return url
 	}
@@ -45,6 +47,14 @@ func flightKey(remote *Remote, path string) string {
 	}
 	return url + "\x00" + hex.EncodeToString(h.Sum(nil))
 }
+
+// Fetch kinds for the single-flight namespace.
+const (
+	flightDoc      = "doc"      // GetBytes/GetBytesFollow: []byte
+	flightFetched  = "fetched"  // fetchWith/FetchPathFollow: Fetched
+	flightBlob     = "blob"     // FetchToBlob: blobResult
+	flightPathBlob = "pathblob" // FetchCachedPath: pathCacheResult
+)
 
 // UserAgent is sent on every upstream request. Registries rate-limit generic
 // user agents (Maven Central 429s the default Go UA), so a stable bespoke one
@@ -193,7 +203,22 @@ func (r *Remote) Get(ctx context.Context, path string) (*http.Response, error) {
 // failures — transport errors or 502/503/504 responses (an egress proxy often
 // surfaces upstream blips that way) — are retried: these are idempotent
 // index/file GETs, and short backoff rides out multi-second proxy flaps.
+//
+// Concurrent identical requests are collapsed by a process-wide single-flight
+// group (keyed by URL + auth headers), so N clients resolving the same index
+// document cause one upstream fetch.
 func (r *Remote) GetBytes(ctx context.Context, path string) ([]byte, error) {
+	v, err, _ := fetchGroup.Do(flightKey(flightDoc, r, path), func() (any, error) {
+		return r.getBytesDirect(ctx, path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]byte), nil
+}
+
+// getBytesDirect is GetBytes without the single-flight wrapper.
+func (r *Remote) getBytesDirect(ctx context.Context, path string) ([]byte, error) {
 	resp, err := r.getStable(ctx, path)
 	if err != nil {
 		return nil, err
@@ -325,7 +350,7 @@ func (r *Registry) FetchPath(ctx context.Context, format, path string) (Fetched,
 // Concurrent identical fetches (same URL and auth headers) are collapsed into
 // one upstream request by a process-wide single-flight group.
 func (r *Registry) fetchWith(ctx context.Context, remote *Remote, path string) (Fetched, error) {
-	v, err, _ := fetchGroup.Do(flightKey(remote, path), func() (any, error) {
+	v, err, _ := fetchGroup.Do(flightKey(flightFetched, remote, path), func() (any, error) {
 		return r.fetchWithDirect(ctx, remote, path)
 	})
 	if err != nil {
@@ -744,8 +769,20 @@ func (r *Registry) RemoteHost(format, host string) (*Remote, bool) {
 
 // GetBytesFollow is GetBytes but follows redirects (up to the default policy).
 // Ivy servers redirect to their artifact store (repo.scala-sbt.org →
-// scala.jfrog.io) and the redirected body is what must be cached.
+// scala.jfrog.io) and the redirected body is what must be cached. Concurrent
+// identical requests are collapsed by the same single-flight group.
 func (r *Remote) GetBytesFollow(ctx context.Context, path string) ([]byte, error) {
+	v, err, _ := fetchGroup.Do(flightKey(flightDoc, r, path), func() (any, error) {
+		return r.getBytesFollowDirect(ctx, path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]byte), nil
+}
+
+// getBytesFollowDirect is GetBytesFollow without the single-flight wrapper.
+func (r *Remote) getBytesFollowDirect(ctx context.Context, path string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL(path), nil)
 	if err != nil {
 		return nil, err
@@ -781,7 +818,7 @@ func (r *Registry) FetchPathFollow(ctx context.Context, format, path string) (Fe
 	if err != nil {
 		return Fetched{}, err
 	}
-	v, err, _ := fetchGroup.Do(flightKey(remote, path), func() (any, error) {
+	v, err, _ := fetchGroup.Do(flightKey(flightFetched, remote, path), func() (any, error) {
 		data, err := remote.GetBytesFollow(ctx, path)
 		if err != nil {
 			return Fetched{}, err
@@ -814,7 +851,7 @@ func (r *Registry) FetchToBlob(ctx context.Context, format, path string) (string
 		size   int64
 		ok     bool
 	}
-	v, _, _ := fetchGroup.Do(flightKey(remote, path), func() (any, error) {
+	v, _, _ := fetchGroup.Do(flightKey(flightBlob, remote, path), func() (any, error) {
 		digest, size, ok := r.fetchToBlobDirect(ctx, remote, path)
 		return blobResult{digest, size, ok}, nil
 	})

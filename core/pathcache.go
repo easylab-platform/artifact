@@ -85,7 +85,7 @@ func (r *Registry) FetchCachedPath(ctx context.Context, format, repo, version, p
 	}
 
 	// Single-flight: one upstream request per (url, auth) even under a burst.
-	v, _, _ := fetchGroup.Do(flightKey(remote, path), func() (any, error) {
+	v, _, _ := fetchGroup.Do(flightKey(flightPathBlob, remote, path), func() (any, error) {
 		// Re-check inside the flight: a peer may have just refreshed the entry
 		// we found stale. Only a genuinely fresh entry short-circuits.
 		if !pol.NoStore {

@@ -148,3 +148,31 @@ func TestPathCacheRevalidates304(t *testing.T) {
 		t.Fatalf("bodyHits=%d notModified=%d, want 1/1", bodyHits, notModified)
 	}
 }
+
+// TestFlightKindsDoNotCollide guards the single-flight namespace: two calls
+// with different result types (a []byte doc vs a Fetched blob) on the same URL
+// must not share one in-flight entry, or a type assertion would panic.
+func TestFlightKindsDoNotCollide(t *testing.T) {
+	reg := newCacheRegistry(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-test")
+		_, _ = w.Write([]byte("body"))
+	}))
+	t.Cleanup(srv.Close)
+	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran"})
+
+	// A doc fetch ([]byte) and a registry fetch (Fetched) for the same base+path,
+	// concurrently.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		reg.Fetch(ctx, "cran", srv.URL, "/same")
+	}()
+	go func() {
+		defer wg.Done()
+		r := reg.RemoteAt(srv.URL)
+		r.GetBytes(ctx, "/same")
+	}()
+	wg.Wait() // a collision would panic the test
+}
