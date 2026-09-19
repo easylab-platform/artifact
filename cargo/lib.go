@@ -41,12 +41,7 @@ type meta struct {
 	Owners []string        `json:"owners"`
 }
 
-func (s *State) base() string {
-	if s.SelfBase == "" {
-		return "http://localhost:8080/artifacts/cargo"
-	}
-	return strings.TrimSuffix(s.SelfBase, "/")
-}
+func (s *State) base() string { return artifactkit.SelfURL(s.SelfBase, "cargo") }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/artifacts/cargo")

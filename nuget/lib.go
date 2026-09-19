@@ -36,12 +36,7 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 
 func init() { artifactkit.Register("nuget", NewHandler) }
 
-func (s *State) base() string {
-	if s.SelfBase == "" {
-		return "http://localhost:8080/artifacts/nuget"
-	}
-	return strings.TrimSuffix(s.SelfBase, "/")
-}
+func (s *State) base() string { return artifactkit.SelfURL(s.SelfBase, "nuget") }
 
 func lower(s string) string      { return strings.ToLower(s) }
 func isPrerelease(v string) bool { return strings.Contains(v, "-") }

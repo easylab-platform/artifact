@@ -13,6 +13,16 @@ import (
 // import both.
 const MountBase = targets.MountBase
 
+// SelfURL returns the external base URL an adapter should build self-referential
+// links on: the configured self_base when non-empty, else a localhost fallback
+// carrying the protocol mount. It replaces the per-adapter `base()` copies.
+func SelfURL(selfBase, format string) string {
+	if selfBase != "" {
+		return trimSlash(selfBase)
+	}
+	return "http://localhost:8080" + MountBase + "/" + format
+}
+
 // clientFactoryFor returns the process-wide client factory. Formerly a
 // separate instance; it now delegates to sharedFactory so OCI's remote
 // upstreams share the same connection pool as every other fetch.
@@ -481,21 +491,4 @@ type Stored struct {
 	Hashes Hashes
 	Size   int64
 	Digest string
-}
-
-// RegistryApi is a convenience trait object so adapters can hold either the
-// concrete Registry or a narrowed view, and accept a blob sink other than the
-// default.
-type RegistryApi interface {
-	// Fetch pulls `path` from an upstream, stores it (dedup by sha256) and
-	// returns bytes + hashes. An empty upstreamBase means "use the format's
-	// default"; non-empty bases are used verbatim.
-	Fetch(ctx context.Context, format, upstreamBase, path string) (Fetched, error)
-	// FetchFor is Fetch for one repository of a format, honoring the
-	// repository's upstream override and proxy policy.
-	FetchFor(ctx context.Context, format, repo, upstreamBase, path string) (Fetched, error)
-	// FetchAbsolute pulls a full URL verbatim.
-	FetchAbsolute(ctx context.Context, url string) (Fetched, error)
-	// StoreAndHash writes bytes into the blob CAS and returns their summary.
-	StoreAndHash(ctx context.Context, data []byte) (Stored, error)
 }

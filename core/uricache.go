@@ -197,22 +197,8 @@ func (r *Registry) FetchURIToBlob(ctx context.Context, rawURL string, opts URIOp
 	return v.(URICacheResult), nil
 }
 
-// staleValidators returns the ETag/Last-Modified of an expired cached entry, so
-// a revalidation request can be conditional. Empty when there is no entry or it
-// carries no validator (then a full fetch is required).
-func (r *Registry) staleValidators(ctx context.Context, key string) (etag, lastMod string, ok bool) {
-	art, err := r.Meta.Get(ctx, "netcache", "uri", key)
-	if err != nil {
-		return "", "", false
-	}
-	if art.ETag == "" && art.LastModified == "" {
-		return "", "", false
-	}
-	return art.ETag, art.LastModified, true
-}
-
 // cachedURI returns a fresh cached entry for key, or false. Immutable entries
-// never expire; mutable ones are trusted for ttl.
+// never expire; mutable ones are trusted for the cache TTL.
 func (r *Registry) cachedURI(ctx context.Context, key string) (URICacheResult, bool) {
 	art, err := r.Meta.Get(ctx, "netcache", "uri", key)
 	if err != nil || art.Digest == "" || len(art.Blobs) == 0 {
@@ -221,15 +207,14 @@ func (r *Registry) cachedURI(ctx context.Context, key string) (URICacheResult, b
 	if art.MediaType == "application/x-netcache-miss" {
 		return URICacheResult{}, false
 	}
-	immutable := art.CacheControl == "immutable"
-	if !immutable && !art.ExpiresAt.IsZero() && time.Now().After(art.ExpiresAt) {
+	if !isFresh(art, time.Now()) {
 		return URICacheResult{}, false
 	}
 	return URICacheResult{
 		Digest:    art.Digest,
 		Size:      art.Blobs[0].Size,
 		Header:    headerFromArtifact(art),
-		Immutable: immutable,
+		Immutable: art.CacheControl == "immutable",
 		Status:    http.StatusOK,
 	}, true
 }
@@ -246,15 +231,13 @@ func (r *Registry) fetchURI(ctx context.Context, key, rawURL string, opts URIOpt
 			remote = remote.WithHeader(k, v)
 		}
 	}
+	// Conditional revalidation: if we hold a stale copy with a validator, ask
+	// the origin whether it changed. A credentialed request is never
+	// revalidated against a shared entry (NoStore skips this path entirely).
 	extra := map[string]string{}
 	if !opts.NoStore {
-		if etag, lastMod, ok := r.staleValidators(ctx, key); ok {
-			if etag != "" {
-				extra["If-None-Match"] = etag
-			}
-			if lastMod != "" {
-				extra["If-Modified-Since"] = lastMod
-			}
+		if prev, err := r.Meta.Get(ctx, "netcache", "uri", key); err == nil && hasValidator(prev) {
+			extra = conditionalHeaders(prev)
 		}
 	}
 	// Retrying, redirect-following GET (presigned CDN URLs, regional mirrors;
@@ -294,21 +277,8 @@ func (r *Registry) fetchURI(ctx context.Context, key, rawURL string, opts URIOpt
 	if opts.KeyURL != "" {
 		immutable = immutable || IsImmutableURL(opts.KeyURL)
 	}
-	art := Artifact{
-		Format: "netcache", Repository: "uri", Version: key,
-		MediaType:       mediaTypeOrOctet(resp.Header.Get("Content-Type")),
-		Digest:          digest,
-		ETag:            resp.Header.Get("ETag"),
-		LastModified:    resp.Header.Get("Last-Modified"),
-		ContentEncoding: resp.Header.Get("Content-Encoding"),
-		Blobs:           []Descriptor{{Digest: digest, Size: size}},
-		Source:          "pull",
-	}
-	if immutable {
-		art.CacheControl = "immutable"
-	} else {
-		art.ExpiresAt = time.Now().Add(sharedURICache().ttl)
-	}
+	art := artifactFromResponse("netcache", "uri", key, digest, size, resp.Header,
+		mediaTypeOrOctet(resp.Header.Get("Content-Type")), "", immutable, sharedURICache().ttl)
 	LogMetaErr("netcache put", r.Meta.Put(ctx, art))
 	return URICacheResult{Digest: digest, Size: size, Header: resp.Header, Immutable: immutable, Status: http.StatusOK}, nil
 }
@@ -320,39 +290,13 @@ func (r *Registry) refreshURI(ctx context.Context, key string, h http.Header) (U
 	if err != nil || art.Digest == "" || len(art.Blobs) == 0 {
 		return URICacheResult{}, false
 	}
-	if v := h.Get("ETag"); v != "" {
-		art.ETag = v
-	}
-	if v := h.Get("Last-Modified"); v != "" {
-		art.LastModified = v
-	}
-	if art.CacheControl != "immutable" {
-		art.ExpiresAt = time.Now().Add(sharedURICache().ttl)
-	}
+	refreshFrom304(&art, h, sharedURICache().ttl)
 	LogMetaErr("netcache revalidate", r.Meta.Put(ctx, art))
 	return URICacheResult{
 		Digest: art.Digest, Size: art.Blobs[0].Size,
 		Header: headerFromArtifact(art), Immutable: art.CacheControl == "immutable",
 		Status: http.StatusOK,
 	}, true
-}
-
-// headerFromArtifact reconstructs the replay headers from a cached entry.
-func headerFromArtifact(art Artifact) http.Header {
-	h := http.Header{}
-	if art.MediaType != "" {
-		h.Set("Content-Type", art.MediaType)
-	}
-	if art.ContentEncoding != "" {
-		h.Set("Content-Encoding", art.ContentEncoding)
-	}
-	if art.ETag != "" {
-		h.Set("ETag", art.ETag)
-	}
-	if art.LastModified != "" {
-		h.Set("Last-Modified", art.LastModified)
-	}
-	return h
 }
 
 // streamToBlob copies a stream into the CAS, hashing as it goes, and returns

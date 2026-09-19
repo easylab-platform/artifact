@@ -410,13 +410,6 @@ func (e *UpstreamRedirectError) Error() string {
 	return fmt.Sprintf("upstream %s: redirected (%d) to %s", e.Path, e.Status, e.Location)
 }
 
-// FetchViaRedirect follows an upstream redirect explicitly and fetches the
-// target. It is used by adapters whose upstream legitimately redirects to a
-// content host that easylab still wants to cache (e.g. HF LFS blobs).
-func (r *Registry) FetchViaRedirect(ctx context.Context, url string) (Fetched, error) {
-	return r.FetchAbsolute(ctx, url)
-}
-
 // FetchAbsolute pulls a full URL verbatim.
 func (r *Registry) FetchAbsolute(ctx context.Context, url string) (Fetched, error) {
 	factory := sharedFactory

@@ -88,14 +88,12 @@ func (r *Registry) FetchCachedPath(ctx context.Context, format, repo, version, p
 	if !pol.NoStore {
 		if a, err := r.Meta.Get(ctx, format, repo, version); err == nil && a.Digest != "" && len(a.Blobs) > 0 {
 			art, have = a, true
-			immutable := a.CacheControl == "immutable"
-			fresh := immutable || a.ExpiresAt.IsZero() || now.Before(a.ExpiresAt)
-			if fresh {
+			if isFresh(a, now) {
 				return PathCacheResult{Artifact: a, Hit: true, OK: true}
 			}
 			// Stale. Without a validator we cannot cheaply revalidate, so keep
 			// serving the cached bytes instead of re-downloading.
-			if a.ETag == "" && a.LastModified == "" {
+			if !hasValidator(a) {
 				return PathCacheResult{Artifact: a, Hit: true, OK: true}
 			}
 		}
@@ -113,9 +111,7 @@ func (r *Registry) FetchCachedPath(ctx context.Context, format, repo, version, p
 		// we found stale. Only a genuinely fresh entry short-circuits.
 		if !pol.NoStore {
 			if a, err := r.Meta.Get(ctx, format, repo, version); err == nil && a.Digest != "" && len(a.Blobs) > 0 {
-				immutable := a.CacheControl == "immutable"
-				stillFresh := immutable || a.ExpiresAt.IsZero() || time.Now().Before(a.ExpiresAt)
-				if stillFresh {
+				if isFresh(a, time.Now()) {
 					return pathCacheResult{art: a, hit: true, ok: true}, nil
 				}
 			}
@@ -131,12 +127,7 @@ func (r *Registry) fetchCachedPathDirect(ctx context.Context, remote *Remote, fo
 	// Conditional revalidation when we hold a stale copy with a validator.
 	extra := map[string]string{}
 	if have && !pol.NoStore {
-		if prev.ETag != "" {
-			extra["If-None-Match"] = prev.ETag
-		}
-		if prev.LastModified != "" {
-			extra["If-Modified-Since"] = prev.LastModified
-		}
+		extra = conditionalHeaders(prev)
 	}
 	// Retrying GET (survives egress-proxy 502 flaps); follows redirects so a
 	// tree root may point at a regional mirror.
@@ -148,9 +139,7 @@ func (r *Registry) fetchCachedPathDirect(ctx context.Context, remote *Remote, fo
 
 	if resp.StatusCode == http.StatusNotModified && have && !pol.NoStore {
 		// Refresh the TTL/validators and serve the cached bytes.
-		prev.ETag = firstNonEmpty(resp.Header.Get("ETag"), prev.ETag)
-		prev.LastModified = firstNonEmpty(resp.Header.Get("Last-Modified"), prev.LastModified)
-		prev.ExpiresAt = expiryFor(pol)
+		refreshFrom304(&prev, resp.Header, ttlOf(pol))
 		LogMetaErr(format+" revalidate", r.Meta.Put(ctx, prev))
 		return pathCacheResult{art: prev, hit: true, ok: true}, nil
 	}
@@ -162,22 +151,9 @@ func (r *Registry) fetchCachedPathDirect(ctx context.Context, remote *Remote, fo
 	if err != nil {
 		return pathCacheResult{}, nil
 	}
-	art := Artifact{
-		Format: format, Repository: repo, Version: version,
-		MediaType:       pol.MediaType,
-		Digest:          digest,
-		ETag:            resp.Header.Get("ETag"),
-		LastModified:    resp.Header.Get("Last-Modified"),
-		ContentEncoding: resp.Header.Get("Content-Encoding"),
-		Blobs:           []Descriptor{{Digest: digest, Size: size, Name: blobNameOr(pol.BlobName, path)}},
-		Source:          "pull",
-		Target:          RepoScopeFrom(ctx).Target,
-	}
-	if pol.Immutable {
-		art.CacheControl = "immutable"
-	} else {
-		art.ExpiresAt = expiryFor(pol)
-	}
+	art := artifactFromResponse(format, repo, version, digest, size, resp.Header,
+		pol.MediaType, blobNameOr(pol.BlobName, path), pol.Immutable, ttlOf(pol))
+	art.Target = RepoScopeFrom(ctx).Target
 	if pol.NoStore {
 		return pathCacheResult{art: art, hit: false, ok: true}, nil
 	}
@@ -187,18 +163,15 @@ func (r *Registry) fetchCachedPathDirect(ctx context.Context, remote *Remote, fo
 
 // expiryFor computes a mutable entry's expiry from the policy.
 func expiryFor(pol PathCachePolicy) time.Time {
-	ttl := pol.TTL
-	if ttl <= 0 {
-		ttl = DefaultPathTTL
-	}
-	return time.Now().Add(ttl)
+	return time.Now().Add(ttlOf(pol))
 }
 
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
+// ttlOf is the effective TTL for a policy.
+func ttlOf(pol PathCachePolicy) time.Duration {
+	if pol.TTL > 0 {
+		return pol.TTL
 	}
-	return b
+	return DefaultPathTTL
 }
 
 func blobNameOr(name, path string) string {

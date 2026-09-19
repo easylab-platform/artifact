@@ -523,12 +523,7 @@ func (s *State) proxyRecipe(w http.ResponseWriter, r *http.Request, path string)
 	artifactkit.Error(w, http.StatusNotFound, "not found")
 }
 
-func (s *State) base() string {
-	if s.SelfBase == "" {
-		return "http://localhost:8080/artifacts/conan"
-	}
-	return strings.TrimSuffix(s.SelfBase, "/")
-}
+func (s *State) base() string { return artifactkit.SelfURL(s.SelfBase, "conan") }
 
 func (s *State) loadRecipeRev(ctx context.Context, name, ver string) string {
 	if rev, ok := loadRecipeRevOf(ctx, s.Registry, name, ver); ok {
