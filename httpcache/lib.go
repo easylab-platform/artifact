@@ -91,13 +91,13 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Range request is satisfied locally after the first fetch; these trees
 	// carry 100MB+ index files.
 	ct := mediaTypeOf(path)
-	digest, _, _, ok := s.Registry.FetchCachedPath(r.Context(), s.Tree, "tree", path, "/"+path, "",
+	res := s.Registry.FetchCachedPath(r.Context(), s.Tree, "tree", path, "/"+path, "",
 		artifactkit.PathCachePolicy{MediaType: ct, BlobName: pathBase(path)})
-	if !ok {
+	if !res.OK {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), digest, ct, pathBase(path)) {
+	if artifactkit.ServeCachedBlob(w, r, s.Registry.Blobs, r.Context(), res.Artifact, ct, pathBase(path)) {
 		return
 	}
 	artifactkit.Error(w, http.StatusBadGateway, "cache error")

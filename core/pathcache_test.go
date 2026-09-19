@@ -51,13 +51,13 @@ func TestPathCacheFetchesOnceAndServesLocally(t *testing.T) {
 	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran", Name: "tree"})
 	pol := artifactkit.PathCachePolicy{MediaType: "application/gzip"}
 
-	d, n, hit, ok := reg.FetchCachedPath(ctx, "cran", "tree", "src/contrib/PACKAGES.gz", "/src/contrib/PACKAGES.gz", srv.URL, pol)
-	if !ok || hit || d == "" || n == 0 {
-		t.Fatalf("first: ok=%v hit=%v d=%q n=%d", ok, hit, d, n)
+	r1 := reg.FetchCachedPath(ctx, "cran", "tree", "src/contrib/PACKAGES.gz", "/src/contrib/PACKAGES.gz", srv.URL, pol)
+	if !r1.OK || r1.Hit || r1.Digest() == "" || r1.Size() == 0 {
+		t.Fatalf("first: %+v", r1)
 	}
-	d2, _, hit2, ok2 := reg.FetchCachedPath(ctx, "cran", "tree", "src/contrib/PACKAGES.gz", "/src/contrib/PACKAGES.gz", srv.URL, pol)
-	if !ok2 || !hit2 || d2 != d {
-		t.Fatalf("second: ok=%v hit=%v d=%q want local hit with same digest", ok2, hit2, d2)
+	r2 := reg.FetchCachedPath(ctx, "cran", "tree", "src/contrib/PACKAGES.gz", "/src/contrib/PACKAGES.gz", srv.URL, pol)
+	if !r2.OK || !r2.Hit || r2.Digest() != r1.Digest() {
+		t.Fatalf("second: %+v want local hit with same digest", r2)
 	}
 	if got := atomic.LoadInt64(&hits); got != 1 {
 		t.Fatalf("upstream hits = %d, want 1", got)
@@ -108,11 +108,11 @@ func TestPathCacheNoValidatorServedForever(t *testing.T) {
 
 	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran", Name: "tree"})
 	cfg := artifactkit.PathCachePolicy{TTL: time.Nanosecond} // expires immediately
-	d, _, _, _ := reg.FetchCachedPath(ctx, "cran", "tree", "v", "/v", srv.URL, cfg)
+	a := reg.FetchCachedPath(ctx, "cran", "tree", "v", "/v", srv.URL, cfg)
 	time.Sleep(2 * time.Millisecond)
-	d2, _, hit, ok := reg.FetchCachedPath(ctx, "cran", "tree", "v", "/v", srv.URL, cfg)
-	if !ok || !hit || d2 != d {
-		t.Fatalf("stale no-validator: ok=%v hit=%v d=%q", ok, hit, d2)
+	b := reg.FetchCachedPath(ctx, "cran", "tree", "v", "/v", srv.URL, cfg)
+	if !b.OK || !b.Hit || b.Digest() != a.Digest() {
+		t.Fatalf("stale no-validator: %+v", b)
 	}
 	if got := atomic.LoadInt64(&hits); got != 1 {
 		t.Fatalf("hits = %d, want 1 (no validator -> never re-download)", got)
@@ -138,11 +138,11 @@ func TestPathCacheRevalidates304(t *testing.T) {
 
 	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran", Name: "tree"})
 	cfg := artifactkit.PathCachePolicy{TTL: time.Nanosecond}
-	d, _, _, _ := reg.FetchCachedPath(ctx, "cran", "tree", "i", "/i", srv.URL, cfg)
+	a := reg.FetchCachedPath(ctx, "cran", "tree", "i", "/i", srv.URL, cfg)
 	time.Sleep(2 * time.Millisecond)
-	d2, _, _, ok := reg.FetchCachedPath(ctx, "cran", "tree", "i", "/i", srv.URL, cfg)
-	if !ok || d2 != d {
-		t.Fatalf("after 304: ok=%v d=%q want %q", ok, d2, d)
+	b := reg.FetchCachedPath(ctx, "cran", "tree", "i", "/i", srv.URL, cfg)
+	if !b.OK || b.Digest() != a.Digest() {
+		t.Fatalf("after 304: %+v want %q", b, a.Digest())
 	}
 	if atomic.LoadInt64(&bodyHits) != 1 || atomic.LoadInt64(&notModified) != 1 {
 		t.Fatalf("bodyHits=%d notModified=%d, want 1/1", bodyHits, notModified)

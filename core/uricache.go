@@ -238,32 +238,28 @@ func (r *Registry) cachedURI(ctx context.Context, key string) (URICacheResult, b
 // exists with a validator, the request is conditional and a 304 refreshes the
 // entry's TTL without re-downloading the body.
 func (r *Registry) fetchURI(ctx context.Context, key, rawURL string, opts URIOptions) (URICacheResult, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return URICacheResult{}, err
-	}
-	req.Header.Set("User-Agent", UserAgent)
+	// The call's own headers (passthrough Authorization, Accept) ride on the
+	// Remote; conditional validators are added per attempt by the retrying GET.
+	remote := NewRemote(sharedFactory, "", proxyPtr(r.Upstreams, "netcache"))
 	for k, vs := range opts.Headers {
 		for _, v := range vs {
-			req.Header.Add(k, v)
+			remote = remote.WithHeader(k, v)
 		}
 	}
-	// Conditional revalidation: if we hold a stale copy with a validator, ask
-	// the origin whether it changed. A credentialed request is never
-	// revalidated against a shared entry (NoStore skips this path entirely).
+	extra := map[string]string{}
 	if !opts.NoStore {
 		if etag, lastMod, ok := r.staleValidators(ctx, key); ok {
 			if etag != "" {
-				req.Header.Set("If-None-Match", etag)
+				extra["If-None-Match"] = etag
 			}
 			if lastMod != "" {
-				req.Header.Set("If-Modified-Since", lastMod)
+				extra["If-Modified-Since"] = lastMod
 			}
 		}
 	}
-	// Follow redirects (presigned CDN URLs, regional mirrors).
-	client := NewClientFactory().Redirecting(proxyPtr(r.Upstreams, "netcache"))
-	resp, err := client.Do(req)
+	// Retrying, redirect-following GET (presigned CDN URLs, regional mirrors;
+	// the egress proxy surfaces upstream blips as 502).
+	resp, err := remote.getStreamRetryCond(ctx, rawURL, extra)
 	if err != nil {
 		return URICacheResult{}, err
 	}

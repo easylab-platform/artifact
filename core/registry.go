@@ -13,12 +13,10 @@ import (
 // import both.
 const MountBase = targets.MountBase
 
-// clientFactoryFor caches a single ClientFactory on the schema-less Upstreams
-// (per-process). Upstreams is cloned around, so we store the factory in an
-// atomic side table rather than a struct field.
-var globalFactory = NewClientFactory()
-
-func clientFactoryFor(u *Upstreams) *ClientFactory { return globalFactory }
+// clientFactoryFor returns the process-wide client factory. Formerly a
+// separate instance; it now delegates to sharedFactory so OCI's remote
+// upstreams share the same connection pool as every other fetch.
+func clientFactoryFor(u *Upstreams) *ClientFactory { return sharedFactory }
 
 // Registry is the composed substrate handed to every protocol adapter. It
 // bundles the metadata store (mutable index), the blob store (immutable CAS)

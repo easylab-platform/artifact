@@ -69,17 +69,17 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		artifactkit.Error(w, http.StatusBadGateway, "upstream: "+err.Error())
 		return
 	}
+	// Serve from the CAS, replaying the stored Content-Encoding/ETag/
+	// Last-Modified so the client decodes bytes exactly as from the origin.
 	ct := res.Header.Get("Content-Type")
-	if ct == "" {
-		ct = "application/octet-stream"
+	art := artifactkit.Artifact{
+		Digest:          res.Digest,
+		MediaType:       ct,
+		ContentEncoding: res.Header.Get("Content-Encoding"),
+		ETag:            res.Header.Get("ETag"),
+		LastModified:    res.Header.Get("Last-Modified"),
 	}
-	// Replay the upstream's content-coding so the client decodes bytes the
-	// same way it would from the origin. go's http.ServeContent does not set
-	// Content-Encoding for us.
-	if enc := res.Header.Get("Content-Encoding"); enc != "" {
-		w.Header().Set("Content-Encoding", enc)
-	}
-	if !artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), res.Digest, ct) {
+	if !artifactkit.ServeCachedBlob(w, r, s.Registry.Blobs, r.Context(), art, ct, "") {
 		artifactkit.Error(w, http.StatusBadGateway, "cache error")
 	}
 }

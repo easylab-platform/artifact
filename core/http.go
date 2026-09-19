@@ -119,6 +119,49 @@ func ServeBlobAtNamed(w http.ResponseWriter, r *http.Request, store BlobStore, c
 	return true
 }
 
+// ServeCachedBlob serves a cached artifact's blob with full HTTP semantics and
+// replays the response metadata captured at fetch time. It is the single serve
+// path for the caching adapters (netcache, pathcache trees) so a stored
+// Content-Encoding / ETag / Last-Modified reaches the client verbatim — without
+// Content-Encoding replay a transparently-gzipped body would be handed to the
+// client unlabeled and fail to decode.
+//
+// ct overrides the artifact's media type when non-empty (an adapter may know a
+// better type from the path). filename, when non-empty, adds a Content-
+// Disposition. It returns false when the blob is absent (caller decides 404).
+func ServeCachedBlob(w http.ResponseWriter, r *http.Request, store BlobStore, ctx context.Context, art Artifact, ct, filename string) bool {
+	if ct == "" {
+		ct = art.MediaType
+	}
+	if art.ContentEncoding != "" {
+		w.Header().Set("Content-Encoding", art.ContentEncoding)
+	}
+	if art.ETag != "" {
+		w.Header().Set("ETag", art.ETag)
+	}
+	var modTime time.Time
+	if art.LastModified != "" {
+		w.Header().Set("Last-Modified", art.LastModified)
+		if t, err := http.ParseTime(art.LastModified); err == nil {
+			modTime = t
+		}
+	}
+	size, err := store.Stat(ctx, art.Digest)
+	if err != nil || size == nil {
+		return false
+	}
+	rd, err := store.Open(ctx, art.Digest)
+	if err != nil || rd == nil {
+		return false
+	}
+	defer func() { _ = rd.Close() }()
+	if filename != "" {
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	}
+	ServeBlob(w, r, rd, ct, modTime)
+	return true
+}
+
 // URLencode percent-encodes a path segment (RFC 3986 unreserved set plus ~
 // stay literal, everything else is %XX uppercase).
 func URLencode(s string) string {

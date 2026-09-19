@@ -94,13 +94,13 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *State) fetch(w http.ResponseWriter, r *http.Request, repoPath string) {
 	repo, name := splitRepoPath(repoPath)
 	ct := mediaTypeOf(name)
-	digest, _, _, ok := s.Registry.FetchCachedPath(r.Context(), "apk", repo, name, "/"+repoPath, "",
+	res := s.Registry.FetchCachedPath(r.Context(), "apk", repo, name, "/"+repoPath, "",
 		artifactkit.PathCachePolicy{MediaType: ct, BlobName: name})
-	if !ok {
+	if !res.OK {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, ct) {
+	if artifactkit.ServeCachedBlob(w, r, s.Registry.Blobs, r.Context(), res.Artifact, ct, "") {
 		return
 	}
 	artifactkit.Error(w, http.StatusBadGateway, "cache error")

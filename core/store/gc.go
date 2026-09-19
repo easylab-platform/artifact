@@ -29,6 +29,13 @@ func (s *Store) ExpireNegative(ctx context.Context, now time.Time) (int, error) 
 	return int(res.RowsAffected), nil
 }
 
+// ReferencedDigests implements artifactkit.IndexStore: every CAS digest any
+// artifact row references (primary Digest plus each blob descriptor), in one
+// pass over the table.
+func (s *Store) ReferencedDigests(ctx context.Context) (map[string]bool, error) {
+	return s.referencedDigests(ctx)
+}
+
 // referencedDigests returns every CAS digest referenced by any artifact row
 // (both the primary Digest and each blob descriptor). One pass over the table
 // serves the whole GC cycle, so orphan detection is O(rows) total rather than
@@ -194,4 +201,44 @@ func (s *Store) Stats(ctx context.Context, blobs artifactkit.BlobStore) (Stats, 
 // it disables orphan reaping (safe default).
 type BlobAger interface {
 	ModTime(ctx context.Context, digest string) (time.Time, error)
+}
+
+// RunReaper runs the storage reaper on a ticker until ctx is cancelled: it
+// expires negative cache entries and reclaims orphan blobs. It is the shared
+// entry point for both the standalone server (cmd) and easylab's embedded
+// registry, so a long-running deployment always reclaims space. interval <= 0
+// disables it. logf may be nil.
+func RunReaper(ctx context.Context, s *Store, blobs artifactkit.BlobStore, interval, grace time.Duration, logf func(string, ...any)) {
+	if interval <= 0 || s == nil || blobs == nil {
+		return
+	}
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	pass := func() {
+		n, err := s.ExpireNegative(ctx, time.Now())
+		if err != nil {
+			logf("reaper: expire negative: %v", err)
+		}
+		st, err := s.ReapOrphanBlobs(ctx, blobs, grace)
+		if err != nil {
+			logf("reaper: orphan blobs: %v", err)
+			return
+		}
+		if n > 0 || st.OrphanBlobs > 0 {
+			logf("reaper: expired_negative=%d orphan_blobs=%d kept=%d bytes_freed=%d",
+				n, st.OrphanBlobs, st.BlobsKept, st.BytesFreed)
+		}
+	}
+	pass()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			pass()
+		}
+	}
 }

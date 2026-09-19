@@ -101,26 +101,14 @@ func (h HostedStore) HostedDelete(ctx context.Context, format, repo, name string
 }
 
 // digestReferenced reports whether any artifact still points at the digest.
+// It asks the index for the full reference set in one pass, rather than
+// loading every artifact one by one.
 func (h HostedStore) digestReferenced(ctx context.Context, digest string) bool {
-	pkgs, err := h.Registry.Meta.ListPackages(ctx)
+	refs, err := h.Registry.Meta.ReferencedDigests(ctx)
 	if err != nil {
 		return true // be conservative
 	}
-	for _, p := range pkgs {
-		art, err := h.Registry.Meta.Get(ctx, p.Format, p.Repository, p.Version)
-		if err != nil {
-			continue
-		}
-		if art.Digest == digest {
-			return true
-		}
-		for _, b := range art.Blobs {
-			if b.Digest == digest {
-				return true
-			}
-		}
-	}
-	return false
+	return refs[digest]
 }
 
 // GeneratedFile is one index document produced by a Generator.

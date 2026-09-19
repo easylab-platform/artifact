@@ -108,6 +108,12 @@ func (s *scopedStore) ListPackages(ctx context.Context) ([]PackageSummary, error
 	return s.inner.ListPackages(ctx)
 }
 
+// ReferencedDigests is namespace-agnostic (it walks everything), so it passes
+// straight through.
+func (s *scopedStore) ReferencedDigests(ctx context.Context) (map[string]bool, error) {
+	return s.inner.ReferencedDigests(ctx)
+}
+
 func (s *scopedStore) DeleteUpload(ctx context.Context, id string) error {
 	return s.inner.DeleteUpload(ctx, id)
 }

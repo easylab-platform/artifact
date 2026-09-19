@@ -103,13 +103,13 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, repo, rest string)
 	}
 
 	ct := mediaTypeOf(rest)
-	digest, _, _, ok := s.Registry.FetchCachedPath(r.Context(), "rpm", repo, full, "/"+full, base,
+	res := s.Registry.FetchCachedPath(r.Context(), "rpm", repo, full, "/"+full, base,
 		artifactkit.PathCachePolicy{MediaType: ct, BlobName: rest})
-	if !ok {
+	if !res.OK {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, ct) {
+	if artifactkit.ServeCachedBlob(w, r, s.Registry.Blobs, r.Context(), res.Artifact, ct, "") {
 		return
 	}
 	artifactkit.Error(w, http.StatusBadGateway, "cache error")

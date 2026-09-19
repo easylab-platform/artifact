@@ -36,19 +36,42 @@ type PathCachePolicy struct {
 	NoStore bool
 }
 
-// pathCacheResult is the single-flight payload.
-type pathCacheResult struct {
-	digest string
-	size   int64
-	hit    bool
-	ok     bool
+// PathCacheResult is the outcome of FetchCachedPath.
+type PathCacheResult struct {
+	// Artifact carries the digest, size, media type and the replayable HTTP
+	// metadata (Content-Encoding/ETag/Last-Modified). Serve it with
+	// ServeCachedBlob so the stored headers reach the client.
+	Artifact Artifact
+	// Hit is true when the bytes were served from the cache with no upstream
+	// request.
+	Hit bool
+	// OK is false when the object is absent upstream (or air-gapped/unreachable).
+	OK bool
 }
 
-// FetchCachedPath returns the CAS digest and size for one path-tree object,
-// serving local bytes when fresh and revalidating or fetching otherwise. ok is
-// false when the object is absent upstream (or air-gapped / unreachable via a
-// 4xx). hit is true when the bytes were served from the cache without any
-// upstream request.
+// Digest is the CAS digest of the served bytes ("" when !OK).
+func (p PathCacheResult) Digest() string { return p.Artifact.Digest }
+
+// Size is the byte length (0 when !OK).
+func (p PathCacheResult) Size() int64 {
+	if len(p.Artifact.Blobs) > 0 {
+		return p.Artifact.Blobs[0].Size
+	}
+	return 0
+}
+
+// pathCacheResult is the single-flight payload.
+type pathCacheResult struct {
+	art Artifact
+	hit bool
+	ok  bool
+}
+
+// FetchCachedPath returns the cached artifact for one path-tree object, serving
+// local bytes when fresh and revalidating or fetching otherwise. OK is false
+// when the object is absent upstream (or air-gapped / unreachable via a 4xx).
+// Hit is true when the bytes were served from the cache without any upstream
+// request. Serve the result with ServeCachedBlob to replay stored headers.
 //
 // Revalidation rules:
 //   - fresh (immutable, or within TTL): served locally, no network.
@@ -56,7 +79,7 @@ type pathCacheResult struct {
 //     serves the cached bytes; 200 replaces them.
 //   - stale WITHOUT a validator: served locally. Re-downloading a large index
 //     that cannot be conditionally revalidated would violate "fetch once".
-func (r *Registry) FetchCachedPath(ctx context.Context, format, repo, version, path, upstreamBase string, pol PathCachePolicy) (digest string, size int64, hit bool, ok bool) {
+func (r *Registry) FetchCachedPath(ctx context.Context, format, repo, version, path, upstreamBase string, pol PathCachePolicy) PathCacheResult {
 	now := time.Now()
 
 	// Cache read (unless proxying an unshareable, credentialed request).
@@ -68,12 +91,12 @@ func (r *Registry) FetchCachedPath(ctx context.Context, format, repo, version, p
 			immutable := a.CacheControl == "immutable"
 			fresh := immutable || a.ExpiresAt.IsZero() || now.Before(a.ExpiresAt)
 			if fresh {
-				return a.Digest, a.Blobs[0].Size, true, true
+				return PathCacheResult{Artifact: a, Hit: true, OK: true}
 			}
 			// Stale. Without a validator we cannot cheaply revalidate, so keep
 			// serving the cached bytes instead of re-downloading.
 			if a.ETag == "" && a.LastModified == "" {
-				return a.Digest, a.Blobs[0].Size, true, true
+				return PathCacheResult{Artifact: a, Hit: true, OK: true}
 			}
 		}
 	}
@@ -81,7 +104,7 @@ func (r *Registry) FetchCachedPath(ctx context.Context, format, repo, version, p
 	// Resolve the upstream for this path.
 	remote, err := r.remoteFor(ctx, format, repo, upstreamBase)
 	if err != nil {
-		return "", 0, false, false
+		return PathCacheResult{}
 	}
 
 	// Single-flight: one upstream request per (url, auth) even under a burst.
@@ -93,14 +116,14 @@ func (r *Registry) FetchCachedPath(ctx context.Context, format, repo, version, p
 				immutable := a.CacheControl == "immutable"
 				stillFresh := immutable || a.ExpiresAt.IsZero() || time.Now().Before(a.ExpiresAt)
 				if stillFresh {
-					return pathCacheResult{a.Digest, a.Blobs[0].Size, true, true}, nil
+					return pathCacheResult{art: a, hit: true, ok: true}, nil
 				}
 			}
 		}
 		return r.fetchCachedPathDirect(ctx, remote, format, repo, version, path, pol, have, art)
 	})
 	res := v.(pathCacheResult)
-	return res.digest, res.size, res.hit, res.ok
+	return PathCacheResult{Artifact: res.art, Hit: res.hit, OK: res.ok}
 }
 
 // fetchCachedPathDirect performs the (conditional) upstream GET and stores it.
@@ -129,7 +152,7 @@ func (r *Registry) fetchCachedPathDirect(ctx context.Context, remote *Remote, fo
 		prev.LastModified = firstNonEmpty(resp.Header.Get("Last-Modified"), prev.LastModified)
 		prev.ExpiresAt = expiryFor(pol)
 		LogMetaErr(format+" revalidate", r.Meta.Put(ctx, prev))
-		return pathCacheResult{prev.Digest, prev.Blobs[0].Size, true, true}, nil
+		return pathCacheResult{art: prev, hit: true, ok: true}, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return pathCacheResult{}, nil
@@ -138,9 +161,6 @@ func (r *Registry) fetchCachedPathDirect(ctx context.Context, remote *Remote, fo
 	digest, size, err := r.streamToBlob(ctx, resp.Body)
 	if err != nil {
 		return pathCacheResult{}, nil
-	}
-	if pol.NoStore {
-		return pathCacheResult{digest, size, false, true}, nil
 	}
 	art := Artifact{
 		Format: format, Repository: repo, Version: version,
@@ -158,8 +178,11 @@ func (r *Registry) fetchCachedPathDirect(ctx context.Context, remote *Remote, fo
 	} else {
 		art.ExpiresAt = expiryFor(pol)
 	}
+	if pol.NoStore {
+		return pathCacheResult{art: art, hit: false, ok: true}, nil
+	}
 	LogMetaErr(format+" cache", r.Meta.Put(ctx, art))
-	return pathCacheResult{digest, size, false, true}, nil
+	return pathCacheResult{art: art, hit: false, ok: true}, nil
 }
 
 // expiryFor computes a mutable entry's expiry from the policy.

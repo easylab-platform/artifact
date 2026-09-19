@@ -157,7 +157,7 @@ func main() {
 		addr, mounted, names, *dataDir, *airGap)
 	// Background reaper: expire negative cache entries and reclaim orphan
 	// blobs. -gc-interval=0 disables it.
-	go runReaper(context.Background(), meta, blobs, *gcInterval, *gcGrace)
+	go store.RunReaper(context.Background(), meta, blobs, *gcInterval, *gcGrace, log.Printf)
 	// ARTIFACT_DEBUG=1 logs every request (method, path, framing, status) and
 	// is invaluable when a client's upload/download framing is in question.
 	debug := os.Getenv("ARTIFACT_DEBUG") != ""
@@ -176,41 +176,6 @@ func main() {
 	}
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
-	}
-}
-
-// runReaper periodically reclaims storage: it expires negative (404/410) cache
-// entries and removes CAS blobs no artifact references. It never deletes a
-// referenced blob, so "fetch once" holds; grace protects in-flight writes.
-func runReaper(ctx context.Context, meta *store.Store, blobs artifactkit.BlobStore, interval, grace time.Duration) {
-	if interval <= 0 {
-		return
-	}
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	pass := func() {
-		n, err := meta.ExpireNegative(ctx, time.Now())
-		if err != nil {
-			log.Printf("reaper: expire negative: %v", err)
-		}
-		st, err := meta.ReapOrphanBlobs(ctx, blobs, grace)
-		if err != nil {
-			log.Printf("reaper: orphan blobs: %v", err)
-			return
-		}
-		if n > 0 || st.OrphanBlobs > 0 {
-			log.Printf("reaper: expired_negative=%d orphan_blobs=%d kept=%d bytes_freed=%d",
-				n, st.OrphanBlobs, st.BlobsKept, st.BytesFreed)
-		}
-	}
-	pass()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			pass()
-		}
 	}
 }
 

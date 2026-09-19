@@ -11,6 +11,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/easylab-platform/artifact/targets"
@@ -65,11 +66,19 @@ const UserAgent = "artifactkit/1.0 (pull-through mirror)"
 //   - nil           -> follow the environment proxy configuration
 //   - Some("")      -> direct connection (env proxy bypassed)
 //   - Some(url)     -> always route through the given proxy
+//
+// One factory is shared process-wide (sharedFactory) so every upstream fetch
+// reuses the same transports and keep-alive pool; building a factory per fetch
+// would open a fresh TCP+TLS connection every time. It is safe for concurrent
+// use.
 type ClientFactory struct {
+	mu      sync.Mutex
 	clients map[string]*http.Client
 }
 
-// NewClientFactory returns an empty factory.
+// NewClientFactory returns an empty factory. Callers that fetch repeatedly
+// should share one (see sharedFactory); this constructor is for tests and
+// isolated embedders.
 func NewClientFactory() *ClientFactory {
 	return &ClientFactory{clients: map[string]*http.Client{}}
 }
@@ -82,6 +91,8 @@ func NewClientFactory() *ClientFactory {
 // defeat the range/caching policy.
 func (f *ClientFactory) Client(proxy *string) *http.Client {
 	key := proxyKey(proxy)
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if c, ok := f.clients[key]; ok {
 		return c
 	}
@@ -107,6 +118,8 @@ func (f *ClientFactory) Client(proxy *string) *http.Client {
 // needs; same-host redirects keep it.
 func (f *ClientFactory) Redirecting(proxy *string) *http.Client {
 	key := "__follow__" + proxyKey(proxy)
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if c, ok := f.clients[key]; ok {
 		return c
 	}
@@ -114,6 +127,13 @@ func (f *ClientFactory) Redirecting(proxy *string) *http.Client {
 	f.clients[key] = c
 	return c
 }
+
+// sharedFactory is the process-wide factory every Registry fetch uses, so
+// upstream connections are pooled instead of re-dialed per request.
+var sharedFactory = NewClientFactory()
+
+// SharedClientFactory returns the process-wide client factory.
+func SharedClientFactory() *ClientFactory { return sharedFactory }
 
 func proxyKey(proxy *string) string {
 	if proxy == nil {
@@ -399,7 +419,7 @@ func (r *Registry) FetchViaRedirect(ctx context.Context, url string) (Fetched, e
 
 // FetchAbsolute pulls a full URL verbatim.
 func (r *Registry) FetchAbsolute(ctx context.Context, url string) (Fetched, error) {
-	factory := NewClientFactory()
+	factory := sharedFactory
 	remote := NewRemote(factory, "", proxyPtr(r.Upstreams, "generic"))
 	resp, err := remote.getStable(ctx, url)
 	if err != nil {
@@ -429,9 +449,11 @@ func (r *Registry) FetchAbsoluteBytes(ctx context.Context, url string) ([]byte, 
 // matches wantDigest (when non-empty) and following redirects. It is used for
 // presigned CDN hrefs (git LFS objects) that the caller learned out of band.
 func (r *Registry) FetchAbsoluteToBlob(ctx context.Context, url, wantDigest string) (int64, error) {
-	factory := NewClientFactory()
+	factory := sharedFactory
 	remote := NewRemote(factory, "", proxyPtr(r.Upstreams, "generic"))
-	resp, err := remote.Get(ctx, url)
+	// Retrying GET that follows redirects: a presigned CDN href may 3xx and
+	// the egress proxy surfaces upstream blips as 502.
+	resp, err := remote.getStreamRetry(ctx, url)
 	if err != nil {
 		return 0, err
 	}
@@ -505,7 +527,7 @@ func (r *Registry) Remote(format, upstreamBase string) (*Remote, error) {
 			return nil, fmt.Errorf("no upstream for %s", format)
 		}
 	}
-	factory := NewClientFactory()
+	factory := sharedFactory
 	return NewRemote(factory, base, proxyPtr(r.Upstreams, format)), nil
 }
 
@@ -520,7 +542,7 @@ func (r *Registry) RemoteFor(format, repo, upstreamBase string) (*Remote, error)
 			return nil, fmt.Errorf("no upstream for %s/%s", format, repo)
 		}
 	}
-	factory := NewClientFactory()
+	factory := sharedFactory
 	proxy, ok := r.Upstreams.RepoProxy(format, repo)
 	var pp *string
 	if ok {
@@ -532,7 +554,7 @@ func (r *Registry) RemoteFor(format, repo, upstreamBase string) (*Remote, error)
 // RemoteAt returns a remote against an arbitrary absolute base using the
 // format's proxy policy.
 func (r *Registry) RemoteAt(base string) *Remote {
-	factory := NewClientFactory()
+	factory := sharedFactory
 	return NewRemote(factory, base, proxyPtr(r.Upstreams, "generic"))
 }
 
@@ -633,7 +655,7 @@ func (r *Registry) remoteFor(ctx context.Context, format, repo, upstreamBase str
 	if !ok {
 		return nil, fmt.Errorf("no upstream for %s/%s", format, repo)
 	}
-	factory := NewClientFactory()
+	factory := sharedFactory
 	remote := NewRemote(factory, base, proxy)
 	return r.applyAuth(ctx, format, repo, remote)
 }
@@ -718,7 +740,7 @@ func (r *Registry) RemoteUpstream(ctx context.Context, format, explicitBase stri
 
 // remoteAtBase is the ctx-free absolute-base constructor.
 func (r *Registry) remoteAtBase(base string) *Remote {
-	factory := NewClientFactory()
+	factory := sharedFactory
 	return NewRemote(factory, base, proxyPtr(r.Upstreams, "generic"))
 }
 

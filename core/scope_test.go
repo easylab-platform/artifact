@@ -134,4 +134,7 @@ func (f *fakeIndex) ListUploads(context.Context) ([]string, error) {
 }
 func (f *fakeIndex) GetMeta(context.Context, string, string) ([]byte, error) { return nil, nil }
 func (f *fakeIndex) SetMeta(context.Context, string, string, []byte) error   { return nil }
-func (f *fakeIndex) Close() error                                            { return nil }
+func (f *fakeIndex) ReferencedDigests(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+func (f *fakeIndex) Close() error { return nil }

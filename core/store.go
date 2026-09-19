@@ -61,6 +61,10 @@ type IndexStore interface {
 	ListRepositories(ctx context.Context) ([]string, error)
 	// ListPackages returns a compact summary for the catalog.
 	ListPackages(ctx context.Context) ([]PackageSummary, error)
+	// ReferencedDigests returns every CAS digest any artifact references
+	// (primary Digest plus blob descriptors), so a caller can decide whether a
+	// blob is still in use without an N+1 scan. One pass over the index.
+	ReferencedDigests(ctx context.Context) (map[string]bool, error)
 	// DeleteRepo removes an entire repository for a format.
 	DeleteRepo(ctx context.Context, format, repository string) (int, error)
 	// SaveUpload persists an upload session.

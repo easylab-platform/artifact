@@ -56,13 +56,13 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Cache-first with shared freshness (single global repo "cache").
 	ct := mediaTypeOf(path)
-	digest, _, _, ok := s.Registry.FetchCachedPath(r.Context(), "nix", "cache", path, "/"+path, "",
+	res := s.Registry.FetchCachedPath(r.Context(), "nix", "cache", path, "/"+path, "",
 		artifactkit.PathCachePolicy{MediaType: ct, BlobName: path})
-	if !ok {
+	if !res.OK {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if artifactkit.ServeBlobAtNamed(w, r, s.Registry.Blobs, r.Context(), digest, ct, path) {
+	if artifactkit.ServeCachedBlob(w, r, s.Registry.Blobs, r.Context(), res.Artifact, ct, path) {
 		return
 	}
 	artifactkit.Error(w, http.StatusBadGateway, "cache error")

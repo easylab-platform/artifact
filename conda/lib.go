@@ -98,13 +98,13 @@ func (s *State) proxy(w http.ResponseWriter, r *http.Request, path, channel, res
 
 	repo := channel + "/" + subdirOf(rest)
 	ct := mediaTypeOf(path)
-	digest, _, _, ok := s.Registry.FetchCachedPath(r.Context(), "conda", repo, path, "/"+path, base,
+	res := s.Registry.FetchCachedPath(r.Context(), "conda", repo, path, "/"+path, base,
 		artifactkit.PathCachePolicy{MediaType: ct})
-	if !ok {
+	if !res.OK {
 		artifactkit.Error(w, http.StatusNotFound, "not found upstream")
 		return
 	}
-	if artifactkit.ServeBlobAt(w, r, s.Registry.Blobs, r.Context(), digest, ct) {
+	if artifactkit.ServeCachedBlob(w, r, s.Registry.Blobs, r.Context(), res.Artifact, ct, "") {
 		return
 	}
 	artifactkit.Error(w, http.StatusBadGateway, "cache error")

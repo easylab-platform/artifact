@@ -233,7 +233,7 @@ func (s *State) fetchSparseIndex(ctx context.Context, rel string) string {
 	if err != nil {
 		return ""
 	}
-	body, err := remote.GetCached(artifactkit.Ctx(), artifactkit.SharedIndexCache(), "/"+strings.Trim(rel, "/"))
+	body, err := remote.GetCached(ctx, artifactkit.SharedIndexCache(), "/"+strings.Trim(rel, "/"))
 	if err != nil {
 		return ""
 	}
