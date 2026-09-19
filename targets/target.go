@@ -41,15 +41,6 @@ const (
 	Identity Kind = "identity"
 )
 
-// PathMap describes how a client's inbound path maps onto the adapter mount.
-// Strip is removed from the front of the path before the adapter sees it (a
-// mirror may publish the repo under a host path prefix, e.g. Google Maven's
-// /dl/android/maven2); Add defaults to MountBase/<ID> and is applied by the
-// sidecar, which is why it is derived, not stored.
-type PathMap struct {
-	Strip string
-}
-
 // AuthMode selects how a target authenticates to its upstream.
 type AuthMode string
 
@@ -85,22 +76,27 @@ type Target struct {
 	// Base is the upstream root (scheme://host[/path]). Empty for an Identity
 	// target whose base is derived from the request host (git, OCI).
 	Base string `json:"base"`
-	// Hosts are the hostname patterns a client may address this target by.
-	// They drive transparent (Host-header) routing and the SSRF allow-list.
-	// Exact names, "*.suffix" wildcards, or bare suffixes.
+	// Hosts are the hostname patterns a client may address this target by:
+	// the upstream's own host plus any alternate mirrors of the same content.
+	// They drive transparent (Host-header) routing, the SSRF allow-list and
+	// the generated egress policy. Exact names, "*.suffix" wildcards, or bare
+	// suffixes.
 	Hosts []string `json:"hosts,omitempty"`
-	// EgressOnly are hostname patterns the sidecar must steer into the
-	// gateway but that are NOT upstream identities for this target: CDN
-	// carve-outs and alternate distro mirrors. They appear in the generated
-	// egress policy but are ignored by the registry's host resolver.
-	EgressOnly []string `json:"egress_only,omitempty"`
+	// DirectHosts are hostname patterns the egress policy must leave DIRECT
+	// even though they belong to this target's ecosystem: CDN endpoints the
+	// adapter reaches server-side (a container registry's blob CDN), which the
+	// intercepted client must never be handed.
+	DirectHosts []string `json:"direct_hosts,omitempty"`
 	// Aux maps a sub-endpoint name to its own base URL, for endpoints that
 	// live on a different host than the primary upstream (crates.io's index
 	// and static downloads). Aux entries are never mounted, but their hosts
 	// are part of the SSRF allow-list.
 	Aux map[string]string `json:"aux,omitempty"`
-	// Strip is the client-path prefix removed before the adapter mount.
-	Strip string `json:"strip,omitempty"`
+	// ExtraStrips are additional client-path prefixes that map onto this
+	// target's mount, beyond the one derived from Base. A mirror that serves
+	// the same content under several prefixes lists them here (Spring's
+	// /release in addition to its base path /milestone).
+	ExtraStrips []string `json:"extra_strips,omitempty"`
 	// Outbound, when set, is the origin emitted in raw self-URL mode (the
 	// upstream shape an intercepting sidecar maps back). Defaults to Base.
 	Outbound string `json:"outbound,omitempty"`
@@ -127,8 +123,46 @@ func (t Target) Shared() bool {
 // Mount is the path prefix this target is served under: /artifacts/<ID>.
 func (t Target) Mount() string { return MountBase + "/" + t.ID }
 
-// Add returns the path prefix the sidecar prepends after stripping t.Strip.
-func (t Target) Add() string { return t.Mount() }
+// EgressAdd is the mount the sidecar prepends after stripping. It is the
+// PROTOCOL's default mount, not the target's own: a named mirror is reached
+// host-driven on the default mount and resolved to the target by its Host.
+// OCI returns "" because it is spec-fixed at /v2 and routes by Host alone.
+func (t Target) EgressAdd() string {
+	if t.Protocol == "oci" {
+		return ""
+	}
+	return MountBase + "/" + t.Protocol
+}
+
+// BasePath returns the path component of Base ("/maven2" for
+// https://repo.maven.apache.org/maven2), or "" when Base is host-only.
+func (t Target) BasePath() string {
+	return pathOf(t.Base)
+}
+
+// InboundStrips returns the client-path prefixes that belong to the upstream
+// ORIGIN and must be removed before the adapter mount sees the path. The
+// upstream's own base path comes first (a mirror at host/prefix is dialed as
+// host/prefix by its clients), then any ExtraStrips.
+func (t Target) InboundStrips() []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		s = strings.Trim(strings.TrimSpace(s), "/")
+		if s == "" {
+			return
+		}
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, "/"+s)
+		}
+	}
+	add(t.BasePath())
+	for _, s := range t.ExtraStrips {
+		add(s)
+	}
+	return out
+}
 
 // Origin returns the raw-mode origin (the upstream shape): Outbound when set,
 // else Base.
@@ -150,4 +184,21 @@ func SplitID(id string) (proto, name string) {
 		return id[:i], id[i+1:]
 	}
 	return id, ""
+}
+
+// pathOf extracts the path component of a URL ("/maven2"), or "".
+func pathOf(raw string) string {
+	rest := raw
+	if i := strings.Index(raw, "://"); i >= 0 {
+		rest = raw[i+3:]
+	}
+	i := strings.IndexAny(rest, "/?#")
+	if i < 0 {
+		return ""
+	}
+	p := rest[i:]
+	if j := strings.IndexAny(p, "?#"); j >= 0 {
+		p = p[:j]
+	}
+	return strings.Trim(p, "/")
 }

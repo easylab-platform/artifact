@@ -1,130 +1,111 @@
-# easysidecar default egress policy: package-manager upstreams are
-# steered into easylab's pull-through registry; everything else is direct.
 rules:
-  - match: ["registry-1.docker.io", "docker.io", "index.docker.io"]
-    action: rewrite
-    target: "gw:80"
-  - match: ["ghcr.io", "quay.io", "gcr.io", "registry.k8s.io", "mcr.microsoft.com", "public.ecr.aws", "nvcr.io"]
+  - match: ["registry-1.docker.io", "docker.io", "index.docker.io", "ghcr.io", "quay.io", "gcr.io", "registry.k8s.io", "mcr.microsoft.com", "public.ecr.aws", "nvcr.io"]
     action: rewrite
     target: "gw:80"
   - match: ["production.cloudflare.docker.com", "*.cloudflarestorage.com"]
-    action: rewrite
-    target: "gw:80"
-  - match: ["registry.npmjs.org", "*.npmjs.org"]
-    action: rewrite
-    target: "gw:80"
-  - match: ["npm.jsr.io"]
-    action: rewrite
-    target: "gw:80"
-    add_prefix: "/artifacts/npm"
-  - match: ["pypi.org", "files.pythonhosted.org"]
-    action: rewrite
-    target: "gw:80"
-  - match: ["proxy.golang.org", "sum.golang.org"]
-    action: rewrite
-    target: "gw:80"
+    action: direct
   - match: ["crates.io", "index.crates.io", "static.crates.io"]
     action: rewrite
     target: "gw:80"
-  - match: ["repo.maven.apache.org"]
+    add_prefix: "/artifacts/cargo"
+  - match: ["repo.packagist.org", "packagist.org"]
     action: rewrite
     target: "gw:80"
-  - match: ["dl.google.com"]
-    action: rewrite
-    target: "gw:80"
-    strip_prefix: "/dl/android/maven2"
-    add_prefix: "/artifacts/maven"
-  - match: ["plugins.gradle.org"]
-    action: rewrite
-    target: "gw:80"
-    strip_prefix: "/m2"
-    add_prefix: "/artifacts/maven"
-  - match: ["repo.clojars.org"]
-    action: rewrite
-    target: "gw:80"
-    add_prefix: "/artifacts/maven"
-  - match: ["repo.spring.io"]
-    action: rewrite
-    target: "gw:80"
-    strip_prefix: "/release"
-    add_prefix: "/artifacts/maven"
-  - match: ["jitpack.io"]
-    action: rewrite
-    target: "gw:80"
-    add_prefix: "/artifacts/maven"
-  - match: ["api.nuget.org", "azuresearch-usnc.nuget.org"]
-    action: rewrite
-    target: "gw:80"
-  - match: ["rubygems.org", "index.rubygems.org"]
-    action: rewrite
-    target: "gw:80"
-  - match: ["repo.packagist.org"]
-    action: rewrite
-    target: "gw:80"
-  - match: ["repo.hex.pm"]
-    action: rewrite
-    target: "gw:80"
-  - match: ["hex.pm", "api.hex.pm"]
-    action: rewrite
-    target: "gw:80"
-  - match: ["pub.dev"]
-    action: rewrite
-    target: "gw:80"
-  - match: ["charts.helm.sh"]
-    action: rewrite
-    target: "gw:80"
+    add_prefix: "/artifacts/composer"
   - match: ["center.conan.io", "center2.conan.io"]
     action: rewrite
     target: "gw:80"
+    add_prefix: "/artifacts/conan"
+  - match: ["proxy.golang.org", "sum.golang.org"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/go"
+  - match: ["charts.helm.sh"]
+    action: rewrite
+    target: "gw:80"
+    strip_prefix: "/stable"
+    add_prefix: "/artifacts/helm"
+  - match: ["repo.hex.pm", "hex.pm", "api.hex.pm"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/hex"
+  - match: ["repo.maven.apache.org"]
+    action: rewrite
+    target: "gw:80"
+    strip_prefix: "/maven2"
+    add_prefix: "/artifacts/maven"
+  - match: ["registry.npmjs.org", "*.npmjs.org"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/npm"
+  - match: ["api.nuget.org", "azuresearch-usnc.nuget.org"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/nuget"
+  - match: ["pub.dev"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/pub"
+  - match: ["pypi.org", "files.pythonhosted.org"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/pypi"
+  - match: ["rubygems.org", "index.rubygems.org"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/rubygems"
   - match: ["api.spm.swift.org"]
     action: rewrite
     target: "gw:80"
+    add_prefix: "/artifacts/swift"
   - match: ["dl-cdn.alpinelinux.org"]
     action: rewrite
     target: "gw:80"
-  - match: ["deb.debian.org", "security.debian.org"]
+    add_prefix: "/artifacts/apk"
+  - match: ["deb.debian.org", "security.debian.org", "archive.ubuntu.com", "security.ubuntu.com"]
     action: rewrite
     target: "gw:80"
-  - match: ["archive.ubuntu.com", "security.ubuntu.com"]
+    add_prefix: "/artifacts/debian"
+  - match: ["dl.fedoraproject.org", "*.elrepo.org", "mirror.stream.centos.org"]
     action: rewrite
     target: "gw:80"
-  - match: ["*.elrepo.org", "mirror.stream.centos.org", "dl.fedoraproject.org"]
-    action: rewrite
-    target: "gw:80"
-  - match: ["huggingface.co", "*.huggingface.co", "cdn-lfs.huggingface.co"]
-    action: rewrite
-    target: "gw:80"
+    add_prefix: "/artifacts/rpm"
   - match: ["repo.anaconda.com", "conda.anaconda.org"]
     action: rewrite
     target: "gw:80"
+    add_prefix: "/artifacts/conda"
+  - match: ["huggingface.co", "*.huggingface.co", "cdn-lfs.huggingface.co"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/huggingface"
   - match: ["cache.nixos.org"]
     action: rewrite
     target: "gw:80"
-  - match: ["github.com", "codeload.github.com"]
+    add_prefix: "/artifacts/nix"
+  - match: ["buf.build"]
     action: rewrite
     target: "gw:80"
-  - match: ["repo.scala-sbt.org", "scala.jfrog.io"]
-    action: rewrite
-    target: "gw:80"
+    add_prefix: "/artifacts/protobuf"
   - match: ["hackage.haskell.org"]
     action: rewrite
     target: "gw:80"
+    add_prefix: "/artifacts/hackage"
   - match: ["cran.r-project.org"]
     action: rewrite
     target: "gw:80"
+    add_prefix: "/artifacts/cran"
   - match: ["cpan.metacpan.org"]
     action: rewrite
     target: "gw:80"
+    add_prefix: "/artifacts/cpan"
   - match: ["luarocks.org"]
     action: rewrite
     target: "gw:80"
+    add_prefix: "/artifacts/luarocks"
   - match: ["pkg.julialang.org", "*.pkg.julialang.org"]
     action: rewrite
     target: "gw:80"
-  - match: ["jsr.io"]
-    action: rewrite
-    target: "gw:80"
-    add_prefix: "/artifacts/jsr"
+    add_prefix: "/artifacts/juliapkg"
   - match: ["opam.ocaml.org"]
     action: rewrite
     target: "gw:80"
@@ -145,5 +126,44 @@ rules:
     action: rewrite
     target: "gw:80"
     add_prefix: "/artifacts/jenkins"
+  - match: ["github.com", "codeload.github.com"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/git"
+  - match: ["repo.scala-sbt.org", "scala.jfrog.io"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/ivy"
+  - match: ["npm.jsr.io"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/npm"
+  - match: ["jsr.io"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/jsr"
+  - match: ["dl.google.com"]
+    action: rewrite
+    target: "gw:80"
+    strip_prefix: "/dl/android/maven2"
+    add_prefix: "/artifacts/maven"
+  - match: ["plugins.gradle.org"]
+    action: rewrite
+    target: "gw:80"
+    strip_prefix: "/m2"
+    add_prefix: "/artifacts/maven"
+  - match: ["repo.clojars.org"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/maven"
+  - match: ["repo.spring.io"]
+    action: rewrite
+    target: "gw:80"
+    strip_prefixes: ["/milestone", "/release"]
+    add_prefix: "/artifacts/maven"
+  - match: ["jitpack.io"]
+    action: rewrite
+    target: "gw:80"
+    add_prefix: "/artifacts/maven"
 default: direct
 mitm_default: false

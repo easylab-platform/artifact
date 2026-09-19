@@ -68,9 +68,13 @@ func TestBuiltinsMatchLegacyDefaults(t *testing.T) {
 	r := NewRegistry()
 	got := map[string]string{}
 	for _, tt := range r.List() {
-		if tt.ID == "git" {
+		switch tt.ID {
+		case "git":
 			// git has no historical Defaults entry (it is host-driven); it
 			// exists only to make the upstream allow-list explicit.
+			continue
+		case "ivy":
+			// ivy was never in the flat table either (host-driven like git).
 			continue
 		}
 		got[tt.ID] = tt.Base

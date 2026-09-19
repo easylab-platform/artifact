@@ -82,47 +82,113 @@ func TestEgressCovers(t *testing.T) {
 	}
 }
 
-// TestLegacyDefaultsStillMatches guards the flat projection used by the
-// registry's legacy Defaults field.
-func TestEgressAddOnlyWhereExpected(t *testing.T) {
-	// Only the recently-added mirrors/trees carry an explicit mount: the
-	// protocol clients configured with a registry URL carry the mount
-	// themselves. If this set changes, routing changes for every deployment.
-	wantAdd := map[string]string{
-		"npm.jsr.io":        "/artifacts/npm",
-		"dl.google.com":     "/artifacts/maven",
-		"plugins.gradle.org": "/artifacts/maven",
-		"repo.clojars.org":  "/artifacts/maven",
-		"repo.spring.io":    "/artifacts/maven",
-		"jitpack.io":        "/artifacts/maven",
-		"jsr.io":            "/artifacts/jsr",
-		"opam.ocaml.org":    "/artifacts/opam",
-		"stackage.org":      "/artifacts/stackage",
-		"pecl.php.net":      "/artifacts/pecl",
-		"bcr.bazel.build":   "/artifacts/bazel",
-		"updates.jenkins.io": "/artifacts/jenkins",
-	}
-	got := map[string]string{}
+// TestEgressAddMountsEveryProtocol pins the invariant the derivation exists to
+// guarantee: every non-OCI target steers its hosts onto its protocol mount.
+// The pre-derivation table omitted add_prefix for most protocols, which broke
+// transparent pull-through on the real gateway.
+func TestEgressAddMountsEveryProtocol(t *testing.T) {
 	for _, e := range EgressPolicy() {
-		for _, m := range e.Match {
+		if e.Direct {
+			continue
+		}
+		if _, isOCI := index(e.Match, "registry-1.docker.io"); isOCI {
+			continue // OCI has no add (see TestEgressOCIHasNoAdd)
+		}
+		if e.Add != MountBase+"/"+protoOf(e) {
+			t.Errorf("rule %v: add = %q, want %q", e.Match, e.Add, MountBase+"/"+protoOf(e))
+		}
+		if protoOf(e) == "" {
+			t.Errorf("rule %v has no protocol mount", e.Match)
+		}
+	}
+}
+
+// protoOf recovers the protocol from a rule's add prefix (for OCI it is "").
+func protoOf(e Egress) string {
+	return strings.TrimPrefix(e.Add, MountBase+"/")
+}
+
+// TestEgressOCIHasNoAdd keeps OCI spec-fixed: it routes by Host at /v2, so the
+// sidecar must not prefix its path.
+func TestEgressOCIHasNoAdd(t *testing.T) {
+	for _, e := range EgressPolicy() {
+		if e.Direct {
+			continue
+		}
+		if _, ok := index(e.Match, "registry-1.docker.io"); ok {
 			if e.Add != "" {
-				got[m] = e.Add
-			} else {
-				got[m] = ""
+				t.Errorf("OCI rule has add_prefix %q, want none", e.Add)
 			}
 		}
 	}
-	for host, want := range wantAdd {
-		if got[host] != want {
-			t.Errorf("%s: add = %q, want %q", host, got[host], want)
+}
+
+// TestEgressMultiStrip pins Spring: it serves the same content under /release
+// and /milestone, and both prefixes belong to the origin, so both must be
+// stripped before the mount.
+func TestEgressMultiStrip(t *testing.T) {
+	for _, e := range EgressPolicy() {
+		if _, ok := index(e.Match, "repo.spring.io"); !ok {
+			continue
+		}
+		if len(e.Strips) != 2 {
+			t.Fatalf("spring strips = %v, want 2", e.Strips)
+		}
+		got := map[string]bool{}
+		for _, s := range e.Strips {
+			got[s] = true
+		}
+		if !got["/milestone"] || !got["/release"] {
+			t.Errorf("spring strips = %v, want /milestone and /release", e.Strips)
+		}
+		return
+	}
+	t.Fatal("no spring rule")
+}
+
+// TestEgressNoShadowing guards declaration order: an earlier, more specific
+// host must not be reachable by a later, broader pattern, or first-match-wins
+// would route it to the wrong target.
+func TestEgressNoShadowing(t *testing.T) {
+	// npm.jsr.io must be claimed before jsr.io (bare suffix "jsr.io" would
+	// otherwise match npm.jsr.io).
+	var order []string
+	for _, e := range EgressPolicy() {
+		if !e.Direct {
+			order = append(order, e.Match...)
 		}
 	}
-	// And nothing outside the set gained an Add.
-	for host, a := range got {
-		if a != "" {
-			if _, ok := wantAdd[host]; !ok {
-				t.Errorf("%s unexpectedly has add_prefix %q", host, a)
+	pos := func(h string) int {
+		for i, v := range order {
+			if v == h {
+				return i
 			}
 		}
+		return -1
 	}
+	if pos("npm.jsr.io") == -1 || pos("jsr.io") == -1 {
+		t.Fatalf("missing rules: %v", order)
+	}
+	if pos("npm.jsr.io") > pos("jsr.io") {
+		t.Errorf("npm.jsr.io must precede jsr.io (got %d > %d)", pos("npm.jsr.io"), pos("jsr.io"))
+	}
+}
+
+// TestEgressDirectCDNs checks the container blob CDNs stay direct (the adapter
+// follows the 307 server-side).
+func TestEgressDirectCDNs(t *testing.T) {
+	for _, e := range EgressPolicy() {
+		if _, ok := index(e.Match, "*.cloudflarestorage.com"); ok && !e.Direct {
+			t.Error("cloudflare storage must be direct")
+		}
+	}
+}
+
+func index(hay []string, needle string) (int, bool) {
+	for i, h := range hay {
+		if h == needle {
+			return i, true
+		}
+	}
+	return -1, false
 }
