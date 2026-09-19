@@ -105,26 +105,19 @@ func (r *Registry) FetchCachedPath(ctx context.Context, format, repo, version, p
 
 // fetchCachedPathDirect performs the (conditional) upstream GET and stores it.
 func (r *Registry) fetchCachedPathDirect(ctx context.Context, remote *Remote, format, repo, version, path string, pol PathCachePolicy, have bool, prev Artifact) (pathCacheResult, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, remote.URL(path), nil)
-	if err != nil {
-		return pathCacheResult{}, nil
-	}
-	req.Header.Set("User-Agent", UserAgent)
-	for k, v := range remote.headers {
-		req.Header.Set(k, v)
-	}
 	// Conditional revalidation when we hold a stale copy with a validator.
+	extra := map[string]string{}
 	if have && !pol.NoStore {
 		if prev.ETag != "" {
-			req.Header.Set("If-None-Match", prev.ETag)
+			extra["If-None-Match"] = prev.ETag
 		}
 		if prev.LastModified != "" {
-			req.Header.Set("If-Modified-Since", prev.LastModified)
+			extra["If-Modified-Since"] = prev.LastModified
 		}
 	}
-	// Follow redirects (a tree root may point at a regional mirror).
-	client := &http.Client{Transport: remote.client.Transport}
-	resp, err := client.Do(req)
+	// Retrying GET (survives egress-proxy 502 flaps); follows redirects so a
+	// tree root may point at a regional mirror.
+	resp, err := remote.getStreamRetryCond(ctx, path, extra)
 	if err != nil {
 		return pathCacheResult{}, nil
 	}

@@ -48,7 +48,7 @@ func TestPathCacheFetchesOnceAndServesLocally(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran"})
+	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran", Name: "tree"})
 	pol := artifactkit.PathCachePolicy{MediaType: "application/gzip"}
 
 	d, n, hit, ok := reg.FetchCachedPath(ctx, "cran", "tree", "src/contrib/PACKAGES.gz", "/src/contrib/PACKAGES.gz", srv.URL, pol)
@@ -76,7 +76,7 @@ func TestPathCacheSingleFlight(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran"})
+	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran", Name: "tree"})
 	pol := artifactkit.PathCachePolicy{}
 	const n = 8
 	var wg sync.WaitGroup
@@ -106,7 +106,7 @@ func TestPathCacheNoValidatorServedForever(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran"})
+	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran", Name: "tree"})
 	cfg := artifactkit.PathCachePolicy{TTL: time.Nanosecond} // expires immediately
 	d, _, _, _ := reg.FetchCachedPath(ctx, "cran", "tree", "v", "/v", srv.URL, cfg)
 	time.Sleep(2 * time.Millisecond)
@@ -136,7 +136,7 @@ func TestPathCacheRevalidates304(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran"})
+	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran", Name: "tree"})
 	cfg := artifactkit.PathCachePolicy{TTL: time.Nanosecond}
 	d, _, _, _ := reg.FetchCachedPath(ctx, "cran", "tree", "i", "/i", srv.URL, cfg)
 	time.Sleep(2 * time.Millisecond)
@@ -159,7 +159,7 @@ func TestFlightKindsDoNotCollide(t *testing.T) {
 		_, _ = w.Write([]byte("body"))
 	}))
 	t.Cleanup(srv.Close)
-	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran"})
+	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran", Name: "tree"})
 
 	// A doc fetch ([]byte) and a registry fetch (Fetched) for the same base+path,
 	// concurrently.
@@ -175,4 +175,33 @@ func TestFlightKindsDoNotCollide(t *testing.T) {
 		r.GetBytes(ctx, "/same")
 	}()
 	wg.Wait() // a collision would panic the test
+}
+
+// TestFetchToBlobRetries502 verifies the streaming path retries a transient
+// 502 (the egress proxy's classic upstream-blip code) instead of failing a
+// client build, matching the buffered Fetch path's resilience.
+func TestFetchToBlobRetries502(t *testing.T) {
+	reg := newCacheRegistry(t)
+	var hits int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt64(&hits, 1)
+		if n == 1 {
+			w.WriteHeader(http.StatusBadGateway) // transient
+			return
+		}
+		_, _ = w.Write([]byte("recovered"))
+	}))
+	t.Cleanup(srv.Close)
+
+	// cran's default upstream is replaced by a per-repo override pointing at
+	// the test server.
+	reg.Upstreams.SetRepo("cran", "tree", srv.URL, "")
+	ctx := artifactkit.WithRepoScope(context.Background(), artifactkit.RepoScope{Format: "cran", Name: "tree"})
+	d, n, ok := reg.FetchToBlob(ctx, "cran", "/idx")
+	if !ok || d == "" || n == 0 {
+		t.Fatalf("expected retry to succeed: ok=%v d=%q n=%d", ok, d, n)
+	}
+	if atomic.LoadInt64(&hits) < 2 {
+		t.Fatalf("hits = %d, want >= 2 (a retry)", hits)
+	}
 }

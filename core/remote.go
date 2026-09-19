@@ -859,18 +859,69 @@ func (r *Registry) FetchToBlob(ctx context.Context, format, path string) (string
 	return res.digest, res.size, res.ok
 }
 
+// getStreamRetry issues a GET and returns the response, retrying transport
+// errors and 502/503/504 with backoff — the same resilience getStable gives
+// the buffered paths. It is required for the streaming fetch paths: the egress
+// proxy surfaces upstream blips as 502, and a one-shot GET would fail a client
+// build. The returned response is a fresh body each attempt; callers must close
+// it. Redirects are followed (the streaming trees may redirect to a mirror).
+func (r *Remote) getStreamRetry(ctx context.Context, path string) (*http.Response, error) {
+	return r.getStreamRetryCond(ctx, path, nil)
+}
+
+// getStreamRetryCond is getStreamRetry with optional extra request headers
+// (If-None-Match / If-Modified-Since for a revalidation). A 304 is a valid
+// result and is returned immediately (never treated as retryable).
+func (r *Remote) getStreamRetryCond(ctx context.Context, path string, extra map[string]string) (*http.Response, error) {
+	client := &http.Client{Transport: r.client.Transport}
+	newReq := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL(path), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", UserAgent)
+		for k, v := range r.headers {
+			req.Header.Set(k, v)
+		}
+		for k, v := range extra {
+			req.Header.Set(k, v)
+		}
+		return req, nil
+	}
+	do := func() (*http.Response, error) {
+		req, err := newReq()
+		if err != nil {
+			return nil, err
+		}
+		return client.Do(req)
+	}
+	resp, err := do()
+	for _, wait := range retryBackoff {
+		if err == nil && resp.StatusCode != 502 && resp.StatusCode != 503 && resp.StatusCode != 504 {
+			return resp, nil
+		}
+		code := 0
+		if resp != nil {
+			code = resp.StatusCode
+			_ = resp.Body.Close()
+		}
+		r.client.CloseIdleConnections()
+		select {
+		case <-ctx.Done():
+			if code == 0 {
+				return nil, err
+			}
+			return nil, &UpstreamStatusError{Path: path, Status: code}
+		case <-time.After(wait):
+		}
+		resp, err = do()
+	}
+	return resp, err
+}
+
 // fetchToBlobDirect is FetchToBlob without the single-flight wrapper.
 func (r *Registry) fetchToBlobDirect(ctx context.Context, remote *Remote, path string) (string, int64, bool) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, remote.URL(path), nil)
-	if err != nil {
-		return "", 0, false
-	}
-	req.Header.Set("User-Agent", UserAgent)
-	for k, v := range remote.headers {
-		req.Header.Set(k, v)
-	}
-	client := &http.Client{Transport: remote.client.Transport}
-	resp, err := client.Do(req)
+	resp, err := remote.getStreamRetry(ctx, path)
 	if err != nil {
 		return "", 0, false
 	}
