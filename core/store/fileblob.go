@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/easylab-platform/artifact/core"
 )
@@ -186,19 +187,39 @@ func (s *FileBlobStore) List(ctx context.Context) ([]string, error) {
 	return out, err
 }
 
+// ModTime implements store.BlobAger: the blob file's mtime, used by the
+// reaper to avoid deleting a blob that may be mid-write. A missing file
+// returns the zero time with no error.
+func (s *FileBlobStore) ModTime(ctx context.Context, digest string) (time.Time, error) {
+	p, err := s.path(digest)
+	if err != nil {
+		return time.Time{}, err
+	}
+	fi, err := os.Stat(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, err
+	}
+	return fi.ModTime(), nil
+}
+
 func digestFromPath(root, path string) (string, bool) {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return "", false
 	}
+	// The layout is sha256/<first-two>/<rest> (3 segments); reconstruct the
+	// full 64-hex digest from the fan-out dir + filename.
 	parts := splitPath(rel)
-	if len(parts) != 2 {
+	if len(parts) != 3 {
 		return "", false
 	}
-	if parts[0] != "sha256" || len(parts[1]) != 62 {
+	if parts[0] != "sha256" || len(parts[1]) != 2 || len(parts[2]) != 62 {
 		return "", false
 	}
-	return "sha256:" + parts[1], true
+	return "sha256:" + parts[1] + parts[2], true
 }
 
 func splitPath(p string) []string {

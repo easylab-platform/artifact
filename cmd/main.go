@@ -42,6 +42,8 @@ func main() {
 		upstreamSet   = flag.String("upstreams", "", "override upstream base for a format, `format=url` pairs comma separated (e.g. go=http://proxy.golang.org)")
 		repoUpstreams = flag.String("repo-upstreams", "", "per-repository upstream overrides, `format/repo=url` pairs comma separated; the longest matching repo prefix wins (e.g. maven/org.apache=https://mirror.example/m2,npm/@acme=https://npm.example)")
 		upstreamProxy = flag.String("upstream-proxy", "", "HTTP proxy URL for upstream fetches (empty = follow env, \"none\" = direct)")
+		gcInterval    = flag.Duration("gc-interval", time.Hour, "background reaper period (expired negative entries + orphan blobs); 0 disables")
+		gcGrace       = flag.Duration("gc-grace", time.Hour, "only orphan blobs older than this are removed (protects in-flight writes)")
 	)
 	flag.Parse()
 
@@ -115,7 +117,7 @@ func main() {
 		if !artifactkit.ProtocolRegistered(proto) {
 			log.Fatalf("build protocol %q: unknown protocol", proto)
 		}
-		handler, err := artifactkit.Build(proto, reg, configFor(proto, *selfBase, *selfBaseRaw, auth, *dataDir, selfBases, meta))
+		handler, err := artifactkit.Build(proto, reg, configFor(proto, *selfBase, *selfBaseRaw, auth, *dataDir, selfBases, meta, blobs))
 		if err != nil {
 			log.Fatalf("build protocol %q: %v", proto, err)
 		}
@@ -153,6 +155,9 @@ func main() {
 	addr := *listen
 	log.Printf("artifact listening on %s (%d protocols: %s), data=%s, airgap=%v",
 		addr, mounted, names, *dataDir, *airGap)
+	// Background reaper: expire negative cache entries and reclaim orphan
+	// blobs. -gc-interval=0 disables it.
+	go runReaper(context.Background(), meta, blobs, *gcInterval, *gcGrace)
 	// ARTIFACT_DEBUG=1 logs every request (method, path, framing, status) and
 	// is invaluable when a client's upload/download framing is in question.
 	debug := os.Getenv("ARTIFACT_DEBUG") != ""
@@ -171,6 +176,41 @@ func main() {
 	}
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// runReaper periodically reclaims storage: it expires negative (404/410) cache
+// entries and removes CAS blobs no artifact references. It never deletes a
+// referenced blob, so "fetch once" holds; grace protects in-flight writes.
+func runReaper(ctx context.Context, meta *store.Store, blobs artifactkit.BlobStore, interval, grace time.Duration) {
+	if interval <= 0 {
+		return
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	pass := func() {
+		n, err := meta.ExpireNegative(ctx, time.Now())
+		if err != nil {
+			log.Printf("reaper: expire negative: %v", err)
+		}
+		st, err := meta.ReapOrphanBlobs(ctx, blobs, grace)
+		if err != nil {
+			log.Printf("reaper: orphan blobs: %v", err)
+			return
+		}
+		if n > 0 || st.OrphanBlobs > 0 {
+			log.Printf("reaper: expired_negative=%d orphan_blobs=%d kept=%d bytes_freed=%d",
+				n, st.OrphanBlobs, st.BlobsKept, st.BytesFreed)
+		}
+	}
+	pass()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			pass()
+		}
 	}
 }
 
@@ -312,7 +352,7 @@ func parseSelfBaseMap(s string) map[string]string {
 	return out
 }
 
-func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, dataDir string, selfBases map[string]string, targetStore targets.Store) map[string]any {
+func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, dataDir string, selfBases map[string]string, meta *store.Store, blobs artifactkit.BlobStore) map[string]any {
 	cfg := map[string]any{}
 	// Each protocol mounts under /artifacts/<name> (OCI is special-cased to /v2),
 	// so its emitted self-URLs must carry that prefix. selfBase is the global
@@ -349,9 +389,12 @@ func configFor(name, selfBase string, selfBaseRaw bool, auth artifactkit.Auth, d
 		// repository is served from local objects.
 		cfg["dir"] = filepath.Join(dataDir, "git")
 	}
-	if name == "system" && targetStore != nil {
-		// The admin API can CRUD user-declared targets.
-		cfg["targets_store"] = targetStore
+	if name == "system" && meta != nil {
+		// The admin API can CRUD user-declared targets and report footprint.
+		cfg["targets_store"] = meta
+		cfg["stats_func"] = func(ctx context.Context) (any, error) {
+			return meta.Stats(ctx, blobs)
+		}
 	}
 	return cfg
 }

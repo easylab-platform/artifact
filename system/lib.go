@@ -5,6 +5,7 @@
 package system
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -20,6 +21,10 @@ type State struct {
 	// TargetsStore persists user-declared targets; nil keeps the instance at
 	// its built-ins.
 	TargetsStore targets.Store
+	// StatsFunc returns the registry footprint as JSON-marshalable data. It is
+	// injected by the server (the concrete store lives outside core, so the
+	// adapter cannot import it directly).
+	StatsFunc func(ctx context.Context) (any, error)
 }
 
 // NewHandler is the artifactkit.Register constructor.
@@ -33,6 +38,9 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 	}
 	if s.TargetsStore == nil && reg != nil {
 		s.TargetsStore = reg.TargetStore
+	}
+	if fn, ok := cfg["stats_func"].(func(context.Context) (any, error)); ok {
+		s.StatsFunc = fn
 	}
 	return s, nil
 }
@@ -60,6 +68,8 @@ func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.proxyKey(w, r, key)
 	case path == "/packages" || path == "/packages/":
 		s.packages(w, r)
+	case path == "/stats" || path == "/stats/":
+		s.stats(w, r)
 	case path == "/repos" || path == "/repos/":
 		s.repos(w, r)
 	case len(path) > len("/repos/") && strings.HasPrefix(path, "/repos/"):
@@ -302,6 +312,25 @@ func (s *State) proxyKey(w http.ResponseWriter, r *http.Request, key string) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// stats returns the registry footprint (rows, referenced bytes, CAS totals).
+// Read-only and unauthenticated like the other listing endpoints.
+func (s *State) stats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if s.StatsFunc == nil {
+		artifactkit.JSON(w, http.StatusNotImplemented, map[string]any{"error": "stats not available"})
+		return
+	}
+	st, err := s.StatsFunc(r.Context())
+	if err != nil {
+		artifactkit.JSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	artifactkit.JSON(w, http.StatusOK, st)
 }
 
 func (s *State) packages(w http.ResponseWriter, r *http.Request) {

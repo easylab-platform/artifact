@@ -40,13 +40,15 @@ type artifactRow struct {
 	Proprietary []byte
 	Blobs       string `gorm:"not null;default:'[]'"`
 	Source      string `gorm:"not null;default:''"`
-	Target      string `gorm:"not null;default:''"`
+	Target      string `gorm:"not null;default:'';index"`
 	// HTTP cache metadata (netcache): replay + revalidation.
 	ETag            string `gorm:"not null;default:''"`
 	LastModified    string `gorm:"not null;default:''"`
 	ContentEncoding string `gorm:"not null;default:''"`
 	CacheControl    string `gorm:"not null;default:''"`
-	ExpiresAt       int64  `gorm:"not null;default:0"`
+	// ExpiresAt is indexed so the reaper's expiry sweep is a range scan, not a
+	// table scan.
+	ExpiresAt int64 `gorm:"not null;default:0;index"`
 }
 
 type uploadRow struct {
@@ -75,3 +77,8 @@ func (artifactRow) TableName() string { return "artifacts" }
 func (uploadRow) TableName() string   { return "uploads" }
 func (metaRow) TableName() string     { return "meta" }
 func (targetRow) TableName() string   { return "targets" }
+
+// negativeMediaType marks a netcache negative (404/410) entry: it holds no blob
+// and exists only to absorb repeated misses until it expires. The reaper may
+// delete these freely; no bytes are lost.
+const negativeMediaType = "application/x-netcache-miss"
