@@ -42,6 +42,18 @@ func newState() (*State, *memTargetStore) {
 	return s, pst
 }
 
+// newGatedState builds a State with a non-nil TokenAuth, so the admin gate is
+// active (auth absent = open dev instance; auth present = operator required).
+func newGatedState() *State {
+	reg := targets.NewRegistry()
+	r := &artifactkit.Registry{Upstreams: &artifactkit.Upstreams{Targets: reg}}
+	return &State{
+		Registry:     r,
+		TargetsStore: &memTargetStore{m: map[string]targets.Target{}},
+		Auth:         artifactkit.NewTokenAuth("writer=write,reader=read"),
+	}
+}
+
 func do(t *testing.T, s *State, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var r *http.Request
@@ -105,6 +117,56 @@ func TestTargetDeleteBuiltinRefused(t *testing.T) {
 	s, _ := newState()
 	if rec := do(t, s, http.MethodDelete, "/artifacts/system/targets/maven", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("deleting built-in: code = %d, want 403", rec.Code)
+	}
+}
+
+// TestAdminSurfaceRequiresOperator verifies the whole /artifacts/system
+// subtree is operator-only, reads included: anonymous gets a 401 challenge, a
+// read-level token gets 403, and a write-level token gets through. Without auth
+// configured (dev instance) reads stay open.
+func TestAdminSurfaceRequiresOperator(t *testing.T) {
+	s := newGatedState()
+
+	// Anonymous read: 401 + a challenge header.
+	rec := do(t, s, http.MethodGet, "/artifacts/system/stats", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous GET = %d, want 401", rec.Code)
+	}
+	if rec.Header().Get("WWW-Authenticate") == "" {
+		t.Error("401 should carry a WWW-Authenticate challenge")
+	}
+
+	// Read-level token: authenticated but not write-capable -> 403.
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/system/targets", nil)
+	req.Header.Set("Authorization", "Bearer reader")
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("read-level GET = %d, want 403", rec.Code)
+	}
+
+	// Write-level token: operator -> 200.
+	req = httptest.NewRequest(http.MethodGet, "/artifacts/system/targets", nil)
+	req.Header.Set("Authorization", "Bearer writer")
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("write-level GET = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+
+	// A write method is gated the same way (anonymous -> 401).
+	if rec := do(t, s, http.MethodPut, "/artifacts/system/targets/maven.corp", map[string]any{"id": "maven.corp", "base": "https://x"}); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous PUT = %d, want 401", rec.Code)
+	}
+}
+
+// TestAdminOpenInstanceWhenNoAuth keeps the dev/open behavior: with no Auth the
+// admin surface is reachable anonymously (the existing tests rely on it).
+func TestAdminOpenInstanceWhenNoAuth(t *testing.T) {
+	s, _ := newState()
+	if rec := do(t, s, http.MethodGet, "/artifacts/system/stats", nil); rec.Code != http.StatusNotImplemented {
+		// no StatsFunc -> 501, but crucially NOT 401: the gate let it through.
+		t.Fatalf("open-instance GET = %d, want 501 (not 401)", rec.Code)
 	}
 }
 

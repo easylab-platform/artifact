@@ -206,10 +206,6 @@ func AuthorizeReadScoped(w http.ResponseWriter, r *http.Request, auth Auth, reg 
 	return AuthorizeReadFor(w, r, auth, reg, format, name)
 }
 
-// AuthorizeWrite gates a write operation on an optional Auth, requiring a
-// WRITE-level credential (a read-level token is not enough to publish).
-// On success it returns true; on failure it writes a 401/403 challenge and
-// returns false (the caller should stop).
 // AuthorizeWriteFor is the tenancy-aware publish gate used by protocol
 // adapters that know their native package name (npm name, OCI repository,
 // generic repo). It performs the write-credential check of AuthorizeWrite
@@ -297,13 +293,39 @@ func AuthorizeReadFor(w http.ResponseWriter, r *http.Request, auth Auth, reg *Re
 	return false
 }
 
+// AuthorizeWrite gates a write operation on an optional Auth, requiring a
+// WRITE-level credential (a read-level token is not enough to publish). On
+// success it returns true; on failure it writes a 401/403 challenge and
+// returns false (the caller should stop). auth == nil permits the write (an
+// open/dev instance).
 func AuthorizeWrite(w http.ResponseWriter, r *http.Request, auth Auth) bool {
+	return authorizeWriteLevel(w, r, auth, "registry")
+}
+
+// AuthorizeAdmin gates the operator/admin surface (the /artifacts/system
+// subtree: upstream/target/proxy config, package inventory, footprint). It
+// requires a WRITE-level credential — the operator level in this codebase — on
+// every method, including reads, because the response body is configuration,
+// not package bytes. A realm names the challenge so a browser/proxy can
+// prompt. auth == nil (dev mode) permits access, exactly like writes.
+func AuthorizeAdmin(w http.ResponseWriter, r *http.Request, auth Auth, realm string) bool {
+	if realm == "" {
+		realm = "admin"
+	}
+	return authorizeWriteLevel(w, r, auth, realm)
+}
+
+// authorizeWriteLevel is the shared privilege gate: no auth configured allows
+// access (open/dev instance); otherwise a request must carry a credential
+// (401 challenge) that is write-capable (403). realm names the WWW-Authenticate
+// challenge.
+func authorizeWriteLevel(w http.ResponseWriter, r *http.Request, auth Auth, realm string) bool {
 	if auth == nil {
 		return true // auth disabled: anonymous writes allowed (dev mode)
 	}
 	username := auth.Authenticate(r.Context(), r)
 	if username == "" {
-		w.Header().Set("WWW-Authenticate", `Basic realm="registry"`)
+		w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
 		JSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "authentication required"})
 		return false
 	}

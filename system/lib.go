@@ -48,6 +48,14 @@ func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, er
 func init() { artifactkit.Register("system", NewHandler) }
 
 func (s *State) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// The whole admin surface is operator-only, reads included: the bodies are
+	// routing configuration (upstreams, targets, proxy policy) and inventory,
+	// not package bytes. Gating once here (before dispatch) keeps a future
+	// sub-endpoint from being added without a gate. auth == nil (dev/open
+	// instance) permits access, matching the write path.
+	if !artifactkit.AuthorizeAdmin(w, r, s.Auth, "registry-admin") {
+		return
+	}
 	path := stringsTrimPrefix(r.URL.Path, "/artifacts/system")
 	path = stringsTrimPrefix(path, "/system")
 
@@ -132,9 +140,6 @@ func (s *State) targetKey(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		artifactkit.JSON(w, http.StatusNotFound, map[string]any{"error": "unknown target: " + id})
 	case http.MethodPut, http.MethodPost:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
-			return
-		}
 		if s.TargetsStore == nil {
 			artifactkit.JSON(w, http.StatusNotImplemented, map[string]any{"error": "target store not configured"})
 			return
@@ -177,9 +182,6 @@ func (s *State) targetKey(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		artifactkit.JSON(w, http.StatusOK, t)
 	case http.MethodDelete:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
-			return
-		}
 		if s.TargetsStore == nil {
 			artifactkit.JSON(w, http.StatusNotImplemented, map[string]any{"error": "target store not configured"})
 			return
@@ -247,9 +249,6 @@ func (s *State) upstreamKey(w http.ResponseWriter, r *http.Request, key string) 
 		}
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"key": key, "url": u, "override": s.Registry.Upstreams.IsOverride(key)})
 	case http.MethodPut:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
-			return
-		}
 		if _, ok := s.lookup(key); !ok {
 			artifactkit.JSON(w, http.StatusNotFound, map[string]any{"error": "unknown upstream key: " + key})
 			return
@@ -265,9 +264,6 @@ func (s *State) upstreamKey(w http.ResponseWriter, r *http.Request, key string) 
 		s.Registry.Upstreams.Set(key, body.URL)
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"key": key, "url": body.URL})
 	case http.MethodDelete:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
-			return
-		}
 		s.Registry.Upstreams.Reset(key)
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"key": key, "reset": true})
 	default:
@@ -289,9 +285,6 @@ func (s *State) proxyKey(w http.ResponseWriter, r *http.Request, key string) {
 		p, _ := s.Registry.Upstreams.ProxyURL(key)
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"key": key, "proxy": p})
 	case http.MethodPut:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
-			return
-		}
 		if _, ok := s.lookup(key); !ok {
 			artifactkit.JSON(w, http.StatusNotFound, map[string]any{"error": "unknown upstream key: " + key})
 			return
@@ -304,9 +297,6 @@ func (s *State) proxyKey(w http.ResponseWriter, r *http.Request, key string) {
 		p, _ := s.Registry.Upstreams.ProxyURL(key)
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"key": key, "proxy": p})
 	case http.MethodDelete:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
-			return
-		}
 		s.Registry.Upstreams.SetProxy(key, "")
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"key": key, "reset": true})
 	default:
@@ -335,9 +325,6 @@ func (s *State) stats(w http.ResponseWriter, r *http.Request) {
 
 func (s *State) packages(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodDelete {
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
-			return
-		}
 		repo := r.URL.Query().Get("repo")
 		if repo == "" {
 			artifactkit.JSON(w, http.StatusBadRequest, map[string]any{"error": "missing repo"})
@@ -411,9 +398,6 @@ func (s *State) repoKey(w http.ResponseWriter, r *http.Request, key string) {
 		}
 		artifactkit.JSON(w, http.StatusNotFound, map[string]any{"error": "no override for " + key})
 	case http.MethodPut:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
-			return
-		}
 		var body struct {
 			Base  string `json:"base"`
 			Proxy string `json:"proxy"`
@@ -426,9 +410,6 @@ func (s *State) repoKey(w http.ResponseWriter, r *http.Request, key string) {
 		s.Registry.Upstreams.SetRepo(format, repo, body.Base, body.Proxy)
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"format": format, "repo": repo, "base": body.Base})
 	case http.MethodDelete:
-		if !artifactkit.AuthorizeWrite(w, r, s.Auth) {
-			return
-		}
 		s.Registry.Upstreams.ResetRepo(format, repo)
 		artifactkit.JSON(w, http.StatusOK, map[string]any{"format": format, "repo": repo, "reset": true})
 	default:
