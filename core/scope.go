@@ -48,6 +48,22 @@ type RepoScope struct {
 	ClientAuth string
 }
 
+// RepoKey encodes (namespace, name) into the canonical repository string. The
+// default namespace is elided so unscoped names keep their historical key (and
+// existing metadata rows keep resolving). It is the primitive behind
+// RepoScope.ScopedKey, which adds the isolated-target prefix on top.
+func RepoKey(namespace, name string) string {
+	namespace = strings.Trim(namespace, "/")
+	name = strings.Trim(name, "/")
+	if namespace == "" || namespace == DefaultNamespace {
+		return name
+	}
+	if name == "" {
+		return namespace
+	}
+	return namespace + "/" + name
+}
+
 type repoScopeKey struct{}
 
 // WithRepoScope returns a context carrying the request's repository scope.
@@ -90,10 +106,13 @@ func (s RepoScope) ScopedName(key string) string {
 	if ns == "" || ns == DefaultNamespace {
 		return key
 	}
+	// Idempotent: a key that already carries its namespace (npm's
+	// "@scope/name", conda's "channel/subdir") is left unchanged, so adapters
+	// that encode the namespace themselves are not double-prefixed.
 	if key == ns || strings.HasPrefix(key, ns+"/") {
 		return key
 	}
-	return ns + "/" + key
+	return RepoKey(ns, key)
 }
 
 // targetPrefix is the storage key prefix that isolates a target's content from

@@ -401,15 +401,10 @@ func storeVersionBlob(reg *artifactkit.Registry, full, version, filename, digest
 }
 
 func storeVersionSource(reg *artifactkit.Registry, full, version, filename string, data []byte, source string, ctx context.Context) {
-	art := artifactkit.Artifact{Format: "swift", Repository: full, Version: version, Source: source}
-	if len(data) > 0 {
-		h, _ := artifactkit.ComputeHashesBytes(data)
-		digest := "sha256:" + h.SHA256
-		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
-		}
-	}
-	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
+	reg.StoreVersion(ctx, artifactkit.VersionInput{
+		Format: "swift", Repository: full, Version: version,
+		Filename: filename, Source: source, Data: data,
+	})
 }
 
 func extractPackageSwift(zipData []byte) (string, bool) {

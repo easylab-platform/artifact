@@ -324,18 +324,10 @@ func (s *State) push(w http.ResponseWriter, r *http.Request) {
 }
 
 func storeVersionSource(reg *artifactkit.Registry, id, ver, filename string, data []byte, source string, ctx context.Context) {
-	if ver == "" {
-		ver = "0.0.0"
-	}
-	art := artifactkit.Artifact{Format: "nuget", Repository: id, Version: ver, Source: source}
-	if len(data) > 0 {
-		h, _ := artifactkit.ComputeHashesBytes(data)
-		digest := "sha256:" + h.SHA256
-		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
-		}
-	}
-	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
+	reg.StoreVersion(ctx, artifactkit.VersionInput{
+		Format: "nuget", Repository: id, Version: ver,
+		Filename: filename, Source: source, Data: data, DefaultVersion: "0.0.0",
+	})
 }
 
 func parseNuspec(nupkg []byte) (string, string) {

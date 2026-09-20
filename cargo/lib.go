@@ -5,7 +5,6 @@
 package cargo
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -444,15 +443,10 @@ func storeVersionSource(reg *artifactkit.Registry, name, version string, data []
 	if version == "" {
 		version = "0.1.0"
 	}
-	art := artifactkit.Artifact{Format: "cargo", Repository: name, Version: version, Source: source}
-	if len(data) > 0 {
-		h, _ := artifactkit.ComputeHashesBytes(data)
-		digest := "sha256:" + h.SHA256
-		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: name + "-" + version + ".crate"})
-		}
-	}
-	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
+	reg.StoreVersion(ctx, artifactkit.VersionInput{
+		Format: "cargo", Repository: name, Version: version,
+		Filename: name + "-" + version + ".crate", Source: source, Data: data,
+	})
 }
 
 func jsonStr(data []byte, key string) string {

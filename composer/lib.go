@@ -328,19 +328,16 @@ func storeVersionBlob(reg *artifactkit.Registry, name, version, filename, digest
 }
 
 func storeVersionSource(reg *artifactkit.Registry, name, version string, data []byte, source string, ctx context.Context) {
-	art := artifactkit.Artifact{Format: "composer", Repository: name, Version: version, Source: source}
-	if len(data) > 0 {
-		h, _ := artifactkit.ComputeHashesBytes(data)
-		digest := "sha256:" + h.SHA256
-		short := name[strings.LastIndex(name, "/")+1:]
-		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: short + "-" + version + ".zip"})
-		}
-		if al := extractAutoload(data); al != nil {
-			art.Proprietary, _ = json.Marshal(map[string]any{"autoload": al})
-		}
+	short := name[strings.LastIndex(name, "/")+1:]
+	var prop []byte
+	if al := extractAutoload(data); al != nil {
+		prop, _ = json.Marshal(map[string]any{"autoload": al})
 	}
-	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
+	reg.StoreVersion(ctx, artifactkit.VersionInput{
+		Format: "composer", Repository: name, Version: version,
+		Filename: short + "-" + version + ".zip", Source: source, Data: data,
+		Proprietary: prop,
+	})
 }
 
 func composerJSONNameVersion(data []byte) (string, string) {

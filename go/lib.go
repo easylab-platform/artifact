@@ -334,15 +334,10 @@ func storeVersionSource(reg *artifactkit.Registry, module, version string, data 
 	if version == "" {
 		version = "v0.0.0"
 	}
-	art := artifactkit.Artifact{Format: "go", Repository: module, Version: version, Source: source}
-	if len(data) > 0 {
-		h, _ := artifactkit.ComputeHashesBytes(data)
-		digest := "sha256:" + h.SHA256
-		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: module + "-" + version + ".zip"})
-		}
-	}
-	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
+	reg.StoreVersion(ctx, artifactkit.VersionInput{
+		Format: "go", Repository: module, Version: version,
+		Filename: module + "-" + version + ".zip", Source: source, Data: data,
+	})
 }
 
 func jsonStr(data []byte, key string) string {

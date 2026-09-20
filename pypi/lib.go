@@ -551,16 +551,11 @@ func (s *State) storeVersion(name, version, filename string, data []byte, source
 	if version == "" {
 		version = "0.1.0"
 	}
-	art := artifactkit.Artifact{Format: "pypi", Repository: name, Version: version, Source: source}
-	if len(data) > 0 {
-		h, _ := artifactkit.ComputeHashesBytes(data)
-		digest := "sha256:" + h.SHA256
-		if _, err := s.Registry.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
-		}
-	}
-	art.Proprietary = []byte(`{"upload_time":"2024-01-01T00:00:00.000000Z"}`)
-	artifactkit.LogMetaErr("meta put", s.Registry.Meta.Put(ctx, art))
+	s.Registry.StoreVersion(ctx, artifactkit.VersionInput{
+		Format: "pypi", Repository: name, Version: version,
+		Filename: filename, Source: source, Data: data,
+		Proprietary: []byte(`{"upload_time":"2024-01-01T00:00:00.000000Z"}`),
+	})
 }
 
 func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.Context) {

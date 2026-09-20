@@ -769,18 +769,15 @@ func (s *State) storeVersion(ctx context.Context, name, version string, tarball 
 	if version == "" {
 		version = "0.0.0"
 	}
-	art := artifactkit.Artifact{Format: "npm", Repository: name, Version: version, MediaType: "application/json", Source: source}
+	var prop []byte
 	if pkgJSON != nil {
-		art.Proprietary, _ = json.Marshal(pkgJSON)
+		prop, _ = json.Marshal(pkgJSON)
 	}
-	if len(tarball) > 0 {
-		h, _ := artifactkit.ComputeHashesBytes(tarball)
-		digest := "sha256:" + h.SHA256
-		if _, err := s.Registry.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(tarball)); err == nil {
-			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(tarball)), Name: tarballFilename(name, version)})
-		}
-	}
-	artifactkit.LogMetaErr("meta put", s.Registry.Meta.Put(ctx, art))
+	s.Registry.StoreVersion(ctx, artifactkit.VersionInput{
+		Format: "npm", Repository: name, Version: version,
+		MediaType: "application/json", Filename: tarballFilename(name, version),
+		Source: source, Data: tarball, Proprietary: prop,
+	})
 }
 
 func hexBytes(s string) []byte {

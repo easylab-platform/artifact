@@ -591,6 +591,60 @@ func (r *Registry) StorePathBlob(ctx context.Context, format, repository, versio
 	return stored.Digest
 }
 
+// VersionInput describes one artifact version to persist: the identity plus the
+// bytes. It is the input to StoreVersion, the shared publish/pull cache write
+// every flat adapter used to hand-roll.
+type VersionInput struct {
+	Format     string
+	Repository string
+	Version    string
+	// Filename is the descriptor name (e.g. "pkg-1.2.3.tar.gz"). Empty uses
+	// the version as the name.
+	Filename string
+	// Source is "push" (published) or "pull" (cached upstream).
+	Source string
+	// Data is the artifact bytes. Empty stores no blob (index-only row).
+	Data []byte
+	// ExtraBlobs are additional blobs to index alongside Data (rare; e.g. a
+	// detached signature). Optional.
+	ExtraBlobs []Descriptor
+	// Proprietary is opaque per-format metadata (hex inner_checksum, composer
+	// autoload, ...). Optional.
+	Proprietary []byte
+	// MediaType is recorded on the row. Optional.
+	MediaType string
+	// DefaultVersion is applied when Version is empty (per-format, e.g.
+	// "0.1.0"). Empty leaves Version as-is.
+	DefaultVersion string
+}
+
+// StoreVersion persists one artifact version: hash Data into the CAS (dedup by
+// digest), attach the descriptor, and upsert the index row. It is the single
+// implementation behind every flat adapter's storeVersionSource. A CAS write
+// failure still indexes the row (best-effort, matching the historical
+// behavior); index errors are logged, never fatal to the response.
+func (r *Registry) StoreVersion(ctx context.Context, in VersionInput) {
+	if in.Version == "" && in.DefaultVersion != "" {
+		in.Version = in.DefaultVersion
+	}
+	name := in.Filename
+	if name == "" {
+		name = in.Version
+	}
+	art := Artifact{
+		Format: in.Format, Repository: in.Repository, Version: in.Version,
+		MediaType: in.MediaType, Source: in.Source, Proprietary: in.Proprietary,
+	}
+	if len(in.Data) > 0 {
+		if stored, err := r.StoreAndHash(ctx, in.Data); err == nil {
+			art.Digest = stored.Digest
+			art.Blobs = append(art.Blobs, Descriptor{Digest: stored.Digest, Size: stored.Size, Name: name})
+		}
+	}
+	art.Blobs = append(art.Blobs, in.ExtraBlobs...)
+	LogMetaErr(in.Format+" meta put", r.Meta.Put(ctx, art))
+}
+
 // baseNameOf returns the final path segment ("b/bash.rpm" -> "bash.rpm").
 func baseNameOf(p string) string {
 	if i := strings.LastIndexByte(p, '/'); i >= 0 {

@@ -2,12 +2,14 @@ package artifactkit
 
 import "strings"
 
-// Namespace support. A repository is the content boundary of one format: it
+// Namespace RESOLUTION: mapping a format-relative request path onto
+// (namespace, name). A repository is the content boundary of one format: it
 // owns its content, its upstream policy, its publish rights and its
 // visibility. Internally a repository is encoded as a plain string key
 // ("namespace/name", or just "name" when the namespace is the implicit
 // default), so the metadata store needs no new column and existing rows stay
-// valid.
+// valid. The key ENCODING (RepoKey/ScopedKey/UnscopedKey) lives in scope.go;
+// this file only decides what the namespace and name ARE for a given path.
 //
 // Protocol adapters know how their native path maps onto (namespace, name):
 // npm takes the scope, OCI the registry host, maven the groupId, go the module
@@ -28,30 +30,9 @@ const DefaultNamespace = "default"
 // exactly "-". Requests without the marker keep their native shape.
 const ExplicitRepoMarker = "-"
 
-// RepoKey encodes (namespace, name) into the canonical repository string.
-// The default namespace is elided so unscoped names keep their historical key
-// (and existing metadata rows keep resolving).
-func RepoKey(namespace, name string) string {
-	namespace = strings.Trim(namespace, "/")
-	name = strings.Trim(name, "/")
-	if namespace == "" || namespace == DefaultNamespace {
-		return name
-	}
-	if name == "" {
-		return namespace
-	}
-	return namespace + "/" + name
-}
-
-// SplitRepoKey reverses RepoKey: it returns the leading namespace and the
-// remainder. A key with no "/" has the default namespace.
-func SplitRepoKey(key string) (namespace, name string) {
-	key = strings.Trim(key, "/")
-	if i := strings.IndexByte(key, '/'); i >= 0 {
-		return key[:i], key[i+1:]
-	}
-	return "", key
-}
+// RepoKey (the canonical namespace-qualified repository string) lives in
+// scope.go, next to RepoScope.ScopedKey, so all repository-key encoding is in
+// one place.
 
 // NamespaceResolver maps a format-relative request path onto a namespace, a
 // package name and the remainder of the path (the part inside the package).

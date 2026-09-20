@@ -405,20 +405,16 @@ func removeVersion(reg *artifactkit.Registry, name, version string, ctx context.
 }
 
 func storeVersionSource(reg *artifactkit.Registry, name, version, filename string, data []byte, source string, ctx context.Context) {
-	art := artifactkit.Artifact{Format: "hex", Repository: name, Version: version, Source: source}
-	if len(data) > 0 {
-		h, _ := artifactkit.ComputeHashesBytes(data)
-		digest := "sha256:" + h.SHA256
-		if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-			art.Blobs = append(art.Blobs, artifactkit.Descriptor{Digest: digest, Size: int64(len(data)), Name: filename})
-		}
-		// Persist the inner checksum (contents.tar.gz sha256) so the release
-		// protobuf can emit a real inner_checksum rather than a placeholder.
-		if inner := innerChecksumOf(data); inner != "" {
-			art.Proprietary = []byte(`{"inner_checksum":"` + inner + `"}`)
-		}
+	// Persist the inner checksum (contents.tar.gz sha256) so the release
+	// protobuf can emit a real inner_checksum rather than a placeholder.
+	var prop []byte
+	if inner := innerChecksumOf(data); inner != "" {
+		prop = []byte(`{"inner_checksum":"` + inner + `"}`)
 	}
-	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, art))
+	reg.StoreVersion(ctx, artifactkit.VersionInput{
+		Format: "hex", Repository: name, Version: version,
+		Filename: filename, Source: source, Data: data, Proprietary: prop,
+	})
 }
 
 // innerChecksumOf extracts the inner checksum a hex package publishes:
