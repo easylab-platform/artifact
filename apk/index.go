@@ -33,7 +33,7 @@ import (
 // the whole file — apk rejects the package with "v2 package integrity error"
 // when the two disagree.
 func GenerateAPKINDEX(store artifactkit.HostedStore) artifactkit.Generator {
-	return func(files []artifactkit.HostedFile) (map[string]artifactkit.GeneratedFile, error) {
+	return func(ctx context.Context, files []artifactkit.HostedFile) (map[string]artifactkit.GeneratedFile, error) {
 		indexes := map[string]*bytes.Buffer{}
 		for _, f := range files {
 			if !strings.HasSuffix(f.Name, ".apk") {
@@ -46,7 +46,7 @@ func GenerateAPKINDEX(store artifactkit.HostedStore) artifactkit.Generator {
 				indexes[arch] = buf
 			}
 			name, version, _ := nameVersionArch(rel)
-			data, err := readBlob(store, f.Digest)
+			data, err := readBlob(ctx, store, f.Digest)
 			if err != nil {
 				continue
 			}
@@ -170,8 +170,8 @@ func nameVersionArch(filename string) (name, version, arch string) {
 
 // readBlob loads a whole CAS blob (index generation reads package bytes to
 // compute the checksum).
-func readBlob(store artifactkit.HostedStore, digest string) ([]byte, error) {
-	rd, err := store.Registry.Blobs.Open(context.Background(), digest)
+func readBlob(ctx context.Context, store artifactkit.HostedStore, digest string) ([]byte, error) {
+	rd, err := store.Registry.Blobs.Open(ctx, digest)
 	if err != nil || rd == nil {
 		return nil, fmt.Errorf("blob %s unavailable", digest)
 	}

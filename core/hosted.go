@@ -127,8 +127,9 @@ type GeneratedFile struct {
 // Generator renders the repo's index document(s) from its file list: a map
 // from hosted path name to file. Multi-file indexes (rpm's repomd.xml plus
 // the primary metadata it references) return several entries. Regeneration
-// is deterministic from `files`, so no caching layer is needed.
-type Generator func(files []HostedFile) (map[string]GeneratedFile, error)
+// is deterministic from `files`, so no caching layer is needed. ctx carries the
+// request's cancellation/deadline into any blob reads the generator performs.
+type Generator func(ctx context.Context, files []HostedFile) (map[string]GeneratedFile, error)
 
 // HostedFile is one stored file, as seen by a Generator.
 type HostedFile struct {
@@ -164,7 +165,7 @@ func (h *HostedHandler) Get(w http.ResponseWriter, r *http.Request, repo, name s
 	// so regenerating an N-file index costs one query, not N.
 	if h.Generator != nil {
 		if files, err := h.Store.HostedFiles(r.Context(), h.Format, repo); err == nil && len(files) > 0 {
-			if gf, ok := h.generate(files, name); ok {
+			if gf, ok := h.generate(r.Context(), files, name); ok {
 				w.Header().Set("Content-Type", gf.ContentType)
 				w.Header().Set("Content-Length", fmt.Sprint(len(gf.Body)))
 				w.WriteHeader(http.StatusOK)
@@ -212,8 +213,8 @@ func (h *HostedHandler) Delete(w http.ResponseWriter, r *http.Request, repo, nam
 // generate renders the repo index from an already-loaded file list and returns
 // the requested member. The caller supplies the list (one index pass), so
 // generation adds no per-file queries.
-func (h *HostedHandler) generate(files []HostedFile, name string) (GeneratedFile, bool) {
-	out, err := h.Generator(files)
+func (h *HostedHandler) generate(ctx context.Context, files []HostedFile, name string) (GeneratedFile, bool) {
+	out, err := h.Generator(ctx, files)
 	if err != nil {
 		return GeneratedFile{}, false
 	}

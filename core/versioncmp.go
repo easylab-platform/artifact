@@ -1,6 +1,7 @@
 package artifactkit
 
 import (
+	"sort"
 	"strings"
 )
 
@@ -100,12 +101,10 @@ func HighestVersion(versions []string) string {
 	return best
 }
 
-// SortSemver sorts version strings in ascending semantic order (stable).
+// SortSemver sorts version strings in ascending semantic order. The sort is
+// stable, so equal semantic keys keep their input order.
 func SortSemver(versions []string) {
-	// Simple insertion sort on the semantic key, stable for equal keys.
-	for i := 1; i < len(versions); i++ {
-		for j := i; j > 0 && compareVersions(versions[j], versions[j-1]) < 0; j-- {
-			versions[j], versions[j-1] = versions[j-1], versions[j]
-		}
-	}
+	sort.SliceStable(versions, func(i, j int) bool {
+		return compareVersions(versions[i], versions[j]) < 0
+	})
 }

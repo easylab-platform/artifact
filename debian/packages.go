@@ -3,6 +3,7 @@ package debian
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -20,7 +21,7 @@ import (
 // This index is UNSIGNED: the source line must carry [trusted=yes] (dev
 // deployments). Pull-through packages keep upstream signatures untouched.
 func GeneratePackages(store artifactkit.HostedStore) artifactkit.Generator {
-	return func(files []artifactkit.HostedFile) (map[string]artifactkit.GeneratedFile, error) {
+	return func(ctx context.Context, files []artifactkit.HostedFile) (map[string]artifactkit.GeneratedFile, error) {
 		var b strings.Builder
 		sorted := make([]artifactkit.HostedFile, len(files))
 		copy(sorted, files)
@@ -29,7 +30,7 @@ func GeneratePackages(store artifactkit.HostedStore) artifactkit.Generator {
 			if !strings.HasSuffix(f.Name, ".deb") {
 				continue
 			}
-			ctrl, err := debControlFields(store, f)
+			ctrl, err := debControlFields(ctx, store, f)
 			if err != nil || ctrl["Package"] == "" {
 				// Minimal stanza: filename-derived name/version.
 				name, ver := nameVersionFromDeb(f.Name)
@@ -77,8 +78,8 @@ func gzipBytes(body []byte) ([]byte, error) {
 }
 
 // debControlFields extracts the control stanza of a hosted .deb.
-func debControlFields(store artifactkit.HostedStore, f artifactkit.HostedFile) (map[string]string, error) {
-	data, err := readBlob(store, f.Digest)
+func debControlFields(ctx context.Context, store artifactkit.HostedStore, f artifactkit.HostedFile) (map[string]string, error) {
+	data, err := readBlob(ctx, store, f.Digest)
 	if err != nil {
 		return nil, err
 	}

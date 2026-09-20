@@ -57,8 +57,8 @@ func TestStoreStreamHashesAndDedups(t *testing.T) {
 	if stored2.Digest != stored.Digest {
 		t.Fatalf("second digest = %s", stored2.Digest)
 	}
-	size, _ := reg.Blobs.Stat(ctx, stored.Digest)
-	if size == nil || *size != int64(len(data)) {
+	info, _ := reg.Blobs.Stat(ctx, stored.Digest)
+	if info == nil || info.Size != int64(len(data)) {
 		t.Fatalf("blob not persisted once")
 	}
 }
@@ -100,6 +100,67 @@ func TestStoreStreamLargeBodyStaysOffHeap(t *testing.T) {
 	}
 	if stored.Size != n {
 		t.Fatalf("size = %d, want %d", stored.Size, n)
+	}
+}
+
+// TestStoreVersionReplacesSameFilename verifies a re-publish of the same
+// filename supersedes its descriptor (no accumulation), while other filenames
+// of the same version are preserved (a jar's pom/sha1 keep their entries).
+func TestStoreVersionReplacesSameFilename(t *testing.T) {
+	reg := newStreamRegistry(t)
+	ctx := context.Background()
+
+	put := func(filename, body string) {
+		reg.StoreVersion(ctx, artifactkit.VersionInput{
+			Format: "maven", Repository: "acme/lib", Version: "1.0",
+			Filename: filename, Source: "push", Data: []byte(body),
+		})
+	}
+	put("lib-1.0.jar", "jar-v1")
+	put("lib-1.0.pom", "pom")
+	// Re-publish the jar with new bytes: the old descriptor is replaced.
+	put("lib-1.0.jar", "jar-v2")
+
+	art, err := reg.Meta.Get(ctx, "maven", "acme/lib", "1.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jarCount, pomCount := 0, 0
+	for _, b := range art.Blobs {
+		switch b.Name {
+		case "lib-1.0.jar":
+			jarCount++
+			if b.Size != int64(len("jar-v2")) {
+				t.Fatalf("jar descriptor not updated: %+v", b)
+			}
+		case "lib-1.0.pom":
+			pomCount++
+		}
+	}
+	if jarCount != 1 {
+		t.Fatalf("jar descriptors = %d, want 1 (replace, not accumulate)", jarCount)
+	}
+	if pomCount != 1 {
+		t.Fatalf("pom descriptor lost on jar replace: %+v", art.Blobs)
+	}
+}
+
+// TestBlobHashesReadsRecordedSet verifies BlobHashes returns the set recorded at
+// write time (no recompute needed).
+func TestBlobHashesReadsRecordedSet(t *testing.T) {
+	reg := newStreamRegistry(t)
+	ctx := context.Background()
+	data := []byte("hash-me-once")
+	stored, err := reg.StoreStream(ctx, bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := reg.BlobHashes(ctx, stored.Digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != stored.Hashes {
+		t.Fatalf("BlobHashes = %+v, want %+v", got, stored.Hashes)
 	}
 }
 

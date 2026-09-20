@@ -49,19 +49,17 @@ func TestS3RoundTrip(t *testing.T) {
 	digest := "sha256:" + hex.EncodeToString(h[:])
 
 	// Put (new), then Put again (dedup -> false).
-	ok, err := st.PutIfAbsent(ctx, digest, strings.NewReader(body))
-	if err != nil || !ok {
+	if _, ok, err := st.Put(ctx, strings.NewReader(body), digest); err != nil || !ok {
 		t.Fatalf("put: ok=%v err=%v", ok, err)
 	}
-	ok2, err := st.PutIfAbsent(ctx, digest, strings.NewReader(body))
-	if err != nil || ok2 {
+	if _, ok2, err := st.Put(ctx, strings.NewReader(body), digest); err != nil || ok2 {
 		t.Fatalf("dedup put: ok=%v err=%v (want false)", ok2, err)
 	}
 
 	// Stat.
-	sz, err := st.Stat(ctx, digest)
-	if err != nil || sz == nil || *sz != int64(len(body)) {
-		t.Fatalf("stat: sz=%v err=%v", sz, err)
+	info, err := st.Stat(ctx, digest)
+	if err != nil || info == nil || info.Size != int64(len(body)) {
+		t.Fatalf("stat: info=%v err=%v", info, err)
 	}
 	// Open.
 	rd, err := st.Open(ctx, digest)
@@ -82,24 +80,24 @@ func TestS3RoundTrip(t *testing.T) {
 		t.Fatalf("list: %v", err)
 	}
 	found := false
-	for _, d := range all {
-		if d == digest {
+	for _, b := range all {
+		if b.Digest == digest {
 			found = true
 		}
 	}
 	if !found {
 		t.Fatalf("digest %s not in List (%d entries)", digest, len(all))
 	}
-	// HashesFor.
-	hs, err := st.HashesFor(ctx, digest)
-	if err != nil || hs.SHA256 != hex.EncodeToString(h[:]) {
-		t.Fatalf("hashes: %v %+v", err, hs)
+	// Hashes recorded at write time.
+	hs, ok, err := st.Hashes(ctx, digest)
+	if err != nil || !ok || hs.SHA256 != hex.EncodeToString(h[:]) {
+		t.Fatalf("hashes: ok=%v err=%v %+v", ok, err, hs)
 	}
 	// Delete.
 	if err := st.Delete(ctx, digest); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if sz, _ := st.Stat(ctx, digest); sz != nil {
+	if info, _ := st.Stat(ctx, digest); info != nil {
 		t.Fatal("blob still present after delete")
 	}
 }

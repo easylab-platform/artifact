@@ -63,7 +63,7 @@ func TestBlobFollowsRedirect(t *testing.T) {
 		t.Fatalf("body = %q want %q", got, payload)
 	}
 	// The blob is now cached.
-	if size, _ := blobs.Stat(t.Context(), digest); size == nil || *size != int64(len(payload)) {
+	if info, _ := blobs.Stat(t.Context(), digest); info == nil || info.Size != int64(len(payload)) {
 		t.Fatalf("blob not cached")
 	}
 	// The CDN received the presigned request WITHOUT the registry bearer

@@ -175,7 +175,7 @@ func (s *State) pkg(w http.ResponseWriter, r *http.Request, name string) {
 		// all-zero value is not a valid checksum for the release. Fall back to
 		// the sha256 of the stored .tar when no recorded value exists.
 		if !bytesHasNonZero(inner[:]) && len(art.Blobs) > 0 {
-			if h, err := s.Registry.Blobs.HashesFor(r.Context(), art.Blobs[0].Digest); err == nil {
+			if h, err := s.Registry.BlobHashes(r.Context(), art.Blobs[0].Digest); err == nil {
 				if raw, err := hex.DecodeString(h.SHA256); err == nil && len(raw) == 32 {
 					copy(inner[:], raw)
 				}
@@ -185,7 +185,7 @@ func (s *State) pkg(w http.ResponseWriter, r *http.Request, name string) {
 		// dependencies (field 3) is omitted when empty (matching hex.pm).
 		// outer_checksum at field 5: emit the .tar sha256.
 		if len(art.Blobs) > 0 {
-			if h, err := s.Registry.Blobs.HashesFor(r.Context(), art.Blobs[0].Digest); err == nil {
+			if h, err := s.Registry.BlobHashes(r.Context(), art.Blobs[0].Digest); err == nil {
 				if raw, err := hex.DecodeString(h.SHA256); err == nil && len(raw) == 32 {
 					rel = pbBytes(rel, 5, raw)
 				}

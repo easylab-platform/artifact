@@ -83,18 +83,24 @@ func (a *StoreAuth) open(ctx context.Context) bool {
 	return a.store.OpenInstance(ctx)
 }
 
-// resolve maps a credential (database token or minted token) to its
-// principal. The minted table is checked first so mints keep their grant's
-// privilege bounds.
+// resolve maps a credential (database token or minted token) to its principal.
+//
+// A PRESENTED credential is resolved directly (minted table first, so mints
+// keep their grant bounds; then the store). Only an ABSENT or UNKNOWN token
+// consults OpenInstance, so the common authenticated request never pays the
+// COUNT(*) — and, unlike a TTL-cached open flag, registering the first user
+// closes anonymous write immediately.
 func (a *StoreAuth) resolve(ctx context.Context, token string) (Principal, bool) {
+	if token != "" {
+		if m, ok := a.lookupMinted(token); ok {
+			return Principal{Username: m.username, Level: m.level}, true
+		}
+		if p, ok := a.store.LookupToken(ctx, token); ok {
+			return p, true
+		}
+	}
 	if a.open(ctx) {
 		return Principal{Username: "open", Level: LevelWrite}, true
-	}
-	if m, ok := a.lookupMinted(token); ok {
-		return Principal{Username: m.username, Level: m.level}, true
-	}
-	if p, ok := a.store.LookupToken(ctx, token); ok {
-		return p, true
 	}
 	return Principal{}, false
 }

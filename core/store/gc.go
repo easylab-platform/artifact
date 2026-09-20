@@ -82,27 +82,20 @@ func (s *Store) ReapOrphanBlobs(ctx context.Context, blobs artifactkit.BlobStore
 		return st, err
 	}
 	cutoff := time.Now().Add(-grace)
-	aged, ok := blobs.(BlobAger)
-	for _, digest := range all {
-		if refs[digest] {
+	for _, b := range all {
+		if refs[b.Digest] {
 			st.BlobsKept++
 			continue
 		}
 		// Only delete blobs old enough that no in-flight write could still be
-		// about to index them. Without an age source, be conservative and skip.
-		if !ok {
+		// about to index them (List carries the mtime, so no extra call).
+		if b.ModTime.IsZero() || b.ModTime.After(cutoff) {
 			continue
 		}
-		mod, err := aged.ModTime(ctx, digest)
-		if err != nil || mod.IsZero() || mod.After(cutoff) {
+		if err := blobs.Delete(ctx, b.Digest); err != nil {
 			continue
 		}
-		if sz, _ := blobs.Stat(ctx, digest); sz != nil {
-			st.BytesFreed += *sz
-		}
-		if err := blobs.Delete(ctx, digest); err != nil {
-			continue
-		}
+		st.BytesFreed += b.Size
 		st.OrphanBlobs++
 	}
 	return st, nil
@@ -140,14 +133,19 @@ func (s *Store) Stats(ctx context.Context, blobs artifactkit.BlobStore) (Stats, 
 		return Stats{}, err
 	}
 	now := time.Now().Unix()
+	// One List gives every blob's size, so per-format byte attribution is O(1)
+	// per digest instead of a Stat round-trip each.
+	sizes := map[string]int64{}
+	all, err := blobs.List(ctx)
+	if err != nil {
+		return Stats{}, err
+	}
+	for _, b := range all {
+		sizes[b.Digest] = b.Size
+	}
 	byFormat := map[string]*FormatStat{}
 	seenDigest := map[string]map[string]bool{} // format -> digest set
-	sizeOf := func(d string) int64 {
-		if sz, _ := blobs.Stat(ctx, d); sz != nil {
-			return *sz
-		}
-		return 0
-	}
+	sizeOf := func(d string) int64 { return sizes[d] }
 	add := func(format, digest string) {
 		if digest == "" {
 			return
@@ -188,19 +186,11 @@ func (s *Store) Stats(ctx context.Context, blobs artifactkit.BlobStore) (Stats, 
 		out.Formats = append(out.Formats, *fs)
 	}
 	sort.Slice(out.Formats, func(i, j int) bool { return out.Formats[i].Format < out.Formats[j].Format })
-	all, _ := blobs.List(ctx)
 	out.Blobs.Objects = int64(len(all))
-	for _, d := range all {
-		out.Blobs.Bytes += sizeOf(d)
+	for _, b := range all {
+		out.Blobs.Bytes += b.Size
 	}
 	return out, nil
-}
-
-// BlobAger is an optional BlobStore capability: the modification time of a
-// blob, used to avoid deleting blobs that may be mid-write. A backend without
-// it disables orphan reaping (safe default).
-type BlobAger interface {
-	ModTime(ctx context.Context, digest string) (time.Time, error)
 }
 
 // RunReaper runs the storage reaper on a ticker until ctx is cancelled: it

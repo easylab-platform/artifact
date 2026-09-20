@@ -133,7 +133,7 @@ func (s *State) serveObject(w http.ResponseWriter, r *http.Request, repo, oid st
 		if !artifactkit.AuthorizeWriteScoped(w, r, s.Auth, s.Registry, "gitlfs") {
 			return
 		}
-		if _, err := s.Registry.Blobs.PutIfAbsent(r.Context(), digest, r.Body); err != nil {
+		if _, _, err := s.Registry.Blobs.Put(r.Context(), r.Body, digest); err != nil {
 			artifactkit.Error(w, http.StatusBadRequest, "digest mismatch: "+err.Error())
 			return
 		}

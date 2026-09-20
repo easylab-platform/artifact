@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -156,8 +156,12 @@ func newTransport(proxy *string) *http.Transport {
 	if proxy != nil {
 		if *proxy == "" {
 			tr.Proxy = nil // direct
+		} else if u, err := url.Parse(*proxy); err == nil {
+			tr.Proxy = http.ProxyURL(u)
 		} else {
-			tr.Proxy = http.ProxyURL(mustParseURL(*proxy))
+			// A malformed proxy URL must not crash the process. Fall back to
+			// the environment proxy and surface the misconfiguration once.
+			LogMetaErr("invalid proxy url "+*proxy, err)
 		}
 	}
 	return tr
@@ -493,61 +497,47 @@ func (r *Registry) FetchAbsoluteToBlob(ctx context.Context, url, wantDigest stri
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return 0, &UpstreamStatusError{Path: url, Status: resp.StatusCode}
 	}
-	digest := wantDigest
-	if digest == "" {
-		digest = "sha256:unknown"
-	}
-	if _, err := r.Blobs.PutIfAbsent(ctx, digest, resp.Body); err != nil {
+	// The store verifies wantDigest when set and computes it when empty, so an
+	// empty digest is safe (the bytes are stored under their true identity).
+	stored, _, err := r.Blobs.Put(ctx, resp.Body, wantDigest)
+	if err != nil {
 		return 0, err
 	}
-	if sz, err := r.Blobs.Stat(ctx, digest); err == nil && sz != nil {
-		return *sz, nil
-	}
-	return 0, nil
+	return stored.Size, nil
 }
 
 // StoreAndHash writes into the blob store (dedup by sha256) and returns a summary.
+// The store computes and records the hashes, so nothing is hashed twice.
 func (r *Registry) StoreAndHash(ctx context.Context, data []byte) (Stored, error) {
-	h, _ := ComputeHashesBytes(data)
-	digest := "sha256:" + h.SHA256
-	if _, err := r.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err != nil {
-		return Stored{}, err
-	}
-	return Stored{Hashes: h, Size: int64(len(data)), Digest: digest}, nil
+	stored, _, err := r.Blobs.Put(ctx, bytes.NewReader(data), "")
+	return stored, err
 }
 
 // StoreStream consumes a reader into the CAS without buffering the whole body
-// in memory, computing every hash in the same pass. It writes to a temp file
-// (the digest must be known before PutIfAbsent), then commits it. This is the
-// upload-path counterpart to StoreAndHash: a multi-GB OCI layer or Helm chart
-// never sits in RAM. The returned Stored carries the multi-hashes so callers
-// (e.g. Maven/Hex checksum files) need not re-read the blob.
+// in memory. The store streams it once, computing and recording the hash set in
+// that pass (no double hash, no post-write re-read). This is the upload-path
+// counterpart to StoreAndHash.
 func (r *Registry) StoreStream(ctx context.Context, body io.Reader) (Stored, error) {
-	tmp, err := os.CreateTemp("", "artifact-store-*")
+	stored, _, err := r.Blobs.Put(ctx, body, "")
+	return stored, err
+}
+
+// BlobHashes returns a blob's hash set. It reads the set recorded by the store
+// at write time (no re-read); only a blob written before that feature existed
+// falls back to one recompute from the stored bytes.
+func (r *Registry) BlobHashes(ctx context.Context, digest string) (Hashes, error) {
+	if h, ok, err := r.Blobs.Hashes(ctx, digest); err == nil && ok {
+		return h, nil
+	}
+	rd, err := r.Blobs.Open(ctx, digest)
 	if err != nil {
-		return Stored{}, err
+		return Hashes{}, err
 	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	defer func() { _ = tmp.Close() }()
-	hasher := newMultiHasher()
-	n, err := io.Copy(io.MultiWriter(tmp, hasher), body)
-	if err != nil {
-		return Stored{}, err
+	if rd == nil {
+		return Hashes{}, ErrBlobUnknown
 	}
-	h := hasher.sum()
-	digest := "sha256:" + h.SHA256
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return Stored{}, err
-	}
-	if _, err := r.Blobs.PutIfAbsent(ctx, digest, tmp); err != nil {
-		return Stored{}, err
-	}
-	// Persist the hashes we already computed, so a later HashesFor (Maven/
-	// Hex checksum files) is a sidecar read, not a full re-read of the blob.
-	if hp, ok := r.Blobs.(HashPersister); ok {
-		LogMetaErr("hash sidecar", hp.PutHashes(ctx, digest, h))
-	}
-	return Stored{Hashes: h, Size: n, Digest: digest}, nil
+	defer func() { _ = rd.Close() }()
+	return ComputeHashes(rd)
 }
 
 // ReadBlobPrefix reads at most n bytes from the start of a blob, streaming
@@ -603,10 +593,13 @@ type VersionInput struct {
 	Filename string
 	// Source is "push" (published) or "pull" (cached upstream).
 	Source string
-	// Data is the artifact bytes. Empty stores no blob (index-only row).
+	// Body is the artifact content, streamed into the CAS (no in-memory copy).
+	// Empty stores no blob (index-only row). Mutually exclusive with Data.
+	Body io.Reader
+	// Data is an in-memory alternative to Body. Mutually exclusive with Body.
 	Data []byte
-	// ExtraBlobs are additional blobs to index alongside Data (rare; e.g. a
-	// detached signature). Optional.
+	// ExtraBlobs are additional blobs to index alongside the primary one
+	// (rare; e.g. a detached signature). Optional.
 	ExtraBlobs []Descriptor
 	// Proprietary is opaque per-format metadata (hex inner_checksum, composer
 	// autoload, ...). Optional.
@@ -618,11 +611,15 @@ type VersionInput struct {
 	DefaultVersion string
 }
 
-// StoreVersion persists one artifact version: hash Data into the CAS (dedup by
-// digest), attach the descriptor, and upsert the index row. It is the single
-// implementation behind every flat adapter's storeVersionSource. A CAS write
-// failure still indexes the row (best-effort, matching the historical
-// behavior); index errors are logged, never fatal to the response.
+// StoreVersion persists one artifact version: stream the content into the CAS,
+// REPLACE any existing descriptor of the same filename (a re-publish of a
+// filename supersedes it; other filenames of the same version, e.g. a jar's
+// pom/sha1, are preserved), and upsert the index row. It is the single
+// implementation behind every flat adapter's publish/cache write.
+//
+// An orphaned blob from a replaced descriptor is NOT deleted eagerly: another
+// version may share the digest, and the background reaper reclaims true
+// orphans. Index errors are logged, never fatal to the response.
 func (r *Registry) StoreVersion(ctx context.Context, in VersionInput) {
 	if in.Version == "" && in.DefaultVersion != "" {
 		in.Version = in.DefaultVersion
@@ -631,14 +628,29 @@ func (r *Registry) StoreVersion(ctx context.Context, in VersionInput) {
 	if name == "" {
 		name = in.Version
 	}
-	art := Artifact{
-		Format: in.Format, Repository: in.Repository, Version: in.Version,
-		MediaType: in.MediaType, Source: in.Source, Proprietary: in.Proprietary,
+	art, _ := r.Meta.Get(ctx, in.Format, in.Repository, in.Version)
+	art.Format, art.Repository, art.Version = in.Format, in.Repository, in.Version
+	art.MediaType, art.Source, art.Proprietary = in.MediaType, in.Source, in.Proprietary
+
+	// Replace the descriptor with the same name; keep the others.
+	kept := art.Blobs[:0:0]
+	for _, b := range art.Blobs {
+		if b.Name != name {
+			kept = append(kept, b)
+		}
 	}
-	if len(in.Data) > 0 {
-		if stored, err := r.StoreAndHash(ctx, in.Data); err == nil {
+	art.Blobs = kept
+
+	body := in.Body
+	if body == nil && len(in.Data) > 0 {
+		body = bytes.NewReader(in.Data)
+	}
+	if body != nil {
+		if stored, _, err := r.Blobs.Put(ctx, body, ""); err == nil && stored.Size > 0 {
 			art.Digest = stored.Digest
 			art.Blobs = append(art.Blobs, Descriptor{Digest: stored.Digest, Size: stored.Size, Name: name})
+		} else if err != nil {
+			LogMetaErr(in.Format+" store blob", err)
 		}
 	}
 	art.Blobs = append(art.Blobs, in.ExtraBlobs...)
@@ -1045,23 +1057,10 @@ func (r *Registry) fetchToBlobDirect(ctx context.Context, remote *Remote, path s
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return "", 0, false
 	}
-	tmp, err := os.CreateTemp("", "artifact-fetch-*")
+	// The store streams the body into the CAS and hashes it in one pass.
+	stored, _, err := r.Blobs.Put(ctx, resp.Body, "")
 	if err != nil {
 		return "", 0, false
 	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	defer func() { _ = tmp.Close() }()
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(tmp, h), resp.Body)
-	if err != nil {
-		return "", 0, false
-	}
-	digest := "sha256:" + hex.EncodeToString(h.Sum(nil))
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return "", 0, false
-	}
-	if _, err := r.Blobs.PutIfAbsent(ctx, digest, tmp); err != nil {
-		return "", 0, false
-	}
-	return digest, n, true
+	return stored.Digest, stored.Size, true
 }

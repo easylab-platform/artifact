@@ -58,12 +58,20 @@ type State struct {
 	DisableLocal bool
 
 	mu         sync.Mutex
-	locks      map[string]*sync.Mutex
 	refreshing map[string]bool
+	// locks is a fixed stripe table: hashing a repository key onto one of a
+	// small number of mutexes serialises clone/fetch per repository WITHOUT an
+	// unbounded map that would grow with the number of repositories ever seen.
+	locks [lockStripes]sync.Mutex
 }
 
+// lockStripes is the size of the repository-lock stripe table. It only needs
+// to exceed the number of repositories fetched CONCURRENTLY (a hash collision
+// merely serialises two unrelated repos briefly).
+const lockStripes = 64
+
 func NewHandler(reg *artifactkit.Registry, cfg map[string]any) (http.Handler, error) {
-	s := &State{Registry: reg, locks: map[string]*sync.Mutex{}}
+	s := &State{Registry: reg}
 	if a, ok := cfg["auth"].(artifactkit.Auth); ok {
 		s.Auth = a
 	}
@@ -226,7 +234,7 @@ func (s *State) lfsObject(w http.ResponseWriter, r *http.Request, host, repoPath
 		if !artifactkit.AuthorizeWriteFor(w, r, s.Auth, s.Registry, "git", repoPath) {
 			return
 		}
-		if _, err := s.Registry.Blobs.PutIfAbsent(r.Context(), digest, r.Body); err != nil {
+		if _, _, err := s.Registry.Blobs.Put(r.Context(), r.Body, digest); err != nil {
 			artifactkit.Error(w, http.StatusBadRequest, "lfs digest mismatch: "+err.Error())
 			return
 		}
@@ -296,19 +304,11 @@ func (s *State) mirrorPath(host, repo string) string {
 	return filepath.Join(s.dir(), host, hex.EncodeToString(sum[:8])+".git")
 }
 
-// repoLock returns the per-repository mutex that serialises clone/fetch.
+// repoLock returns the striped mutex that serialises clone/fetch for a
+// repository key. Two keys colliding on a stripe only briefly serialise.
 func (s *State) repoLock(key string) *sync.Mutex {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.locks == nil {
-		s.locks = map[string]*sync.Mutex{}
-	}
-	m, ok := s.locks[key]
-	if !ok {
-		m = &sync.Mutex{}
-		s.locks[key] = m
-	}
-	return m
+	sum := sha256.Sum256([]byte(key))
+	return &s.locks[sum[0]%lockStripes]
 }
 
 // ensureMirror makes the local mirror exist and reasonably fresh. It is a

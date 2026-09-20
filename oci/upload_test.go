@@ -174,7 +174,7 @@ func TestBlobMount(t *testing.T) {
 	payload := []byte("shared layer")
 	sum := sha256.Sum256(payload)
 	dgst := "sha256:" + hex.EncodeToString(sum[:])
-	if _, err := reg.Blobs.PutIfAbsent(context.Background(), dgst, bytes.NewReader(payload)); err != nil {
+	if _, _, err := reg.Blobs.Put(context.Background(), bytes.NewReader(payload), dgst); err != nil {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()

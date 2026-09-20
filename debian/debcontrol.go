@@ -21,8 +21,8 @@ import (
 // readBlob loads a whole CAS blob into memory (index generation reads only
 // control members, which are small; the bytes fetched here are bounded by
 // the uploaded .deb size).
-func readBlob(store artifactkit.HostedStore, digest string) ([]byte, error) {
-	rd, err := store.Registry.Blobs.Open(context.Background(), digest)
+func readBlob(ctx context.Context, store artifactkit.HostedStore, digest string) ([]byte, error) {
+	rd, err := store.Registry.Blobs.Open(ctx, digest)
 	if err != nil || rd == nil {
 		return nil, fmt.Errorf("blob %s unavailable", digest)
 	}

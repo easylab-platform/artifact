@@ -509,7 +509,7 @@ func (s *State) aggregateMetadata(r *http.Request, name string) string {
 			if b.Digest == "" {
 				continue
 			}
-			h, err := s.Registry.Blobs.HashesFor(ctx, b.Digest)
+			h, err := s.Registry.BlobHashes(ctx, b.Digest)
 			if err == nil {
 				dist["shasum"] = h.SHA1
 				intB64 := base64.StdEncoding.EncodeToString(hexBytes(h.SHA512))

@@ -27,7 +27,7 @@ import (
 // recorded here, so a hosted channel needs no signing at all. (This is the
 // one system-package ecosystem where hosted works with zero trust config.)
 func GenerateRepodata(store artifactkit.HostedStore) artifactkit.Generator {
-	return func(files []artifactkit.HostedFile) (map[string]artifactkit.GeneratedFile, error) {
+	return func(ctx context.Context, files []artifactkit.HostedFile) (map[string]artifactkit.GeneratedFile, error) {
 		// Group by subdir (the first path segment of the hosted name).
 		bySubdir := map[string]map[string]any{}
 		condaBySubdir := map[string]map[string]any{}
@@ -36,7 +36,7 @@ func GenerateRepodata(store artifactkit.HostedStore) artifactkit.Generator {
 			if subdir == "" {
 				continue
 			}
-			entry, ok := condaPackageEntry(store, f)
+			entry, ok := condaPackageEntry(ctx, store, f)
 			if !ok {
 				continue
 			}
@@ -76,8 +76,8 @@ func GenerateRepodata(store artifactkit.HostedStore) artifactkit.Generator {
 }
 
 // condaPackageEntry builds one repodata entry from a stored package.
-func condaPackageEntry(store artifactkit.HostedStore, f artifactkit.HostedFile) (map[string]any, bool) {
-	data, err := readBlob(store, f.Digest)
+func condaPackageEntry(ctx context.Context, store artifactkit.HostedStore, f artifactkit.HostedFile) (map[string]any, bool) {
+	data, err := readBlob(ctx, store, f.Digest)
 	if err != nil {
 		return nil, false
 	}
@@ -159,8 +159,8 @@ func baseName(p string) string {
 	return p
 }
 
-func readBlob(store artifactkit.HostedStore, digest string) ([]byte, error) {
-	rd, err := store.Registry.Blobs.Open(context.Background(), digest)
+func readBlob(ctx context.Context, store artifactkit.HostedStore, digest string) ([]byte, error) {
+	rd, err := store.Registry.Blobs.Open(ctx, digest)
 	if err != nil || rd == nil {
 		return nil, fmt.Errorf("blob %s unavailable", digest)
 	}

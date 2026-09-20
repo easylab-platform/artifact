@@ -3,6 +3,7 @@ package rpm
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -25,7 +26,7 @@ import (
 // repomd.xml references exactly one <data type="primary"> member; dnf treats
 // filelists/other as optional, so a primary-only repo is valid.
 func GenerateRepodata(store artifactkit.HostedStore) artifactkit.Generator {
-	return func(files []artifactkit.HostedFile) (map[string]artifactkit.GeneratedFile, error) {
+	return func(ctx context.Context, files []artifactkit.HostedFile) (map[string]artifactkit.GeneratedFile, error) {
 		var primary bytes.Buffer
 		primary.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 		primary.WriteString(`<metadata xmlns="http://linux.duke.edu/metadata/common" xmlns:rpm="http://linux.duke.edu/metadata/rpm" packages="`)

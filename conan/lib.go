@@ -755,11 +755,11 @@ func storeFile(reg *artifactkit.Registry, name, ver, filename string, data []byt
 	// file is legitimate content (a package with no files has a 0-byte
 	// conaninfo.txt) and must still be recorded, or the client reports the
 	// package as corrupted.
-	h, _ := artifactkit.ComputeHashesBytes(data)
-	digest := "sha256:" + h.SHA256
-	if _, err := reg.Blobs.PutIfAbsent(ctx, digest, bytes.NewReader(data)); err == nil {
-		artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, artifactkit.Artifact{Format: "conan", Repository: name, Version: filename, Source: "push", Blobs: []artifactkit.Descriptor{{Digest: digest, Size: int64(len(data)), Name: filename}}}))
+	stored, _, err := reg.Blobs.Put(ctx, bytes.NewReader(data), "")
+	if err != nil {
+		return
 	}
+	artifactkit.LogMetaErr("meta put", reg.Meta.Put(ctx, artifactkit.Artifact{Format: "conan", Repository: name, Version: filename, Source: "push", Blobs: []artifactkit.Descriptor{{Digest: stored.Digest, Size: stored.Size, Name: filename}}}))
 }
 
 func removeVersion(reg *artifactkit.Registry, name, ver string, ctx context.Context) {

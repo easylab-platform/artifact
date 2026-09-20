@@ -177,6 +177,64 @@ func TestFlightKindsDoNotCollide(t *testing.T) {
 	wg.Wait() // a collision would panic the test
 }
 
+// TestPathCacheRepoIsolation verifies two repositories that resolve to the SAME
+// upstream URL for the SAME path are cached separately (the single-flight key
+// and the storage key include the repository). Without it, a shared path would
+// collapse onto one entry.
+func TestPathCacheRepoIsolation(t *testing.T) {
+	reg := newCacheRegistry(t)
+	var hits int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&hits, 1)
+		_, _ = w.Write([]byte("shared-path"))
+	}))
+	t.Cleanup(srv.Close)
+
+	pol := artifactkit.PathCachePolicy{MediaType: "text/plain"}
+	// Two repos, same base + path (e.g. two conda channels serving one filename).
+	r1 := reg.FetchCachedPath(context.Background(), "conda", "chan-a/noarch", "f.conda", "/f.conda", srv.URL, pol)
+	r2 := reg.FetchCachedPath(context.Background(), "conda", "chan-b/noarch", "f.conda", "/f.conda", srv.URL, pol)
+	if !r1.OK || !r2.OK {
+		t.Fatalf("both repos should resolve: %+v %+v", r1, r2)
+	}
+	// They are distinct cache rows, so the upstream is hit once per repo.
+	if got := atomic.LoadInt64(&hits); got != 2 {
+		t.Fatalf("upstream hits = %d, want 2 (one per repo)", got)
+	}
+	// A repeat of repo A is a local hit.
+	r3 := reg.FetchCachedPath(context.Background(), "conda", "chan-a/noarch", "f.conda", "/f.conda", srv.URL, pol)
+	if !r3.Hit {
+		t.Fatal("repeat of repo A should be a cache hit")
+	}
+	if got := atomic.LoadInt64(&hits); got != 2 {
+		t.Fatalf("upstream hits = %d, want still 2", got)
+	}
+}
+
+// TestFetchAbsoluteToBlobComputesDigest verifies an empty wantDigest stores the
+// bytes under their TRUE computed identity (never a placeholder), so a later
+// lookup by the real digest finds them.
+func TestFetchAbsoluteToBlobComputesDigest(t *testing.T) {
+	reg := newCacheRegistry(t)
+	body := []byte("absolute-body")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	size, err := reg.FetchAbsoluteToBlob(context.Background(), srv.URL+"/obj", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size != int64(len(body)) {
+		t.Fatalf("size = %d, want %d", size, len(body))
+	}
+	d := artifactkit.DigestOf(body)
+	if info, _ := reg.Blobs.Stat(context.Background(), d); info == nil {
+		t.Fatalf("blob not stored under its computed digest %s", d)
+	}
+}
+
 // TestFetchToBlobRetries502 verifies the streaming path retries a transient
 // 502 (the egress proxy's classic upstream-blip code) instead of failing a
 // client build, matching the buffered Fetch path's resilience.

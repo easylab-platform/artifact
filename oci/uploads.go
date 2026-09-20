@@ -123,7 +123,7 @@ func (s *uploadSessions) commit(ctx context.Context, session, digest string, blo
 		return err
 	}
 	defer func() { _ = f.Close() }()
-	if _, err := blobs.PutIfAbsent(ctx, digest, f); err != nil {
+	if _, _, err := blobs.Put(ctx, f, digest); err != nil {
 		return err
 	}
 	s.remove(session)

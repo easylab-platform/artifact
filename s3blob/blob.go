@@ -6,15 +6,13 @@
 //	import _ "github.com/easylab-platform/artifact/s3blob"
 //
 // The CAS layout mirrors the filesystem store: one object per digest at
-// <prefix>/sha256/<first-two>/<rest>. Blobs are immutable and content-addressed,
-// so PutIfAbsent is a HEAD-then-PUT and deletes are unconditional.
+// <prefix>/sha256/<first-two>/<rest>, plus a `.hashes.json` sidecar recording
+// the hash set computed at write time. Blobs are immutable and content-addressed.
 package s3blob
 
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,6 +80,9 @@ func New(cfg Config) (*Store, error) {
 	return &Store{client: s3.NewFromConfig(awsCfg, optFns...), bucket: cfg.Bucket, prefix: cfg.Prefix}, nil
 }
 
+// hashSidecarSuffix names the persisted-hashes sidecar object for a blob.
+const hashSidecarSuffix = ".hashes.json"
+
 // key maps a digest to its object key.
 func (s *Store) key(digest string) (string, error) {
 	hexpart, err := artifactkit.ParseDigest(digest)
@@ -99,132 +100,135 @@ func (s *Store) key(digest string) (string, error) {
 }
 
 // Stat implements BlobStore.
-func (s *Store) Stat(ctx context.Context, digest string) (*int64, error) {
+func (s *Store) Stat(ctx context.Context, digest string) (*artifactkit.BlobInfo, error) {
 	k, err := s.key(digest)
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: &k})
+	out, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: aws.String(k)})
 	if err != nil {
 		if isNotFound(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return out.ContentLength, nil
+	var size int64
+	if out.ContentLength != nil {
+		size = *out.ContentLength
+	}
+	var mod time.Time
+	if out.LastModified != nil {
+		mod = *out.LastModified
+	}
+	return &artifactkit.BlobInfo{Digest: digest, Size: size, ModTime: mod}, nil
 }
 
-// Open implements BlobStore. The returned reader buffers the whole object in
-// memory: the S3 GetObject body is stream-only, but ServeBlob needs Seek for
-// Range. Blobs here are the same ones the filesystem store mmaps; a bounded
-// read is acceptable and keeps Range correct.
+// Open implements BlobStore with a LAZY ranged reader: it HEADs for the size
+// and issues Range GETs on demand, so a multi-GB layer never sits in RAM. The
+// reader satisfies http.ServeContent's Seek/Range contract.
 func (s *Store) Open(ctx context.Context, digest string) (io.ReadSeekCloser, error) {
 	k, err := s.key(digest)
 	if err != nil {
 		return nil, err
 	}
-	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: &s.bucket, Key: &k})
+	out, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: aws.String(k)})
 	if err != nil {
 		if isNotFound(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	defer func() { _ = out.Body.Close() }()
-	data, err := io.ReadAll(out.Body)
-	if err != nil {
-		return nil, err
+	var size int64
+	if out.ContentLength != nil {
+		size = *out.ContentLength
 	}
-	return &memReadSeekCloser{data: data}, nil
+	return &rangeReader{ctx: ctx, store: s, key: k, size: size}, nil
 }
 
-// PutIfAbsent implements BlobStore with a HEAD-then-PUT. It verifies the sha256
-// while streaming, so a corrupted transfer is never stored. Returns false when
-// the digest already exists (dedup).
-func (s *Store) PutIfAbsent(ctx context.Context, digest string, r io.Reader) (bool, error) {
-	k, err := s.key(digest)
-	if err != nil {
-		return false, err
+// Put implements BlobStore: stream to a temp file while computing every hash in
+// one pass, verify against wantDigest (when set), upload, then write the hash
+// sidecar. S3 PUT cannot be replayed after a mismatch, so the body is buffered
+// to disk (never RAM).
+func (s *Store) Put(ctx context.Context, r io.Reader, wantDigest string) (artifactkit.Stored, bool, error) {
+	if wantDigest != "" {
+		if _, err := artifactkit.ParseDigest(wantDigest); err != nil {
+			return artifactkit.Stored{}, false, err
+		}
+		if info, err := s.Stat(ctx, wantDigest); err != nil {
+			return artifactkit.Stored{}, false, err
+		} else if info != nil {
+			h, _, _ := s.Hashes(ctx, wantDigest)
+			return artifactkit.Stored{Hashes: h, Size: info.Size, Digest: wantDigest}, false, nil
+		}
 	}
-	if sz, err := s.Stat(ctx, digest); err != nil {
-		return false, err
-	} else if sz != nil {
-		return false, nil // dedup
-	}
-	// Buffer to a temp file so the sha256 can be verified before the PUT (S3
-	// PUT cannot be replayed after a mismatch). Large layers stream to disk,
-	// not RAM.
 	tmp, err := os.CreateTemp("", "s3blob-*")
 	if err != nil {
-		return false, err
+		return artifactkit.Stored{}, false, err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
 	defer func() { _ = tmp.Close() }()
-	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(tmp, h), r); err != nil {
-		return false, err
+	h, err := artifactkit.ComputeHashes(io.TeeReader(r, tmp))
+	if err != nil {
+		return artifactkit.Stored{}, false, err
 	}
-	if got := "sha256:" + hex.EncodeToString(h.Sum(nil)); got != digest {
-		return false, fmt.Errorf("s3blob: digest mismatch: expected %s got %s", digest, got)
+	got := "sha256:" + h.SHA256
+	if wantDigest != "" && got != wantDigest {
+		return artifactkit.Stored{}, false, fmt.Errorf("s3blob: digest mismatch: expected %s got %s", wantDigest, got)
 	}
+	k, err := s.key(got)
+	if err != nil {
+		return artifactkit.Stored{}, false, err
+	}
+	sz, _ := tmp.Seek(0, io.SeekEnd)
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return false, err
+		return artifactkit.Stored{}, false, err
 	}
 	if _, err := s.client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: &s.bucket, Key: &k, Body: tmp,
+		Bucket: &s.bucket, Key: aws.String(k), Body: tmp,
 	}); err != nil {
-		return false, err
+		return artifactkit.Stored{}, false, err
 	}
-	return true, nil
+	if err := s.putHashes(ctx, k, h); err != nil {
+		artifactkit.LogMetaErr("hash sidecar", err)
+	}
+	return artifactkit.Stored{Hashes: h, Size: sz, Digest: got}, true, nil
 }
 
-// PutHashes implements artifactkit.HashPersister: store the hashes computed
-// while streaming the blob as a sidecar object next to it, so HashesFor is a
-// small GET rather than a full re-read of a possibly multi-GB layer.
-func (s *Store) PutHashes(ctx context.Context, digest string, h artifactkit.Hashes) error {
+// Hashes implements BlobStore: the hash set recorded at write time. ok=false
+// when no sidecar exists (a blob written before this feature).
+func (s *Store) Hashes(ctx context.Context, digest string) (artifactkit.Hashes, bool, error) {
 	k, err := s.key(digest)
 	if err != nil {
-		return err
+		return artifactkit.Hashes{}, false, err
 	}
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: &s.bucket, Key: aws.String(k + hashSidecarSuffix)})
+	if err != nil {
+		if isNotFound(err) {
+			return artifactkit.Hashes{}, false, nil
+		}
+		return artifactkit.Hashes{}, false, err
+	}
+	defer func() { _ = out.Body.Close() }()
+	data, err := io.ReadAll(out.Body)
+	if err != nil {
+		return artifactkit.Hashes{}, false, err
+	}
+	var h artifactkit.Hashes
+	if json.Unmarshal(data, &h) != nil || h.SHA256 == "" {
+		return artifactkit.Hashes{}, false, nil
+	}
+	return h, true, nil
+}
+
+// putHashes writes the hash sidecar object.
+func (s *Store) putHashes(ctx context.Context, key string, h artifactkit.Hashes) error {
 	data, err := json.Marshal(h)
 	if err != nil {
 		return err
 	}
-	body := bytes.NewReader(data)
-	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{Bucket: &s.bucket, Key: aws.String(k), Body: body})
+	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{Bucket: &s.bucket, Key: aws.String(key + hashSidecarSuffix), Body: bytes.NewReader(data)})
 	return err
 }
-
-// HashesFor implements BlobStore: read the persisted sidecar when present, else
-// recompute from the stored bytes.
-func (s *Store) HashesFor(ctx context.Context, digest string) (artifactkit.Hashes, error) {
-	k, err := s.key(digest)
-	if err != nil {
-		return artifactkit.Hashes{}, err
-	}
-	if out, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: &s.bucket, Key: aws.String(k + hashSidecarSuffix)}); err == nil {
-		data, rerr := io.ReadAll(out.Body)
-		_ = out.Body.Close()
-		if rerr == nil {
-			var h artifactkit.Hashes
-			if json.Unmarshal(data, &h) == nil && h.SHA256 != "" {
-				return h, nil
-			}
-		}
-	}
-	rd, err := s.Open(ctx, digest)
-	if err != nil {
-		return artifactkit.Hashes{}, err
-	}
-	if rd == nil {
-		return artifactkit.Hashes{}, artifactkit.ErrBlobUnknown
-	}
-	defer func() { _ = rd.Close() }()
-	return artifactkit.ComputeHashes(rd)
-}
-
-// hashSidecarSuffix names the persisted-hashes sidecar for a blob object.
-const hashSidecarSuffix = ".hashes.json"
 
 // Delete implements BlobStore (unconditional; a missing key is not an error).
 func (s *Store) Delete(ctx context.Context, digest string) error {
@@ -232,20 +236,19 @@ func (s *Store) Delete(ctx context.Context, digest string) error {
 	if err != nil {
 		return err
 	}
-	// Best-effort sidecar removal; the object delete is authoritative.
 	_, _ = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: aws.String(k + hashSidecarSuffix)})
 	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: aws.String(k)})
 	return err
 }
 
-// List implements BlobStore: every digest under the prefix, paginated.
-func (s *Store) List(ctx context.Context) ([]string, error) {
+// List implements BlobStore: every blob under the prefix with size + mtime.
+func (s *Store) List(ctx context.Context) ([]artifactkit.BlobInfo, error) {
 	prefix := s.prefix
 	if prefix != "" {
 		prefix += "/"
 	}
 	prefix += "sha256/"
-	var out []string
+	var out []artifactkit.BlobInfo
 	var token *string
 	for {
 		page, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
@@ -255,9 +258,19 @@ func (s *Store) List(ctx context.Context) ([]string, error) {
 			return nil, err
 		}
 		for _, obj := range page.Contents {
-			if d, ok := digestFromKey(aws.ToString(obj.Key)); ok {
-				out = append(out, d)
+			d, ok := digestFromKey(aws.ToString(obj.Key))
+			if !ok {
+				continue
 			}
+			var size int64
+			if obj.Size != nil {
+				size = *obj.Size
+			}
+			var mod time.Time
+			if obj.LastModified != nil {
+				mod = *obj.LastModified
+			}
+			out = append(out, artifactkit.BlobInfo{Digest: d, Size: size, ModTime: mod})
 		}
 		if page.IsTruncated == nil || !*page.IsTruncated {
 			break
@@ -265,25 +278,6 @@ func (s *Store) List(ctx context.Context) ([]string, error) {
 		token = page.NextContinuationToken
 	}
 	return out, nil
-}
-
-// ModTime implements store.BlobAger so the reaper can skip in-flight writes.
-func (s *Store) ModTime(ctx context.Context, digest string) (time.Time, error) {
-	k, err := s.key(digest)
-	if err != nil {
-		return time.Time{}, err
-	}
-	out, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: &k})
-	if err != nil {
-		if isNotFound(err) {
-			return time.Time{}, nil
-		}
-		return time.Time{}, err
-	}
-	if out.LastModified != nil {
-		return *out.LastModified, nil
-	}
-	return time.Time{}, nil
 }
 
 // digestFromKey recovers the digest from a key ending sha256/<2>/<62>.
@@ -313,37 +307,69 @@ func isNotFound(err error) bool {
 	return false
 }
 
-// memReadSeekCloser is an in-memory io.ReadSeekCloser for ServeBlob.
-type memReadSeekCloser struct {
-	data []byte
-	off  int64
+// rangeReader is a lazy io.ReadSeekCloser over an S3 object: it issues a Range
+// GET per contiguous read span instead of buffering the whole object, so
+// http.ServeContent's Seek/Range semantics are satisfied without RAM.
+type rangeReader struct {
+	ctx   context.Context
+	store *Store
+	key   string
+	size  int64
+	off   int64
+	body  io.ReadCloser
 }
 
-func (m *memReadSeekCloser) Read(p []byte) (int, error) {
-	if m.off >= int64(len(m.data)) {
+func (r *rangeReader) Read(p []byte) (int, error) {
+	if r.off >= r.size {
 		return 0, io.EOF
 	}
-	n := copy(p, m.data[m.off:])
-	m.off += int64(n)
-	return n, nil
+	if r.body == nil {
+		out, err := r.store.client.GetObject(r.ctx, &s3.GetObjectInput{
+			Bucket: &r.store.bucket, Key: aws.String(r.key),
+			Range: aws.String(fmt.Sprintf("bytes=%d-", r.off)),
+		})
+		if err != nil {
+			return 0, err
+		}
+		r.body = out.Body
+	}
+	n, err := r.body.Read(p)
+	r.off += int64(n)
+	if err == io.EOF && r.off < r.size {
+		// The ranged stream ended early; reopen on the next Read.
+		_ = r.body.Close()
+		r.body = nil
+		return n, nil
+	}
+	return n, err
 }
 
-func (m *memReadSeekCloser) Seek(off int64, whence int) (int64, error) {
+func (r *rangeReader) Seek(off int64, whence int) (int64, error) {
 	switch whence {
 	case io.SeekStart:
-		m.off = off
+		r.off = off
 	case io.SeekCurrent:
-		m.off += off
+		r.off += off
 	case io.SeekEnd:
-		m.off = int64(len(m.data)) + off
+		r.off = r.size + off
 	}
-	if m.off < 0 {
-		m.off = 0
+	if r.off < 0 {
+		r.off = 0
 	}
-	return m.off, nil
+	// A seek invalidates the open stream; the next Read reopens at r.off.
+	if r.body != nil {
+		_ = r.body.Close()
+		r.body = nil
+	}
+	return r.off, nil
 }
 
-func (m *memReadSeekCloser) Close() error { return nil }
+func (r *rangeReader) Close() error {
+	if r.body != nil {
+		return r.body.Close()
+	}
+	return nil
+}
 
 // init registers the "s3" backend.
 func init() {

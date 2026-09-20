@@ -28,14 +28,14 @@ func TestBlobStoreListReconstructsDigests(t *testing.T) {
 	}
 	ctx := context.Background()
 	want := digestOf("list-me")
-	if _, err := blobs.PutIfAbsent(ctx, want, strings.NewReader("list-me")); err != nil {
+	if _, _, err := blobs.Put(ctx, strings.NewReader("list-me"), want); err != nil {
 		t.Fatal(err)
 	}
 	got, err := blobs.List(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0] != want {
+	if len(got) != 1 || got[0].Digest != want {
 		t.Fatalf("List() = %v, want [%s]", got, want)
 	}
 }
@@ -56,7 +56,7 @@ func TestStats(t *testing.T) {
 	ctx := context.Background()
 	body := "stats-body"
 	d := digestOf(body)
-	if _, err := blobs.PutIfAbsent(ctx, d, strings.NewReader(body)); err != nil {
+	if _, _, err := blobs.Put(ctx, strings.NewReader(body), d); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Put(ctx, artifactkit.Artifact{
@@ -104,10 +104,10 @@ func TestReapOrphanBlobsAndExpireNegative(t *testing.T) {
 	orphanData := "orphan-bytes"
 	referenced := digestOf(referencedData)
 	orphan := digestOf(orphanData)
-	if _, err := blobs.PutIfAbsent(ctx, referenced, strings.NewReader(referencedData)); err != nil {
+	if _, _, err := blobs.Put(ctx, strings.NewReader(referencedData), referenced); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := blobs.PutIfAbsent(ctx, orphan, strings.NewReader(orphanData)); err != nil {
+	if _, _, err := blobs.Put(ctx, strings.NewReader(orphanData), orphan); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Put(ctx, artifactkit.Artifact{

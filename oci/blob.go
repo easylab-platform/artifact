@@ -47,12 +47,12 @@ func (a *Adapter) blob(w http.ResponseWriter, r *http.Request, name, digest stri
 }
 
 func (a *Adapter) checkBlob(w http.ResponseWriter, r *http.Request, digest string) {
-	size, _ := a.state.Registry.Blobs.Stat(r.Context(), digest)
-	if size == nil {
+	info, _ := a.state.Registry.Blobs.Stat(r.Context(), digest)
+	if info == nil {
 		writeJSON(w, http.StatusNotFound, ociError("BLOB_UNKNOWN", "blob unknown to registry"))
 		return
 	}
-	w.Header().Set("Content-Length", strconv.FormatInt(*size, 10))
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	w.Header().Set("Docker-Content-Digest", digest)
 	w.WriteHeader(http.StatusOK)
 }
@@ -102,7 +102,7 @@ func (a *Adapter) getBlob(w http.ResponseWriter, r *http.Request, name, digest s
 		writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
 		return
 	}
-	if _, err := a.state.Registry.Blobs.PutIfAbsent(r.Context(), digest, mustOpen(tmp.path)); err != nil {
+	if _, _, err := a.state.Registry.Blobs.Put(r.Context(), mustOpen(tmp.path), digest); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ociError("UNKNOWN", err.Error()))
 		return
 	}

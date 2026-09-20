@@ -21,29 +21,30 @@ func TestFileBlobStoreDedupAndVerify(t *testing.T) {
 	ctx := context.Background()
 	data := []byte("hello artifact")
 	d := artifactkit.DigestOf(data)
-	ok, err := blobs.PutIfAbsent(ctx, d, strings.NewReader(string(data)))
+	stored, ok, err := blobs.Put(ctx, strings.NewReader(string(data)), d)
 	if err != nil || !ok {
 		t.Fatalf("first put: %v ok=%v", err, ok)
 	}
+	if stored.Digest != d || stored.Size != int64(len(data)) {
+		t.Fatalf("stored = %+v", stored)
+	}
 	// Dedup: second put is a no-op.
-	ok, err = blobs.PutIfAbsent(ctx, d, strings.NewReader(string(data)))
-	if err != nil || ok {
+	if _, ok, err := blobs.Put(ctx, strings.NewReader(string(data)), d); err != nil || ok {
 		t.Fatalf("second put should dedup, ok=%v err=%v", ok, err)
 	}
-	size, err := blobs.Stat(ctx, d)
-	if err != nil || size == nil || *size != int64(len(data)) {
-		t.Fatalf("stat: %v %v", size, err)
+	info, err := blobs.Stat(ctx, d)
+	if err != nil || info == nil || info.Size != int64(len(data)) {
+		t.Fatalf("stat: %v %v", info, err)
 	}
 	// Mismatched digest must be rejected.
-	if _, err := blobs.PutIfAbsent(ctx, "sha256:"+strings.Repeat("0", 64), strings.NewReader(string(data))); err == nil {
+	if _, _, err := blobs.Put(ctx, strings.NewReader(string(data)), "sha256:"+strings.Repeat("0", 64)); err == nil {
 		t.Fatal("expected digest mismatch")
 	}
 }
 
-// TestHashesForSidecar verifies StoreStream persists the hashes it computed
-// and HashesFor reads them back without the bytes, while a blob written outside
-// StoreStream still recomputes.
-func TestHashesForSidecar(t *testing.T) {
+// TestHashesSidecar verifies the store records the hash set at write time and
+// Hashes reads it back without touching the bytes.
+func TestHashesSidecar(t *testing.T) {
 	blobs, err := store.NewFileBlobStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -60,10 +61,10 @@ func TestHashesForSidecar(t *testing.T) {
 	if stored.Digest != d {
 		t.Fatalf("digest = %s, want %s", stored.Digest, d)
 	}
-	// The sidecar lets HashesFor return the full hash set without re-reading.
-	got, err := blobs.HashesFor(ctx, d)
-	if err != nil {
-		t.Fatal(err)
+	// The recorded set is available without re-reading the blob.
+	got, ok, err := blobs.Hashes(ctx, d)
+	if err != nil || !ok {
+		t.Fatalf("Hashes: ok=%v err=%v", ok, err)
 	}
 	if got != stored.Hashes {
 		t.Fatalf("hashes = %+v, want %+v", got, stored.Hashes)
@@ -73,15 +74,15 @@ func TestHashesForSidecar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 1 || all[0] != d {
+	if len(all) != 1 || all[0].Digest != d {
 		t.Fatalf("list = %v, want exactly [%s]", all, d)
 	}
 	// Deleting the blob removes the sidecar too.
 	if err := blobs.Delete(ctx, d); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := blobs.HashesFor(ctx, d); err == nil {
-		t.Fatal("HashesFor on a deleted blob should error")
+	if _, ok, _ := blobs.Hashes(ctx, d); ok {
+		t.Fatal("Hashes on a deleted blob should report absent")
 	}
 }
 

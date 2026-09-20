@@ -190,7 +190,7 @@ func (s *State) hashFile(w http.ResponseWriter, r *http.Request, p string) {
 	if art, err := s.Registry.Meta.Get(r.Context(), "maven", c.artifactID, c.version); err == nil {
 		for _, b := range art.Blobs {
 			if b.Name == filename {
-				h, err := s.Registry.Blobs.HashesFor(r.Context(), b.Digest)
+				h, err := s.Registry.BlobHashes(r.Context(), b.Digest)
 				if err == nil {
 					val := h.SHA1
 					if isMD5 {

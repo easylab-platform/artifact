@@ -20,7 +20,7 @@ func TestServeCachedBlobReplaysHeaders(t *testing.T) {
 	body := "compressed-bytes"
 	h := sha256.Sum256([]byte(body))
 	digest := "sha256:" + hex.EncodeToString(h[:])
-	if _, err := reg.Blobs.PutIfAbsent(context.Background(), digest, strings.NewReader(body)); err != nil {
+	if _, _, err := reg.Blobs.Put(context.Background(), strings.NewReader(body), digest); err != nil {
 		t.Fatal(err)
 	}
 	art := artifactkit.Artifact{

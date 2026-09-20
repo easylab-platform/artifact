@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"time"
 )
 
 // Digest is the canonical content-addressed identifier of a blob. The OCI
@@ -12,33 +13,41 @@ import (
 // of implementations are free to use any algorithm.
 const SHA256 = "sha256"
 
-// BlobStore abstracts the CAS for immutable artifact content. The default
-// implementation is a filesystem store (one file per digest); a SQLite-BLOB
-// or in-memory implementation can be supplied instead. This is the seam that
-// lets the engine keep large layers on disk while small index docs could live
-// in SQLite.
-type BlobStore interface {
-	// Stat returns the size of the blob, or (nil, nil) when absent.
-	Stat(ctx context.Context, digest string) (*int64, error)
-	// Open returns a reader (supporting Seek when possible) or (nil, nil).
-	Open(ctx context.Context, digest string) (io.ReadSeekCloser, error)
-	// PutIfAbsent stores the bytes under digest; returns true if stored,
-	// false if it already existed (dedup).
-	PutIfAbsent(ctx context.Context, digest string, r io.Reader) (bool, error)
-	// HashesFor returns the persisted or recomputed multi-hashes for a blob.
-	HashesFor(ctx context.Context, digest string) (Hashes, error)
-	// Delete removes the blob.
-	Delete(ctx context.Context, digest string) error
-	// List returns every digest in the store.
-	List(ctx context.Context) ([]string, error)
+// BlobInfo is the metadata of one stored blob. ModTime lets the reaper skip
+// blobs that may still be mid-write, so no separate ager capability is needed.
+type BlobInfo struct {
+	Digest  string
+	Size    int64
+	ModTime time.Time
 }
 
-// HashPersister is an optional BlobStore capability: persist the multi-hashes
-// computed while streaming a blob, so a later HashesFor is a sidecar read
-// instead of a full re-read of a possibly large blob. StoreStream calls it when
-// the backend implements it; backends without it simply recompute.
-type HashPersister interface {
-	PutHashes(ctx context.Context, digest string, h Hashes) error
+// BlobStore abstracts the CAS for immutable artifact content. The default
+// implementation is a filesystem store (one file per digest); an S3-compatible
+// store is provided by the s3blob module.
+//
+// The store owns INTEGRITY: Put streams the body once, computes the full hash
+// set in that pass, verifies it against the caller's expected digest, and
+// persists the hashes. Callers therefore never hash a body themselves and never
+// re-read a blob to learn its hashes (Hashes), which is what makes publish and
+// checksum sidecars cheap.
+type BlobStore interface {
+	// Stat returns the blob's metadata, or (nil, nil) when absent.
+	Stat(ctx context.Context, digest string) (*BlobInfo, error)
+	// Open returns a reader (supporting Seek when possible), or (nil, nil).
+	Open(ctx context.Context, digest string) (io.ReadSeekCloser, error)
+	// Put streams r into the CAS, computing every hash in one pass. When
+	// wantDigest is non-empty the content MUST hash to it (else an error);
+	// when empty the computed digest is used. stored is false when the blob
+	// already existed (dedup). The returned Stored carries the hashes, so a
+	// caller never hashes the bytes again.
+	Put(ctx context.Context, r io.Reader, wantDigest string) (Stored, bool, error)
+	// Hashes returns the hash set recorded for a blob at write time. ok=false
+	// when the store has no record (a blob written by an older tool).
+	Hashes(ctx context.Context, digest string) (Hashes, bool, error)
+	// Delete removes the blob.
+	Delete(ctx context.Context, digest string) error
+	// List returns every blob's metadata (digest, size, mtime).
+	List(ctx context.Context) ([]BlobInfo, error)
 }
 
 // UploadRecord is a persisted in-progress multi-chunk upload session.

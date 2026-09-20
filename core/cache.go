@@ -1,20 +1,9 @@
 package artifactkit
 
 import (
-	"net/url"
 	"sync"
 	"time"
 )
-
-// mustParseURL parses a proxy URL, panicking on invalid input. Callers feed
-// validated config; a panic here surfaces a misconfiguration eagerly.
-func mustParseURL(s string) *url.URL {
-	u, err := url.Parse(s)
-	if err != nil {
-		panic("artifactkit: invalid proxy URL: " + s)
-	}
-	return u
-}
 
 // MemCache is a process-wide TTL cache for upstream index/metadata documents.
 // Caching the index layer (not just artifacts) is what makes a mirror fast
@@ -62,27 +51,29 @@ func (c *MemCache) Get(key string) (string, bool) {
 	return e.body, true
 }
 
-// Set stores a body with a fresh expiry, evicting an expired/arbitrary entry
-// when at capacity.
+// Set stores a body with a fresh expiry. At capacity it evicts one expired
+// entry when present, else an arbitrary entry, so the bound is always honored
+// (a cache that grows without bound under an all-fresh workload is a leak).
 func (c *MemCache) Set(key, body string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.data) >= c.cap && !artifactkitHas(c.data, key) {
-		// Drop the first expired (or arbitrary) entry.
+	if _, exists := c.data[key]; !exists && len(c.data) >= c.cap {
 		now := time.Now()
+		victim := ""
 		for k, e := range c.data {
+			if victim == "" {
+				victim = k // fallback: evict an arbitrary entry
+			}
 			if now.After(e.expires) {
-				delete(c.data, k)
+				victim = k // prefer an expired one
 				break
 			}
 		}
+		if victim != "" {
+			delete(c.data, victim)
+		}
 	}
 	c.data[key] = &entry{body: body, expires: time.Now().Add(c.ttl)}
-}
-
-func artifactkitHas(m map[string]*entry, key string) bool {
-	_, ok := m[key]
-	return ok
 }
 
 // SharedIndexCache returns a process-global index cache (1h TTL) used by the
